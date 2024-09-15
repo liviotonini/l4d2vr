@@ -437,7 +437,7 @@ int Hooks::dWriteUsercmd(void *buf, CUserCmd *to, CUserCmd *from)
 		int rollEncoding = (((int)controllerAngles.z + 180) / 2 * 10000000);
 		to->command_number += rollEncoding;
 
-		if (VectorLength(m_VR->m_RightControllerPose.TrackedDeviceVel) > 1.1)
+		if (VectorLength(m_VR->m_RightControllerPose.TrackedDeviceVel) > m_VR->m_MeleeSwingVelocityRequired)
 		{
 			to->command_number *= -1; // Signal to server that melee swing in motion
 		}

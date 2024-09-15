@@ -184,6 +184,7 @@ public:
 	float m_HudDistance = 1.3;
 	float m_HudSize = 1.1;
 	bool m_HudAlwaysVisible = false;
+	float m_MeleeSwingVelocityRequired = 1.1;
 
 	VR() {};
 	VR(Game *game);

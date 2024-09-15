@@ -10,3 +10,4 @@ HudSize=1.1
 HudAlwaysVisible=false
 ControllerAngleAdjustment=-45.0
 IsTrackingManualPush=true
+MeleeSwingVelocityRequired = 1.1

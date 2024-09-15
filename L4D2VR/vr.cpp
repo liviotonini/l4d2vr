@@ -1058,6 +1058,7 @@ void VR::ParseConfigFile()
     m_HudAlwaysVisible = userConfig["HudAlwaysVisible"] == "true";
     m_ControllerAngleAdjustment = std::stof(userConfig["ControllerAngleAdjustment"]);
     m_IsTrackingManualPush = userConfig["IsTrackingManualPush"] == "true";
+    m_MeleeSwingVelocityRequired = std::stof(userConfig["MeleeSwingVelocityRequired"]);
 }
 
 void VR::WaitForConfigUpdate()
