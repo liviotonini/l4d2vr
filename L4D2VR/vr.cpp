@@ -960,12 +960,12 @@ void VR::UpdateTracking()
     QAngle::AngleVectors(leftControllerAngLocal, &m_LeftControllerForward, &m_LeftControllerRight, &m_LeftControllerUp);			
     QAngle::AngleVectors(rightControllerAngLocal, &m_RightControllerForward, &m_RightControllerRight, &m_RightControllerUp);	
 
-    // Adjust controller angle 45 degrees downward
-    m_LeftControllerForward = VectorRotate(m_LeftControllerForward, m_LeftControllerRight, -45.0);
-    m_LeftControllerUp = VectorRotate(m_LeftControllerUp, m_LeftControllerRight, -45.0);
+    // Adjust controller angle with value specified in config. (default 45 degrees downward.)
+    m_LeftControllerForward = VectorRotate(m_LeftControllerForward, m_LeftControllerRight, m_ControllerAngleAdjustment);
+    m_LeftControllerUp = VectorRotate(m_LeftControllerUp, m_LeftControllerRight, m_ControllerAngleAdjustment);
 
-    m_RightControllerForward = VectorRotate(m_RightControllerForward, m_RightControllerRight, -45.0);
-    m_RightControllerUp = VectorRotate(m_RightControllerUp, m_RightControllerRight, -45.0);
+    m_RightControllerForward = VectorRotate(m_RightControllerForward, m_RightControllerRight, m_ControllerAngleAdjustment);
+    m_RightControllerUp = VectorRotate(m_RightControllerUp, m_RightControllerRight, m_ControllerAngleAdjustment);
 
     // controller angles
     QAngle::VectorAngles(m_LeftControllerForward, m_LeftControllerUp, m_LeftControllerAngAbs);
@@ -1056,6 +1056,7 @@ void VR::ParseConfigFile()
     m_HudDistance = std::stof(userConfig["HudDistance"]);
     m_HudSize = std::stof(userConfig["HudSize"]);
     m_HudAlwaysVisible = userConfig["HudAlwaysVisible"] == "true";
+    m_ControllerAngleAdjustment = std::stof(userConfig["ControllerAngleAdjustment"]);
 }
 
 void VR::WaitForConfigUpdate()
