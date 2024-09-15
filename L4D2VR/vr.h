@@ -172,6 +172,7 @@ public:
 	float m_RotationOffset = 0;
 	std::chrono::steady_clock::time_point m_PrevFrameTime;
 
+	bool m_IsTrackingManualPush = false;
 	float m_ControllerAngleAdjustment = -45.0;
 	float m_TurnSpeed = 0.3;
 	bool m_SnapTurning = false;

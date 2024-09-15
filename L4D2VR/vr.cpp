@@ -651,7 +651,7 @@ void VR::ProcessInput()
         m_Game->ClientCmd_Unrestricted("-reload");
     }
 
-    if (PressedDigitalAction(m_ActionSecondaryAttack))
+    if (PressedDigitalAction(m_ActionSecondaryAttack) || (m_IsTrackingManualPush && VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 3.0))
     {
         m_Game->ClientCmd_Unrestricted("+attack2");
     }
@@ -1057,6 +1057,7 @@ void VR::ParseConfigFile()
     m_HudSize = std::stof(userConfig["HudSize"]);
     m_HudAlwaysVisible = userConfig["HudAlwaysVisible"] == "true";
     m_ControllerAngleAdjustment = std::stof(userConfig["ControllerAngleAdjustment"]);
+    m_IsTrackingManualPush = userConfig["IsTrackingManualPush"] == "true";
 }
 
 void VR::WaitForConfigUpdate()
