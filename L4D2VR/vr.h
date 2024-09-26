@@ -164,6 +164,9 @@ public:
 	vr::VRActionHandle_t m_Scoreboard;
 	vr::VRActionHandle_t m_ShowHUD;
 	vr::VRActionHandle_t m_Pause;
+	vr::VRActionHandle_t m_LeftHandGrab;
+	vr::VRActionHandle_t m_RightHandGrab;
+	vr::VRActionHandle_t m_ToggleWalkSpeed;
 
 	TrackedDevicePoseData m_HmdPose;
 	TrackedDevicePoseData m_LeftControllerPose;
@@ -185,6 +188,14 @@ public:
 	float m_HudSize = 1.1;
 	bool m_HudAlwaysVisible = false;
 	float m_MeleeSwingVelocityRequired = 1.1;
+	float m_PlayerHeightInMeters = 1.8;
+
+	bool isWalkingSlowly = false;
+	bool isHoldingWeapon2Handed = false;
+	bool temp = false;
+	bool isReloading = false;
+	bool isPressingToggleWalkSpeed = false;
+	bool isCrouching = false;
 
 	VR() {};
 	VR(Game *game);

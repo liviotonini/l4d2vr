@@ -11,3 +11,4 @@ HudAlwaysVisible=false
 ControllerAngleAdjustment=-45.0
 IsTrackingManualPush=true
 MeleeSwingVelocityRequired = 1.1
+PlayerHeightInMeters=1.68

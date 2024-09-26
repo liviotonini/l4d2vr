@@ -135,6 +135,9 @@ int VR::SetActionManifest(const char *fileName)
     m_Input->GetActionHandle("/actions/main/in/Scoreboard", &m_Scoreboard);
     m_Input->GetActionHandle("/actions/main/in/ShowHUD", &m_ShowHUD);
     m_Input->GetActionHandle("/actions/main/in/Pause", &m_Pause);
+    m_Input->GetActionHandle("/actions/main/in/LeftHandGrab", &m_LeftHandGrab);
+    m_Input->GetActionHandle("/actions/main/in/RightHandGrab", &m_RightHandGrab);
+    m_Input->GetActionHandle("/actions/main/in/ToggleWalkSpeed", &m_ToggleWalkSpeed);
 
     m_Input->GetActionSetHandle("/actions/main", &m_ActionSet);
     m_ActiveActionSet = {};
@@ -571,12 +574,13 @@ void VR::ProcessInput()
     {
         bool pushingStickX = true;
         bool pushingStickY = true;
-        if (analogActionData.y > 0.5)	
+
+        if (analogActionData.y > 0.5)
         {
             m_Game->ClientCmd_Unrestricted("-back");
             m_Game->ClientCmd_Unrestricted("+forward");
         }
-        else if (analogActionData.y < -0.5)		
+        else if (analogActionData.y < -0.5)
         {
             m_Game->ClientCmd_Unrestricted("-forward");
             m_Game->ClientCmd_Unrestricted("+back");
@@ -588,12 +592,12 @@ void VR::ProcessInput()
             pushingStickY = false;
         }
 
-        if (analogActionData.x > 0.5)		
+        if (analogActionData.x > 0.5)
         {
             m_Game->ClientCmd_Unrestricted("-moveleft");
             m_Game->ClientCmd_Unrestricted("+moveright");
         }
-        else if (analogActionData.x < -0.5)		
+        else if (analogActionData.x < -0.5)
         {
             m_Game->ClientCmd_Unrestricted("-moveright");
             m_Game->ClientCmd_Unrestricted("+moveleft");
@@ -642,18 +646,19 @@ void VR::ProcessInput()
         m_Game->ClientCmd_Unrestricted("-use");
     }
 
-    if (PressedDigitalAction(m_ActionReload))
+    if (PressedDigitalAction(m_ActionReload) || isReloading)
     {
         m_Game->ClientCmd_Unrestricted("+reload");
+        isReloading = false;
     }
     else
     {
         m_Game->ClientCmd_Unrestricted("-reload");
     }
 
-    if (PressedDigitalAction(m_ActionSecondaryAttack) || (m_IsTrackingManualPush && VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 3.0))
+    if (PressedDigitalAction(m_ActionSecondaryAttack) || (m_IsTrackingManualPush && VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 5.0))
     {
-        m_Game->ClientCmd_Unrestricted("+attack2");
+        m_Game->ClientCmd_Unrestricted("+attack2");       
     }
     else
     {
@@ -674,7 +679,7 @@ void VR::ProcessInput()
         ResetPosition();
     }
 
-    if (PressedDigitalAction(m_ActionCrouch))
+    if (PressedDigitalAction(m_ActionCrouch) || isCrouching)
     {
         m_Game->ClientCmd_Unrestricted("+duck");
     }
@@ -691,6 +696,27 @@ void VR::ProcessInput()
     if (PressedDigitalAction(m_Spray, true))
     {
         m_Game->ClientCmd_Unrestricted("impulse 201");
+    }
+
+    if (PressedDigitalAction(m_ToggleWalkSpeed))
+    {
+        if (isPressingToggleWalkSpeed == false)
+        {
+            isWalkingSlowly = !isWalkingSlowly;
+            if (isWalkingSlowly)
+            {
+                m_Game->ClientCmd_Unrestricted("+speed");
+            }
+            else
+            {
+                m_Game->ClientCmd_Unrestricted("-speed");
+            }
+            isPressingToggleWalkSpeed = true;
+        }
+    }
+    else 
+    {
+        isPressingToggleWalkSpeed = false;
     }
     
     bool isControllerVertical = m_RightControllerAngAbs.x > 60 || m_RightControllerAngAbs.x < -45;
@@ -851,6 +877,59 @@ QAngle VR::GetRecommendedViewmodelAbsAngle()
     return result;
 }
 
+void printFloat(const char* label, float value) {
+    char buffer[100];
+    snprintf(buffer, sizeof(buffer), "%s: %f", label, value);  // Format the label and float value into a string
+
+    // Print to Output window
+    OutputDebugString(buffer);
+}
+
+void writeToFile(const std::string& label) {
+    std::ofstream outFile("output.txt", std::ios::app);  // Open the file in append mode
+    if (outFile.is_open()) {
+        outFile << label << std::endl;  // Write the label and float to the file
+        outFile.close();  // Close the file after writing
+    }
+    else {
+        std::cerr << "Error opening file!" << std::endl;
+    }
+}
+
+void writeToFile(const std::string& label, float value) {
+    std::ofstream outFile("output.txt", std::ios::app);  // Open the file in append mode
+    if (outFile.is_open()) {
+        outFile << label << ": " << value << std::endl;  // Write the label and float to the file
+        outFile.close();  // Close the file after writing
+    }
+    else {
+        std::cerr << "Error opening file!" << std::endl;
+    }
+}
+
+void writeToFile(const std::string& label, Vector vector) {
+    std::ofstream outFile("output.txt", std::ios::app);  // Open the file in append mode
+    if (outFile.is_open()) {
+        outFile << label << " => x: " << vector.x << "; y: " << vector.y << "; z: " << vector.z << std::endl;  // Write the label and float to the file
+        outFile.close();  // Close the file after writing
+    }
+    else {
+        std::cerr << "Error opening file!" << std::endl;
+    }
+}
+
+void writeToFile(const std::string& label, QAngle angle) {
+    std::ofstream outFile("output.txt", std::ios::app);  // Open the file in append mode
+    if (outFile.is_open()) {
+        outFile << label << " => x: " << angle.x << "; y: " << angle.y << "; z: " << angle.z << std::endl;  // Write the label and float to the file
+        outFile.close();  // Close the file after writing
+    }
+    else {
+        std::cerr << "Error opening file!" << std::endl;
+    }
+}
+
+
 void VR::UpdateTracking()
 {
     GetPoses();
@@ -946,16 +1025,25 @@ void VR::UpdateTracking()
     Vector hmdToController = rightControllerPosLocal - hmdPosLocal;
     Vector rightControllerPosCorrected = hmdPosCorrected + hmdToController;
 
+    Vector hmdToControllerLeft = leftControllerPosLocal - hmdPosLocal;
+    Vector LeftControllerPosCorrected = hmdPosCorrected + hmdToControllerLeft;
+
     // When using stick turning, pivot the controllers around the HMD
     VectorPivotXY(rightControllerPosCorrected, hmdPosCorrected, m_RotationOffset);
+    VectorPivotXY(LeftControllerPosCorrected, hmdPosCorrected, m_RotationOffset);
 
     Vector rightControllerPosLocalInWorld = rightControllerPosCorrected * m_VRScale;
+    Vector leftControllerPosLocalInWorld = LeftControllerPosCorrected * m_VRScale;
 
     m_RightControllerPosAbs = m_CameraAnchor - Vector(0, 0, 64) + rightControllerPosLocalInWorld;
 
     rightControllerAngLocal.y += m_RotationOffset;
     // Wrap angle from -180 to 180
     rightControllerAngLocal.y -= 360 * std::floor((rightControllerAngLocal.y + 180) / 360);
+
+    leftControllerAngLocal.y += m_RotationOffset;
+    // Wrap angle from -180 to 180
+    leftControllerAngLocal.y -= 360 * std::floor((leftControllerAngLocal.y + 180) / 360);
 
     QAngle::AngleVectors(leftControllerAngLocal, &m_LeftControllerForward, &m_LeftControllerRight, &m_LeftControllerUp);			
     QAngle::AngleVectors(rightControllerAngLocal, &m_RightControllerForward, &m_RightControllerRight, &m_RightControllerUp);	
@@ -967,17 +1055,249 @@ void VR::UpdateTracking()
     m_RightControllerForward = VectorRotate(m_RightControllerForward, m_RightControllerRight, m_ControllerAngleAdjustment);
     m_RightControllerUp = VectorRotate(m_RightControllerUp, m_RightControllerRight, m_ControllerAngleAdjustment);
 
+
+    Vector rightControllerForward_2handAdjust = m_RightControllerForward;
+
+    //if (isWalkingSlowly)
+    //{
+    //    m_RightControllerPosAbs = m_RightControllerPosAbs + m_RightControllerRight;
+    //}
+
+    if (PressedDigitalAction(m_RightHandGrab) || PressedDigitalAction(m_LeftHandGrab))
+    {
+        Vector handsDistanceLocalInWorld = leftControllerPosLocalInWorld - rightControllerPosLocalInWorld;
+        vec_t handsDistanceLocalInWorldLength = VectorLength(handsDistanceLocalInWorld);
+        
+        Vector handsDistanceLocalInWorldNormalized;
+        VectorCopy(handsDistanceLocalInWorld, handsDistanceLocalInWorldNormalized);
+        VectorNormalize(handsDistanceLocalInWorldNormalized);
+
+        float rightControllerForward_HandsDistLocalWorld_Angle = RAD2DEG(acosf(DotProduct(m_RightControllerForward, handsDistanceLocalInWorldNormalized)));
+        float dotProduct_RightControllerUp_HandsDistLocalWorld = DotProduct(m_RightControllerUp, handsDistanceLocalInWorldNormalized);
+
+        Vector hmdToControllerWorld = rightControllerPosLocalInWorld - m_HmdPosLocalInWorld;
+        
+
+        Vector hmdToControllerWorld2DNormalized;
+        VectorCopy(hmdToControllerWorld, hmdToControllerWorld2DNormalized);
+        hmdToControllerWorld2DNormalized.z = 0;
+        VectorNormalize(hmdToControllerWorld2DNormalized);
+
+
+        float dotProduct_hmdToControllerWorld2DNorm_HmdRight = DotProduct2D(hmdToControllerWorld2DNormalized, m_HmdRight);
+        float dotProduct_hmdToControllerWorld2DNorm_HmdForward = DotProduct2D(hmdToControllerWorld2DNormalized, m_HmdForward);
+
+        float hmdToControllerWorldLength = VectorLength(hmdToControllerWorld);
+        float hmdToControllerWorldZDist = m_HmdPosLocalInWorld.z - rightControllerPosLocalInWorld.z;
+
+        Vector hmdToControllerWorldLeft = leftControllerPosLocalInWorld - m_HmdPosLocalInWorld;
+
+        Vector hmdToControllerWorldLeft2DNormalized;
+        VectorCopy(hmdToControllerWorldLeft, hmdToControllerWorldLeft2DNormalized);
+        hmdToControllerWorldLeft2DNormalized.z = 0;
+        VectorNormalize(hmdToControllerWorldLeft2DNormalized);
+
+        float dotProduct_hmdToControllerWorldLeft2DNorm_HmdRight = DotProduct2D(hmdToControllerWorldLeft2DNormalized, m_HmdRight);
+        float dotProduct_hmdToControllerWorldLeft2DNorm_HmdForward = DotProduct2D(hmdToControllerWorldLeft2DNormalized, m_HmdForward);
+
+        float hmdToControllerWorldLeftLength = VectorLength(hmdToControllerWorldLeft);
+        float hmdToControllerWorldLeftZDist = m_HmdPosLocalInWorld.z - leftControllerPosLocalInWorld.z;
+
+     
+        //if (m_HmdPosLocalInWorld.z <= 40.0f)
+        //{
+        //    // duck
+        //    isCrouching = true;
+        //}
+        //else 
+        //{
+        //    // unduck
+        //    isCrouching = false;
+        //}
+
+        if (temp == false)
+        {
+          
+
+
+            writeToFile("");
+            writeToFile("######");
+            writeToFile("######");
+
+            writeToFile("hmdPosLocal", hmdPosLocal);
+            writeToFile("hmdAngLocal", hmdAngLocal);
+            writeToFile("m_RotationOffset", m_RotationOffset);
+
+            writeToFile("--teste--");
+            writeToFile("handsDistanceLocalInWorld", handsDistanceLocalInWorld);
+            writeToFile("handsDistanceLocalInWorldLength", handsDistanceLocalInWorldLength);
+            writeToFile("rightControllerForward_HandsDistLocalWorld_Angle", rightControllerForward_HandsDistLocalWorld_Angle);
+            writeToFile("dotProduct_RightControllerUp_HandsDistLocalWorld", dotProduct_RightControllerUp_HandsDistLocalWorld);
+            writeToFile("m_HmdPosLocalInWorld", m_HmdPosLocalInWorld);
+            writeToFile("hmdToControllerWorld", hmdToControllerWorld);
+            writeToFile("dotProduct_hmdToControllerWorld2DNorm_HmdRight", dotProduct_hmdToControllerWorld2DNorm_HmdRight);
+            writeToFile("dotProduct_hmdToControllerWorld2DNorm_HmdForward", dotProduct_hmdToControllerWorld2DNorm_HmdForward);
+            writeToFile("hmdToControllerWorldLength", hmdToControllerWorldLength);
+            writeToFile("hmdToControllerWorldZDist", hmdToControllerWorldZDist);
+            writeToFile("--teste--");
+            writeToFile("hmdToControllerWorldLeftLength", hmdToControllerWorldLeftLength);
+            writeToFile("dotProduct_hmdToControllerWorldLeft2DNorm_HmdRight", dotProduct_hmdToControllerWorldLeft2DNorm_HmdRight);
+            writeToFile("dotProduct_hmdToControllerWorldLeft2DNorm_HmdForward", hmdToControllerWorldZDist);
+            writeToFile("hmdToControllerWorldLeftZDist", hmdToControllerWorldLeftZDist);
+
+
+            temp = true;
+        }
+
+        if (PressedDigitalAction(m_RightHandGrab))
+        {
+            // Check if grabbing primary weapon
+            float hmdToControllerShoulderMaxZDist = 8.0f;
+            float hmdToControllerShoulderDist = 12.0f;
+            float hmdToControllerShoulderDistOffset = 2.0f;
+
+            if (hmdToControllerWorldLength >= (hmdToControllerShoulderDist - hmdToControllerShoulderDistOffset)
+                && hmdToControllerWorldLength <= (hmdToControllerShoulderDist + hmdToControllerShoulderDistOffset)
+                && dotProduct_hmdToControllerWorld2DNorm_HmdRight >= 0.1f
+                && dotProduct_hmdToControllerWorld2DNorm_HmdForward <= -0.7f
+                && hmdToControllerWorldZDist <= hmdToControllerShoulderMaxZDist)
+            {
+                m_Game->ClientCmd_Unrestricted("slot1");
+            }
+
+            // Check in grabbing secondary weapon
+            float hmdToControllerLegHolsterDist = m_PlayerHeightInMeters * 22.5f;
+            float hmdToControllerLegHolsterDistOffset = 5.0f;
+            float hmdToControllerLegMaxZDist = m_PlayerHeightInMeters * 21.5f;
+            float hmdToControllerLegMaxZDistOffset = 5.0f;
+
+            if (hmdToControllerWorldLength >= (hmdToControllerLegHolsterDist - hmdToControllerLegHolsterDistOffset)
+                && hmdToControllerWorldLength <= (hmdToControllerLegHolsterDist + hmdToControllerLegHolsterDistOffset)
+                && dotProduct_hmdToControllerWorld2DNorm_HmdRight >= 0.8f
+                && hmdToControllerWorldZDist >= (hmdToControllerLegMaxZDist - hmdToControllerLegMaxZDistOffset)
+                && hmdToControllerWorldZDist <= (hmdToControllerLegMaxZDist + hmdToControllerLegMaxZDistOffset))
+            {
+                m_Game->ClientCmd_Unrestricted("slot2");
+            }
+
+            // Check if grabbing Medkit
+            float hmdToControllerBackDist = m_PlayerHeightInMeters * 11.9f;
+            float hmdToControllerBackDistOffset = 5.0f;
+
+            if (dotProduct_hmdToControllerWorld2DNorm_HmdForward < -0.9f
+                && hmdToControllerWorldZDist >= (hmdToControllerBackDist - hmdToControllerBackDistOffset)
+                && hmdToControllerWorldZDist <= (hmdToControllerBackDist + hmdToControllerBackDistOffset))
+            {
+                m_Game->ClientCmd_Unrestricted("slot4");
+            }
+        }
+        if (PressedDigitalAction(m_LeftHandGrab))
+        {
+            // Check if holding weapon with 2 hands
+            float handsDistanceFor2HandWeapon = 15.0f;
+            float handsDistanceFor2HandWeaponOffset = 5.0f;
+
+            float angleLimitFor2HandWeapon = 15.0f;
+            if (isHoldingWeapon2Handed ||
+                (handsDistanceLocalInWorldLength >= (handsDistanceFor2HandWeapon - handsDistanceFor2HandWeaponOffset)
+                    && handsDistanceLocalInWorldLength <= (handsDistanceFor2HandWeapon + handsDistanceFor2HandWeaponOffset)
+                    && rightControllerForward_HandsDistLocalWorld_Angle <= angleLimitFor2HandWeapon))
+            {
+                if (isHoldingWeapon2Handed == false)
+                {
+                    isHoldingWeapon2Handed = true;
+                }
+
+                //Vector pivotUp;
+                //Vector rightTemp = m_RightControllerUp;
+                //CrossProduct(forwardTemp, handsDistanceLocalInWorldNormalized, pivotForward);
+                //VectorNormalize(pivotForward);
+
+                // Change forward vector to angle towards Hands Distance vector
+                Vector pivotForward;
+                Vector forwardTemp = m_RightControllerForward - (m_RightControllerForward * 0.2);
+                CrossProduct(forwardTemp, handsDistanceLocalInWorldNormalized, pivotForward);
+                VectorNormalize(pivotForward);
+
+                rightControllerForward_2handAdjust = VectorRotate(m_RightControllerForward, pivotForward, rightControllerForward_HandsDistLocalWorld_Angle);
+            }
+
+            // Check if reloading
+            float maxNandsDistanceToReload = 10.0f;
+
+            if (isHoldingWeapon2Handed == false 
+                && dotProduct_RightControllerUp_HandsDistLocalWorld <= -0.9f
+                && handsDistanceLocalInWorldLength <= maxNandsDistanceToReload)
+            {
+                isReloading = true; // Change value here so that next time it executes "ProcessInput", will perform reload action.
+            }
+
+            // Check if grabbing Bomb
+            float hmdToControllerLeftShoulderMaxZDist = 8.0f;
+            float hmdToControllerLeftShoulderDist = 14.0f;
+            float hmdToControllerLeftShoulderDistOffset = 2.0f;
+
+            if (isHoldingWeapon2Handed == false 
+                && hmdToControllerWorldLeftLength >= (hmdToControllerLeftShoulderDist - hmdToControllerLeftShoulderDistOffset)
+                && hmdToControllerWorldLeftLength <= (hmdToControllerLeftShoulderDist + hmdToControllerLeftShoulderDistOffset)
+                && dotProduct_hmdToControllerWorldLeft2DNorm_HmdRight <= -0.4f
+                //&& dotProduct_hmdToControllerWorldLeft2DNorm_HmdForward <= -0.7f
+                && hmdToControllerWorldLeftZDist <= hmdToControllerLeftShoulderMaxZDist)
+            {
+                m_Game->ClientCmd_Unrestricted("slot3");
+            }
+
+            // Check if grabbing Pills / Adrenaline
+            float hmdToControllerLeftLegHolsterDist = m_PlayerHeightInMeters * 22.5f;
+            float hmdToControllerLeftLegHolsterDistOffset = 5.0f;
+            float hmdToControllerLeftLegMaxZDist = m_PlayerHeightInMeters * 21.5f;
+            float hmdToControllerLeftLegMaxZDistOffset = 5.0f;
+
+            if (isHoldingWeapon2Handed == false 
+                && hmdToControllerWorldLeftLength >= (hmdToControllerLeftLegHolsterDist - hmdToControllerLeftLegHolsterDistOffset)
+                && hmdToControllerWorldLeftLength <= (hmdToControllerLeftLegHolsterDist + hmdToControllerLeftLegHolsterDistOffset)
+                && dotProduct_hmdToControllerWorldLeft2DNorm_HmdRight <= -0.8f
+                && hmdToControllerWorldLeftZDist >= (hmdToControllerLeftLegMaxZDist - hmdToControllerLeftLegMaxZDistOffset)
+                && hmdToControllerWorldLeftZDist <= (hmdToControllerLeftLegMaxZDist + hmdToControllerLeftLegMaxZDistOffset))
+            {
+                m_Game->ClientCmd_Unrestricted("slot5");
+            }
+
+            // Check if grabbing Medkit
+            float hmdToControllerLeftBackDist = m_PlayerHeightInMeters * 11.9f; // 0.5f
+            float hmdToControllerLeftBackDistOffset = 5.0f;
+
+            if (isHoldingWeapon2Handed == false 
+                && dotProduct_hmdToControllerWorldLeft2DNorm_HmdForward < -0.9f
+                && hmdToControllerWorldLeftZDist >= (hmdToControllerLeftBackDist - hmdToControllerLeftBackDistOffset)
+                && hmdToControllerWorldLeftZDist <= (hmdToControllerLeftBackDist + hmdToControllerLeftBackDistOffset))
+            {
+                m_Game->ClientCmd_Unrestricted("slot4");
+            }
+        }
+        else
+        {
+            isHoldingWeapon2Handed = false;
+        }
+    }
+    else
+    {
+        isHoldingWeapon2Handed = false;
+        temp = false;
+    }
+
     // controller angles
     QAngle::VectorAngles(m_LeftControllerForward, m_LeftControllerUp, m_LeftControllerAngAbs);
-    QAngle::VectorAngles(m_RightControllerForward, m_RightControllerUp, m_RightControllerAngAbs);
+    QAngle::VectorAngles(rightControllerForward_2handAdjust, m_RightControllerUp, m_RightControllerAngAbs);
     
     PositionAngle viewmodelOffset = localPlayer->GetViewmodelOffset();
 
     m_ViewmodelPosOffset = viewmodelOffset.position;
     m_ViewmodelAngOffset = viewmodelOffset.angle;
 
-    m_ViewmodelForward = m_RightControllerForward;
+    m_ViewmodelForward = rightControllerForward_2handAdjust;
     m_ViewmodelUp = m_RightControllerUp;
+
     m_ViewmodelRight = m_RightControllerRight;
 
     // Viewmodel yaw offset
@@ -991,7 +1311,10 @@ void VR::UpdateTracking()
     // Viewmodel roll offset
     m_ViewmodelRight = VectorRotate(m_ViewmodelRight, m_ViewmodelForward, m_ViewmodelAngOffset.z);
     m_ViewmodelUp = VectorRotate(m_ViewmodelUp, m_ViewmodelForward, m_ViewmodelAngOffset.z);
+
 }
+
+
 
 Vector VR::GetViewAngle()
 {
@@ -1059,6 +1382,7 @@ void VR::ParseConfigFile()
     m_ControllerAngleAdjustment = std::stof(userConfig["ControllerAngleAdjustment"]);
     m_IsTrackingManualPush = userConfig["IsTrackingManualPush"] == "true";
     m_MeleeSwingVelocityRequired = std::stof(userConfig["MeleeSwingVelocityRequired"]);
+    m_PlayerHeightInMeters = std::stof(userConfig["PlayerHeightInMeters"]);
 }
 
 void VR::WaitForConfigUpdate()
