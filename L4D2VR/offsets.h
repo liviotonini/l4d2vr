@@ -51,6 +51,8 @@ public:
     Offset PrePushRenderTarget =         { "client.dll", 0xA8C80, "55 8B EC 8B C1 56 8B 75 08 8B 0E 89 08 8B 56 04 89" };
     // Operand of "mov ecx, [r_flashlight_attach_to_viewmodel.m_pParent]" inside C_TerrorPlayer::Simulate
     Offset FlashlightAttachToViewmodel = { "client.dll", 0x260774, "8B 0D ? ? ? ? 83 79 30 00 0F 84 ? ? ? ? 6A 00 8B CF E8", 2 };
+    // "lea eax, [ebp-0x1F0]" (viewmodel attachment angles passed to AngleVectors) inside the first person laser sight update of C_TerrorPlayer
+    Offset LaserSightAttachmentAngles =  { "client.dll", 0x25E143, "8D 85 F8 FD FF FF 50 8D 8D E0 FD FF FF 51 8D 95 FC FE FF FF 52 8D 85 10 FE FF FF 50 E8", 0x15 };
 
     Offset ServerFireTerrorBullets =     { "server.dll", 0x3C3FC0, "55 8B EC 81 EC ? ? ? ? A1 ? ? ? ? 33 C5 89 45 FC 8B 45 08 8B 4D 10" };
     Offset ReadUserCmd =                 { "server.dll", 0x205100, "55 8B EC 53 8B 5D 10 56 57 8B 7D 0C 53" };

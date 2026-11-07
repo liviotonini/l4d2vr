@@ -96,6 +96,8 @@ VR::VR(Game *game)
 
     UpdatePosesAndActions();
 
+    PatchLaserSight();
+
     m_IsInitialized = true;
     m_IsVREnabled = true;
 }
@@ -1009,6 +1011,84 @@ static Vector WorldToFrame(const Vector &v, const Vector &forward, const Vector 
 static Vector FrameToWorld(const Vector &local, const Vector &forward, const Vector &right, const Vector &up)
 {
     return forward * local.x + right * local.y + up * local.z;
+}
+
+// Checks code bytes at address. -1 in the pattern matches any byte.
+static bool CodeBytesMatch(uintptr_t address, std::initializer_list<int> pattern)
+{
+    const uint8_t *bytes = (const uint8_t *)address;
+    int i = 0;
+    for (int expected : pattern)
+    {
+        if (expected != -1 && bytes[i] != expected)
+            return false;
+        ++i;
+    }
+    return true;
+}
+
+static bool PatchCodeBytes(uintptr_t address, const uint8_t *bytes, size_t size)
+{
+    DWORD oldProtect;
+    if (!VirtualProtect((LPVOID)address, size, PAGE_EXECUTE_READWRITE, &oldProtect))
+        return false;
+
+    memcpy((void *)address, bytes, size);
+
+    VirtualProtect((LPVOID)address, size, oldProtect, &oldProtect);
+    FlushInstructionCache(GetCurrentProcess(), (LPVOID)address, size);
+    return true;
+}
+
+// L4D2's first person laser sight (C_TerrorPlayer, particle "weapon_laser_sight_FP") traces the laser from a blend
+// of the eye position/angles and the viewmodel's "flashlight" attachment. Whenever the weapon points roughly where the
+// player looks, it's fully eye based (so the dot sits on the crosshair in the regular game), otherwise the dot is hidden.
+// In VR the eyes are the HMD, so the laser came out of the head instead of the weapon.
+// This patches that function so the laser trace starts at the weapon attachment and uses the weapon aim angles
+// (m_RightControllerAngAbs, the same angles used for the bullets).
+void VR::PatchLaserSight()
+{
+    uintptr_t attachmentAnglesAddress = m_Game->m_Offsets->LaserSightAttachmentAngles.address;
+    if (!attachmentAnglesAddress)
+        return;
+
+    uintptr_t eyeAnglesCallAddress = attachmentAnglesAddress + 0xE3;
+    uintptr_t blendCompareAddress = attachmentAnglesAddress + 0x13C;
+    uintptr_t blendDoneAddress = attachmentAnglesAddress + 0x190;
+
+    // Verify all original instructions before changing anything
+    bool codeMatches =
+        // lea eax, [ebp-0x1F0] (attachment angles); push eax; call AngleVectors
+        CodeBytesMatch(attachmentAnglesAddress, { 0x8D, 0x85, 0x10, 0xFE, 0xFF, 0xFF, 0x50, 0xE8 })
+        // push edx; mov ecx, esi; mov byte ptr [ebp-0xDD], 0; call C_BasePlayer::EyeAngles; push eax; call AngleVectors
+        && CodeBytesMatch(eyeAnglesCallAddress - 10, { 0x52, 0x8B, 0xCE, 0xC6, 0x85, 0x23, 0xFF, 0xFF, 0xFF, 0x00, 0xE8, -1, -1, -1, -1, 0x50, 0xE8 })
+        // comiss xmm0, xmm3; movaps xmm2, xmm0; movss [ebp-0x110], xmm2; jbe +9; mov byte ptr [ebp-0xDD], 1; jmp blendDone
+        && CodeBytesMatch(blendCompareAddress, { 0x0F, 0x2F, 0xC3, 0x0F, 0x28, 0xD0, 0xF3, 0x0F, 0x11, 0x95, 0xF0, 0xFE, 0xFF, 0xFF, 0x76, 0x09, 0xC6, 0x85, 0x23, 0xFF, 0xFF, 0xFF, 0x01, 0xEB, 0x3B })
+        // blendDone: mov eax, [esi+4]
+        && CodeBytesMatch(blendDoneAddress, { 0x8B, 0x46, 0x04 });
+
+    if (!codeMatches)
+        return;
+
+    uint32_t aimAnglesAddress = (uint32_t)(uintptr_t)&m_RightControllerAngAbs;
+
+    // 1. Weapon direction: "mov eax, &m_RightControllerAngAbs; nop" instead of the attachment angles
+    uint8_t weaponAnglesPatch[6] = { 0xB8, 0, 0, 0, 0, 0x90 };
+    memcpy(&weaponAnglesPatch[1], &aimAnglesAddress, 4);
+
+    // 2. Eye direction: "mov eax, &m_RightControllerAngAbs" instead of calling EyeAngles(), so the dot isn't hidden
+    //    or pulled towards where the HMD is looking
+    uint8_t eyeAnglesPatch[5] = { 0xB8, 0, 0, 0, 0 };
+    memcpy(&eyeAnglesPatch[1], &aimAnglesAddress, 4);
+
+    // 3. Eye/weapon blend factor = 0, so the trace starts at the weapon attachment instead of the eye position:
+    //    xorps xmm2, xmm2; movss [ebp-0x110], xmm2; jmp blendDone
+    uint8_t blendPatch[13] = { 0x0F, 0x57, 0xD2, 0xF3, 0x0F, 0x11, 0x95, 0xF0, 0xFE, 0xFF, 0xFF, 0xEB, 0x00 };
+    blendPatch[12] = (uint8_t)(blendDoneAddress - (blendCompareAddress + sizeof(blendPatch)));
+
+    PatchCodeBytes(attachmentAnglesAddress, weaponAnglesPatch, sizeof(weaponAnglesPatch));
+    PatchCodeBytes(eyeAnglesCallAddress, eyeAnglesPatch, sizeof(eyeAnglesPatch));
+    PatchCodeBytes(blendCompareAddress, blendPatch, sizeof(blendPatch));
 }
 
 // L4D2 attaches the first person flashlight to the "flashlight" attachment of the viewmodel when

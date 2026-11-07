@@ -91,8 +91,8 @@ public:
 
 	Vector m_LeftControllerPosAbs;											
 	QAngle m_LeftControllerAngAbs;
-	Vector m_RightControllerPosAbs;											
-	QAngle m_RightControllerAngAbs;
+	Vector m_RightControllerPosAbs;
+	QAngle m_RightControllerAngAbs = { 0,0,0 }; // Weapon aim angles. Also read directly by the patched laser sight code in client.dll
 
 	Vector m_ViewmodelPosOffset;
 	QAngle m_ViewmodelAngOffset;
@@ -243,6 +243,7 @@ public:
 	QAngle GetRecommendedViewmodelAbsAngle();
 	void UpdateTracking();
 	void UpdateFlashlightAttachment();
+	void PatchLaserSight();
 	Vector GetViewAngle();
 	Vector GetViewOriginLeft();
 	Vector GetViewOriginRight();
