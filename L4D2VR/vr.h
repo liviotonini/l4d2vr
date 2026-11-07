@@ -9,6 +9,7 @@ class Game;
 class IDirect3DTexture9;
 class IDirect3DSurface9;
 class ITexture;
+struct ConVarData;
 
 
 struct TrackedDevicePoseData 
@@ -193,6 +194,16 @@ public:
 	float m_PlayerHeightInMeters = 1.8;
 	bool m_ActivateCrouchPhisically = false;
 	bool m_UseCrouchButtonAsToggle = false;
+	bool m_AttachFlashlightToHeadWhenMelee = true;
+
+	// r_flashlight_attach_to_viewmodel ConVar (found through FlashlightAttachToViewmodel offset)
+	ConVarData *m_FlashlightAttachConVar = nullptr;
+	bool m_FlashlightAttachConVarLookupDone = false;
+	int m_FlashlightAttachDefaultValue = 1;
+
+	// Weapon orientation stored relative to the "two hands" frame at the moment the left hand grabs the weapon
+	Vector m_TwoHandForwardLocal = { 1,0,0 };
+	Vector m_TwoHandUpLocal = { 0,0,1 };
 
 	bool isWalkingSlowly = false;
 	bool isHoldingWeapon2Handed = false;
@@ -231,6 +242,7 @@ public:
 	Vector GetRecommendedViewmodelAbsPos();
 	QAngle GetRecommendedViewmodelAbsAngle();
 	void UpdateTracking();
+	void UpdateFlashlightAttachment();
 	Vector GetViewAngle();
 	Vector GetViewOriginLeft();
 	Vector GetViewOriginRight();

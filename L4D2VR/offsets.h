@@ -49,6 +49,8 @@ public:
     Offset GetMeleeWeaponInfoClient =    { "client.dll", 0x30B570, "8B 81 ? ? ? ? 50 B9 ? ? ? ? E8 ? ? ? ? C3" };
     Offset IsSplitScreen =               { "client.dll", 0x1B2A60, "33 C0 83 3D ? ? ? ? ? 0F 9D C0" };
     Offset PrePushRenderTarget =         { "client.dll", 0xA8C80, "55 8B EC 8B C1 56 8B 75 08 8B 0E 89 08 8B 56 04 89" };
+    // Operand of "mov ecx, [r_flashlight_attach_to_viewmodel.m_pParent]" inside C_TerrorPlayer::Simulate
+    Offset FlashlightAttachToViewmodel = { "client.dll", 0x260774, "8B 0D ? ? ? ? 83 79 30 00 0F 84 ? ? ? ? 6A 00 8B CF E8", 2 };
 
     Offset ServerFireTerrorBullets =     { "server.dll", 0x3C3FC0, "55 8B EC 81 EC ? ? ? ? A1 ? ? ? ? 33 C5 89 45 FC 8B 45 08 8B 4D 10" };
     Offset ReadUserCmd =                 { "server.dll", 0x205100, "55 8B EC 53 8B 5D 10 56 57 8B 7D 0C 53" };

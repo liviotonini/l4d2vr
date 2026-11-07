@@ -978,6 +978,81 @@ void writeToFile(const std::string& label, QAngle angle) {
 }
 
 
+// Builds an orthonormal frame whose forward points from the right hand to the left hand.
+// The roll comes from the right controller: its right vector is taken from both the controller's up and right vectors
+// projected onto the plane perpendicular to forward. Each term only degenerates when forward is parallel to
+// controllerUp or controllerRight respectively, so the sum stays stable for any hands position.
+static void GetTwoHandedFrame(const Vector &handsDirection, const Vector &controllerRight, const Vector &controllerUp,
+    Vector &forward, Vector &right, Vector &up)
+{
+    forward = handsDirection;
+    VectorNormalize(forward);
+
+    Vector rightFromUp;
+    CrossProduct(forward, controllerUp, rightFromUp);
+    Vector rightProjected = controllerRight - forward * DotProduct(forward, controllerRight);
+
+    right = rightFromUp + rightProjected;
+    if (VectorLength(right) < 0.001f)
+        right = rightProjected;
+    VectorNormalize(right);
+
+    CrossProduct(right, forward, up);
+}
+
+// Expresses a world direction in the coordinates of the frame (forward, right, up), and back.
+static Vector WorldToFrame(const Vector &v, const Vector &forward, const Vector &right, const Vector &up)
+{
+    return Vector(DotProduct(v, forward), DotProduct(v, right), DotProduct(v, up));
+}
+
+static Vector FrameToWorld(const Vector &local, const Vector &forward, const Vector &right, const Vector &up)
+{
+    return forward * local.x + right * local.y + up * local.z;
+}
+
+// L4D2 attaches the first person flashlight to the "flashlight" attachment of the viewmodel when
+// r_flashlight_attach_to_viewmodel is 1 (default). Since the viewmodel follows the controller, swinging
+// a melee weapon swings the light around too. When the ConVar is 0 (or while on a ladder) the game
+// uses the eye position/angles instead, which follow the HMD.
+// The ConVar is FCVAR_CHEAT, so the value is written directly instead of using the console.
+void VR::UpdateFlashlightAttachment()
+{
+    if (!m_FlashlightAttachConVarLookupDone)
+    {
+        m_FlashlightAttachConVarLookupDone = true;
+
+        uintptr_t operandAddress = m_Game->m_Offsets->FlashlightAttachToViewmodel.address;
+        if (operandAddress)
+        {
+            // The operand is the address of the ConVar's m_pParent field
+            uintptr_t parentFieldAddress = *(uintptr_t *)operandAddress;
+            ConVarData *conVar = (ConVarData *)(parentFieldAddress - offsetof(ConVarData, parent));
+
+            if (conVar->name && strcmp(conVar->name, "r_flashlight_attach_to_viewmodel") == 0)
+            {
+                m_FlashlightAttachConVar = conVar;
+                ConVarData *parent = conVar->parent ? conVar->parent : conVar;
+                m_FlashlightAttachDefaultValue = parent->intValue;
+            }
+        }
+    }
+
+    if (!m_FlashlightAttachConVar)
+        return;
+
+    ConVarData *parent = m_FlashlightAttachConVar->parent ? m_FlashlightAttachConVar->parent : m_FlashlightAttachConVar;
+
+    bool attachToHead = m_IsVREnabled && m_AttachFlashlightToHeadWhenMelee && m_Game->m_IsMeleeWeaponActive;
+    int desiredValue = attachToHead ? 0 : m_FlashlightAttachDefaultValue;
+
+    if (parent->intValue != desiredValue)
+    {
+        parent->intValue = desiredValue;
+        parent->floatValue = (float)desiredValue;
+    }
+}
+
 void VR::UpdateTracking()
 {
     GetPoses();
@@ -995,6 +1070,8 @@ void VR::UpdateTracking()
     }
 
     m_Game->m_IsMeleeWeaponActive = localPlayer->IsMeleeWeaponActive();
+
+    UpdateFlashlightAttachment();
 
     // HMD tracking
     QAngle hmdAngLocal = m_HmdPose.TrackedDeviceAng;	
@@ -1141,7 +1218,9 @@ void VR::UpdateTracking()
         m_RightControllerPosAbs = m_RightControllerPosAbs + (m_RightControllerRight * m_WeaponHorizontalPositionAdjustment);
     }
 
+    // Weapon orientation. Same as the right controller, unless the weapon is being held with 2 hands.
     Vector rightControllerForward_2handAdjust = m_RightControllerForward;
+    Vector rightControllerRight_2handAdjust = m_RightControllerRight;
     Vector rightControllerUp_2handAdjust = m_RightControllerUp;
     if (PressedDigitalAction(m_RightHandGrab) || PressedDigitalAction(m_LeftHandGrab))
     {
@@ -1152,7 +1231,9 @@ void VR::UpdateTracking()
         VectorCopy(handsDistanceLocalInWorld, handsDistanceLocalInWorldNormalized);
         VectorNormalize(handsDistanceLocalInWorldNormalized);
 
-        float rightControllerForward_HandsDistLocalWorld_Angle = RAD2DEG(acosf(DotProduct(m_RightControllerForward, handsDistanceLocalInWorldNormalized)));
+        // Clamp to avoid acosf returning NaN due to floating point error
+        float dotProduct_RightControllerForward_HandsDistLocalWorld = std::clamp(DotProduct(m_RightControllerForward, handsDistanceLocalInWorldNormalized), -1.0f, 1.0f);
+        float rightControllerForward_HandsDistLocalWorld_Angle = RAD2DEG(acosf(dotProduct_RightControllerForward_HandsDistLocalWorld));
         float dotProduct_RightControllerUp_HandsDistLocalWorld = DotProduct(m_RightControllerUp, handsDistanceLocalInWorldNormalized);
 
         Vector hmdToControllerWorld = rightControllerPosLocalInWorld - m_HmdPosLocalInWorld;
@@ -1297,26 +1378,36 @@ void VR::UpdateTracking()
                     && handsDistanceLocalInWorldLength <= (handsDistanceFor2HandWeapon + handsDistanceFor2HandWeaponOffset)
                     && rightControllerForward_HandsDistLocalWorld_Angle <= angleLimitFor2HandWeapon))
             {
+                // The weapon pivots around the right hand so that it keeps pointing at the left hand.
+                // Only changing the forward vector (keeping the controller's up/right vectors) creates a skewed basis,
+                // which twists the viewmodel and its offsets as soon as the weapon is angled away from the controller,
+                // so a complete orthonormal frame is built from the hands direction instead.
+                Vector handsFrameForward, handsFrameRight, handsFrameUp;
+                GetTwoHandedFrame(handsDistanceLocalInWorld, m_RightControllerRight, m_RightControllerUp, handsFrameForward, handsFrameRight, handsFrameUp);
+
                 if (isHoldingWeapon2Handed == false)
                 {
                     isHoldingWeapon2Handed = true;
+
+                    // Store the weapon orientation relative to the hands frame when the left hand grabs it,
+                    // so the weapon doesn't snap and keeps the grip chosen by the player.
+                    m_TwoHandForwardLocal = WorldToFrame(m_RightControllerForward, handsFrameForward, handsFrameRight, handsFrameUp);
+                    m_TwoHandUpLocal = WorldToFrame(m_RightControllerUp, handsFrameForward, handsFrameRight, handsFrameUp);
                 }
 
-                // Change forward vector to angle towards Hands Distance vector
-              /*  Vector pivotUp;
-                CrossProduct(m_RightControllerUp, handsDistanceLocalInWorldNormalized, pivotUp);
-                VectorNormalize(pivotUp);
+                // Hands direction is unreliable when the controllers are almost touching
+                float minHandsDistanceFor2HandAim = 2.0f;
+                if (handsDistanceLocalInWorldLength > minHandsDistanceFor2HandAim)
+                {
+                    rightControllerForward_2handAdjust = FrameToWorld(m_TwoHandForwardLocal, handsFrameForward, handsFrameRight, handsFrameUp);
+                    rightControllerUp_2handAdjust = FrameToWorld(m_TwoHandUpLocal, handsFrameForward, handsFrameRight, handsFrameUp);
 
-                rightControllerUp_2handAdjust = VectorRotate(m_RightControllerUp, pivotUp, rightControllerForward_HandsDistLocalWorld_Angle);*/
-
-                // Change forward vector to angle towards Hands Distance vector
-                Vector pivotForward;
-                CrossProduct(m_RightControllerForward, handsDistanceLocalInWorldNormalized, pivotForward);
-                VectorNormalize(pivotForward);
-
-                rightControllerForward_2handAdjust = VectorRotate(m_RightControllerForward, pivotForward, rightControllerForward_HandsDistLocalWorld_Angle);
-
-                QAngle::AngleVectors(hmdAngLocal, &m_HmdForward, &m_HmdRight, &m_HmdUp);
+                    // Re-orthonormalize (right = forward x up, up = right x forward)
+                    VectorNormalize(rightControllerForward_2handAdjust);
+                    CrossProduct(rightControllerForward_2handAdjust, rightControllerUp_2handAdjust, rightControllerRight_2handAdjust);
+                    VectorNormalize(rightControllerRight_2handAdjust);
+                    CrossProduct(rightControllerRight_2handAdjust, rightControllerForward_2handAdjust, rightControllerUp_2handAdjust);
+                }
             }
 
             // Check if reloading
@@ -1407,7 +1498,7 @@ void VR::UpdateTracking()
 
     // controller angles
     QAngle::VectorAngles(m_LeftControllerForward, m_LeftControllerUp, m_LeftControllerAngAbs);
-    QAngle::VectorAngles(rightControllerForward_2handAdjust, m_RightControllerUp, m_RightControllerAngAbs);
+    QAngle::VectorAngles(rightControllerForward_2handAdjust, rightControllerUp_2handAdjust, m_RightControllerAngAbs);
     
     PositionAngle viewmodelOffset = localPlayer->GetViewmodelOffset();
 
@@ -1415,9 +1506,9 @@ void VR::UpdateTracking()
     m_ViewmodelAngOffset = viewmodelOffset.angle;
 
     m_ViewmodelForward = rightControllerForward_2handAdjust;
-    m_ViewmodelUp = m_RightControllerUp;
+    m_ViewmodelUp = rightControllerUp_2handAdjust;
 
-    m_ViewmodelRight = m_RightControllerRight;
+    m_ViewmodelRight = rightControllerRight_2handAdjust;
 
     // Viewmodel yaw offset
     m_ViewmodelForward = VectorRotate(m_ViewmodelForward, m_ViewmodelUp, m_ViewmodelAngOffset.y);
@@ -1505,6 +1596,7 @@ void VR::ParseConfigFile()
     m_PlayerHeightInMeters = std::stof(userConfig["PlayerHeightInMeters"]);
     m_ActivateCrouchPhisically = userConfig["ActivateCrouchPhisically"] == "true";
     m_UseCrouchButtonAsToggle = userConfig["UseCrouchButtonAsToggle"] == "true";
+    m_AttachFlashlightToHeadWhenMelee = userConfig["AttachFlashlightToHeadWhenMelee"] != "false"; // enabled if missing from config
 }
 
 void VR::WaitForConfigUpdate()

@@ -3,6 +3,7 @@
 #pragma once
 
 #include <math.h>
+#include <cstddef>
 #include "game.h"
 #include "offsets.h"
 #include "usercmd.h"
@@ -974,6 +975,29 @@ public:
 	char pad_0DA4[920]; //0x0DA4
 }; //Size: 0x113C
 static_assert(sizeof(CMeleeWeaponInfoStore) == 0x113C);
+
+// Memory layout of a ConVar (ConCommandBase + IConVar). Only used to read/write
+// values directly, which also works for FCVAR_CHEAT ConVars.
+struct ConVarData
+{
+	void *vtable;					//0x00
+	ConVarData *next;				//0x04
+	bool registered;				//0x08
+	const char *name;				//0x0C
+	const char *helpString;			//0x10
+	int flags;						//0x14
+	void *iConVarVtable;			//0x18
+	ConVarData *parent;				//0x1C
+	const char *defaultValue;		//0x20
+	char *stringValue;				//0x24
+	int stringLength;				//0x28
+	float floatValue;				//0x2C
+	int intValue;					//0x30
+};
+#ifndef _WIN64
+static_assert(offsetof(ConVarData, parent) == 0x1C);
+static_assert(offsetof(ConVarData, intValue) == 0x30);
+#endif
 
 class IHandleEntity
 {
