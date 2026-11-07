@@ -1,6 +1,7 @@
 #pragma once
 #include "openvr.h"
 #include "vector.h"
+#include <atomic>
 #include <chrono>
 
 #define MAX_STR_LEN 256
@@ -9,6 +10,7 @@ class Game;
 class IDirect3DTexture9;
 class IDirect3DSurface9;
 class ITexture;
+class SettingsMenu;
 struct ConVarData;
 
 
@@ -201,6 +203,11 @@ public:
 	bool m_FlashlightAttachConVarLookupDone = false;
 	int m_FlashlightAttachDefaultValue = 1;
 
+	// "L4D2VR" tab in the SteamVR dashboard for changing the settings above while playing
+	SettingsMenu *m_SettingsMenu = nullptr;
+	// Write time of the last config.txt saved by SaveConfigFile(), so WaitForConfigUpdate() doesn't reload our own save
+	std::atomic<long long> m_ConfigWriteTimeSavedByMenu{ 0 };
+
 	// Weapon orientation stored relative to the "two hands" frame at the moment the left hand grabs the weapon
 	Vector m_TwoHandForwardLocal = { 1,0,0 };
 	Vector m_TwoHandUpLocal = { 0,0,1 };
@@ -252,5 +259,6 @@ public:
 	void ResetPosition();
 	void GetPoseData(vr::TrackedDevicePose_t &poseRaw, TrackedDevicePoseData &poseOut);
 	void ParseConfigFile();
+	bool SaveConfigFile();
 	void WaitForConfigUpdate();
 };

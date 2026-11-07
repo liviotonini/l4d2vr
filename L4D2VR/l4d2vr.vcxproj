@@ -111,7 +111,8 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>openvr_api.lib;libMinHook.x86.lib;$(SolutionDir)dxvk\lib32\vulkan-1.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>openvr_api.lib;libMinHook.x86.lib;$(SolutionDir)dxvk\lib32\vulkan-1.lib;d3d11.lib;d3dcompiler.lib;delayimp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <DelayLoadDLLs>d3d11.dll;d3dcompiler_47.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
       <ModuleDefinitionFile>$(SolutionDir)dxvk\src\d3d9\d3d9.def</ModuleDefinitionFile>
     </Link>
     <PostBuildEvent>
@@ -140,7 +141,8 @@
       <EnableUAC>false</EnableUAC>
       <ModuleDefinitionFile>$(SolutionDir)dxvk\src\d3d9\d3d9.def</ModuleDefinitionFile>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>openvr_api.lib;libMinHook.x86.lib;$(SolutionDir)dxvk\lib32\vulkan-1.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>openvr_api.lib;libMinHook.x86.lib;$(SolutionDir)dxvk\lib32\vulkan-1.lib;d3d11.lib;d3dcompiler.lib;delayimp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <DelayLoadDLLs>d3d11.dll;d3dcompiler_47.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
     </Link>
     <PostBuildEvent>
       <Command>copy /Y "$(OutDir)$(TargetName)$(TargetExt)" "C:\Program Files (x86)\Steam\steamapps\common\Left 4 Dead 2\$(TargetName)$(TargetExt)"</Command>
@@ -447,8 +449,16 @@
     <ClInclude Include="sdk\texture.h" />
     <ClInclude Include="sdk\trace.h" />
     <ClInclude Include="sdk\vector.h" />
+    <ClInclude Include="settings_menu.h" />
     <ClInclude Include="sigscanner.h" />
     <ClInclude Include="vr.h" />
+    <ClInclude Include="..\thirdparty\imgui\imconfig.h" />
+    <ClInclude Include="..\thirdparty\imgui\imgui.h" />
+    <ClInclude Include="..\thirdparty\imgui\imgui_impl_dx11.h" />
+    <ClInclude Include="..\thirdparty\imgui\imgui_internal.h" />
+    <ClInclude Include="..\thirdparty\imgui\imstb_rectpack.h" />
+    <ClInclude Include="..\thirdparty\imgui\imstb_textedit.h" />
+    <ClInclude Include="..\thirdparty\imgui\imstb_truetype.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\dxvk\src\d3d9\d3d9_adapter.cpp" />
@@ -588,7 +598,13 @@
     <ClCompile Include="game.cpp" />
     <ClCompile Include="hooks.cpp" />
     <ClCompile Include="sdk\checksum_crc.cpp" />
+    <ClCompile Include="settings_menu.cpp" />
     <ClCompile Include="vr.cpp" />
+    <ClCompile Include="..\thirdparty\imgui\imgui.cpp" />
+    <ClCompile Include="..\thirdparty\imgui\imgui_draw.cpp" />
+    <ClCompile Include="..\thirdparty\imgui\imgui_impl_dx11.cpp" />
+    <ClCompile Include="..\thirdparty\imgui\imgui_tables.cpp" />
+    <ClCompile Include="..\thirdparty\imgui\imgui_widgets.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\dxvk\lib32\libd3dcompiler_43.def" />

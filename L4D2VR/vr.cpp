@@ -12,7 +12,9 @@
 #include <filesystem>
 #include <thread>
 #include <algorithm>
+#include <vector>
 #include <d3d9_vr.h>
+#include "settings_menu.h"
 
 VR::VR(Game *game) 
 {
@@ -97,6 +99,9 @@ VR::VR(Game *game)
     UpdatePosesAndActions();
 
     PatchLaserSight();
+
+    // The dashboard overlay and its D3D11 device are created on the first Update() (render thread)
+    m_SettingsMenu = new SettingsMenu(this);
 
     m_IsInitialized = true;
     m_IsVREnabled = true;
@@ -183,6 +188,9 @@ void VR::Update()
         ProcessMenuInput();
     else
         ProcessInput();
+
+    if (m_SettingsMenu)
+        m_SettingsMenu->Update();
 }
 
 void VR::CreateVRTextures()
@@ -1679,6 +1687,117 @@ void VR::ParseConfigFile()
     m_AttachFlashlightToHeadWhenMelee = userConfig["AttachFlashlightToHeadWhenMelee"] != "false"; // enabled if missing from config
 }
 
+static std::string ConfigBoolString(bool value)
+{
+    return value ? "true" : "false";
+}
+
+// Same style as the values in config.txt: "45.0", "0.3", "1.68"
+static std::string ConfigFloatString(float value)
+{
+    if (fabsf(value) < 0.0005f)
+        value = 0.0f;
+
+    char buffer[32];
+    snprintf(buffer, sizeof(buffer), "%.3f", value);
+    std::string result = buffer;
+
+    size_t dot = result.find('.');
+    if (dot != std::string::npos)
+    {
+        size_t lastDigit = result.find_last_not_of('0');
+        if (lastDigit == dot)
+            ++lastDigit; // keep one decimal
+        result.erase(lastDigit + 1);
+    }
+    return result;
+}
+
+// Writes the current settings to VR\config.txt. Keeps the order of the lines and any line it doesn't know about,
+// replaces the known values and appends the ones that are missing.
+bool VR::SaveConfigFile()
+{
+    const std::vector<std::pair<std::string, std::string>> values =
+    {
+        { "TurnSpeed", ConfigFloatString(m_TurnSpeed) },
+        { "SnapTurning", ConfigBoolString(m_SnapTurning) },
+        { "SnapTurnAngle", ConfigFloatString(m_SnapTurnAngle) },
+        { "LeftHanded", ConfigBoolString(m_LeftHanded) },
+        { "VRScale", ConfigFloatString(m_VRScale) },
+        { "IPDScale", ConfigFloatString(m_IpdScale) },
+        { "HideArms", ConfigBoolString(m_HideArms) },
+        { "HudDistance", ConfigFloatString(m_HudDistance) },
+        { "HudSize", ConfigFloatString(m_HudSize) },
+        { "HudAlwaysVisible", ConfigBoolString(m_HudAlwaysVisible) },
+        { "ControllerAngleAdjustment", ConfigFloatString(m_ControllerAngleAdjustment) },
+        { "WeaponHorizontalPositionAdjustment", ConfigFloatString(m_WeaponHorizontalPositionAdjustment) },
+        { "IsTrackingManualPush", ConfigBoolString(m_IsTrackingManualPush) },
+        { "MeleeSwingVelocityRequired", ConfigFloatString(m_MeleeSwingVelocityRequired) },
+        { "PlayerHeightInMeters", ConfigFloatString(m_PlayerHeightInMeters) },
+        { "ActivateCrouchPhisically", ConfigBoolString(m_ActivateCrouchPhisically) },
+        { "UseCrouchButtonAsToggle", ConfigBoolString(m_UseCrouchButtonAsToggle) },
+        { "AttachFlashlightToHeadWhenMelee", ConfigBoolString(m_AttachFlashlightToHeadWhenMelee) },
+    };
+
+    std::vector<std::string> lines;
+    {
+        std::ifstream configStream("VR\\config.txt");
+        std::string line;
+        while (std::getline(configStream, line))
+            lines.push_back(line);
+    }
+
+    std::vector<bool> written(values.size(), false);
+    for (std::string &line : lines)
+    {
+        size_t separator = line.find('=');
+        if (separator == std::string::npos)
+            continue;
+
+        std::string key = line.substr(0, separator);
+        for (size_t i = 0; i < values.size(); ++i)
+        {
+            if (values[i].first == key)
+            {
+                line = key + "=" + values[i].second;
+                written[i] = true;
+                break;
+            }
+        }
+    }
+
+    for (size_t i = 0; i < values.size(); ++i)
+    {
+        if (!written[i])
+            lines.push_back(values[i].first + "=" + values[i].second);
+    }
+
+    // Write a temporary file and swap it in, so the config reload thread never reads a half written config.txt
+    {
+        std::ofstream tempStream("VR\\config.txt.tmp", std::ios::trunc);
+        for (size_t i = 0; i < lines.size(); ++i)
+        {
+            tempStream << lines[i];
+            if (i + 1 < lines.size())
+                tempStream << '\n';
+        }
+
+        if (!tempStream)
+            return false;
+    }
+
+    if (!MoveFileExA("VR\\config.txt.tmp", "VR\\config.txt", MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+        return false;
+
+    try
+    {
+        m_ConfigWriteTimeSavedByMenu = std::filesystem::last_write_time("VR\\config.txt").time_since_epoch().count();
+    }
+    catch (const std::filesystem::filesystem_error &) {}
+
+    return true;
+}
+
 void VR::WaitForConfigUpdate()
 {
     char currentDir[MAX_STR_LEN];
@@ -1697,7 +1816,10 @@ void VR::WaitForConfigUpdate()
             if (configModifiedTime != configLastModified)
             {
                 configLastModified = configModifiedTime;
-                ParseConfigFile();
+
+                // Values saved by the settings menu are already applied. Reloading them could undo a change made in the menu right after the save.
+                if (configModifiedTime.time_since_epoch().count() != m_ConfigWriteTimeSavedByMenu)
+                    ParseConfigFile();
             }
         }
         catch (const std::invalid_argument &e)
