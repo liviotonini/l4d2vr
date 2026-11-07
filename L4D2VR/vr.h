@@ -175,8 +175,7 @@ public:
 	float m_RotationOffset = 0;
 	std::chrono::steady_clock::time_point m_PrevFrameTime;
 
-	bool m_IsTrackingManualPush = false;
-	float m_ControllerAngleAdjustment = -45.0;
+
 	float m_TurnSpeed = 0.3;
 	bool m_SnapTurning = false;
 	float m_SnapTurnAngle = 45.0;
@@ -187,15 +186,28 @@ public:
 	float m_HudDistance = 1.3;
 	float m_HudSize = 1.1;
 	bool m_HudAlwaysVisible = false;
+	bool m_IsTrackingManualPush = false;
+	float m_ControllerAngleAdjustment = -45.0;
+	float m_WeaponHorizontalPositionAdjustment = 0;
 	float m_MeleeSwingVelocityRequired = 1.1;
 	float m_PlayerHeightInMeters = 1.8;
+	bool m_ActivateCrouchPhisically = false;
+	bool m_UseCrouchButtonAsToggle = false;
 
 	bool isWalkingSlowly = false;
 	bool isHoldingWeapon2Handed = false;
+	bool isPressingLeftGrab = false;
+	bool isPressingRightGrab = false;
 	bool temp = false;
 	bool isReloading = false;
 	bool isPressingToggleWalkSpeed = false;
+	bool m_IsPlayerCrouched = false;
 	bool isCrouching = false;
+	bool hasCrouchAnimationEnded = false;
+	float m_CrouchAnimDeltaTime = 0;
+	float cameraAnchorZBeforePhysicalCrouch = 0;
+	bool isPressingCrouchButton = false;
+	bool isSendingCrouchCommand = false;
 
 	VR() {};
 	VR(Game *game);

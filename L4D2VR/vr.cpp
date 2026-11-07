@@ -656,7 +656,8 @@ void VR::ProcessInput()
         m_Game->ClientCmd_Unrestricted("-reload");
     }
 
-    if (PressedDigitalAction(m_ActionSecondaryAttack) || (m_IsTrackingManualPush && VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 5.0))
+    //if (PressedDigitalAction(m_ActionSecondaryAttack) || (m_IsTrackingManualPush && VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 5.0))
+    if (PressedDigitalAction(m_ActionSecondaryAttack) || (m_IsTrackingManualPush && (VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 4.0 || ( !m_Game->m_IsMeleeWeaponActive && VectorLength(m_RightControllerPose.TrackedDeviceVel) > 4.0))))
     {
         m_Game->ClientCmd_Unrestricted("+attack2");       
     }
@@ -679,11 +680,58 @@ void VR::ProcessInput()
         ResetPosition();
     }
 
-    if (PressedDigitalAction(m_ActionCrouch) || isCrouching)
+    m_IsPlayerCrouched = (m_ActivateCrouchPhisically && m_HmdPosLocalInWorld.z <= (27.0f * m_PlayerHeightInMeters));
+    if (m_IsPlayerCrouched)
+    {
+        if (isCrouching == false)
+        {
+            isCrouching = true;
+            hasCrouchAnimationEnded = false;
+            m_CrouchAnimDeltaTime = 0;
+            cameraAnchorZBeforePhysicalCrouch = m_CameraAnchor.z;
+        }
+    }
+    else if (isCrouching)
+    {
+        isCrouching = false;
+        hasCrouchAnimationEnded = false;
+        m_CrouchAnimDeltaTime = 0;
+        cameraAnchorZBeforePhysicalCrouch = m_CameraAnchor.z;
+        isSendingCrouchCommand = false;
+    }
+
+    if (PressedDigitalAction(m_ActionCrouch))
+    {
+        if (m_UseCrouchButtonAsToggle)
+        {
+            if (isPressingCrouchButton == false)
+            {
+                isPressingCrouchButton = true;
+                isSendingCrouchCommand = !isSendingCrouchCommand;
+            }
+        }
+        else
+        {
+            isSendingCrouchCommand = true;
+        }
+    }
+    else
+    {
+        if (m_UseCrouchButtonAsToggle)
+        {
+            isPressingCrouchButton = false;
+        }
+        else
+        {
+            isSendingCrouchCommand = false;
+        }
+    }
+
+    if (isSendingCrouchCommand || m_IsPlayerCrouched)
     {
         m_Game->ClientCmd_Unrestricted("+duck");
     }
-    else
+    else 
     {
         m_Game->ClientCmd_Unrestricted("-duck");
     }
@@ -939,6 +987,13 @@ void VR::UpdateTracking()
     if (!localPlayer)
         return;
 
+    C_WeaponCSBase* weapon = (C_WeaponCSBase*)localPlayer->GetActiveWeapon();
+    int weaponId = 0;
+    if (weapon)
+    {
+        weaponId = weapon->GetWeaponID(); 
+    }
+
     m_Game->m_IsMeleeWeaponActive = localPlayer->IsMeleeWeaponActive();
 
     // HMD tracking
@@ -979,7 +1034,33 @@ void VR::UpdateTracking()
     if (!m_RoomscaleActive)
         m_CameraAnchor += m_SetupOrigin - m_SetupOriginPrev;
     
+    typedef std::chrono::duration<float, std::milli> duration;
+    auto currentTime = std::chrono::steady_clock::now();
+    duration elapsed = currentTime - m_PrevFrameTime; 
+    float deltaTime = elapsed.count();
+
     m_CameraAnchor.z = m_SetupOrigin.z + m_HeightOffset;
+
+    float totalCrouchDurationInMilliseconds = 450.0f;
+    if (hasCrouchAnimationEnded == false)
+    {
+        m_CrouchAnimDeltaTime += deltaTime;
+        if (m_CrouchAnimDeltaTime >= totalCrouchDurationInMilliseconds)
+        {
+            hasCrouchAnimationEnded = true;
+        }
+    }
+    if (hasCrouchAnimationEnded == false)
+    {
+        m_CameraAnchor.z = cameraAnchorZBeforePhysicalCrouch;
+    }
+    else if (m_IsPlayerCrouched)
+    {
+        // When crouching in game, the camera moves 18 units down. When crouching phisically, this would make the camera go even further down. 
+        // This compensates the extra deltaZ.
+        float gameCrouchDeltaZ = 18;
+        m_CameraAnchor.z += gameCrouchDeltaZ;
+    }
 
     m_HmdPosAbs = m_CameraAnchor - Vector(0, 0, 64) + m_HmdPosLocalInWorld;
 
@@ -1055,14 +1136,13 @@ void VR::UpdateTracking()
     m_RightControllerForward = VectorRotate(m_RightControllerForward, m_RightControllerRight, m_ControllerAngleAdjustment);
     m_RightControllerUp = VectorRotate(m_RightControllerUp, m_RightControllerRight, m_ControllerAngleAdjustment);
 
+    if (m_WeaponHorizontalPositionAdjustment != 0)
+    {
+        m_RightControllerPosAbs = m_RightControllerPosAbs + (m_RightControllerRight * m_WeaponHorizontalPositionAdjustment);
+    }
 
     Vector rightControllerForward_2handAdjust = m_RightControllerForward;
-
-    //if (isWalkingSlowly)
-    //{
-    //    m_RightControllerPosAbs = m_RightControllerPosAbs + m_RightControllerRight;
-    //}
-
+    Vector rightControllerUp_2handAdjust = m_RightControllerUp;
     if (PressedDigitalAction(m_RightHandGrab) || PressedDigitalAction(m_LeftHandGrab))
     {
         Vector handsDistanceLocalInWorld = leftControllerPosLocalInWorld - rightControllerPosLocalInWorld;
@@ -1077,12 +1157,10 @@ void VR::UpdateTracking()
 
         Vector hmdToControllerWorld = rightControllerPosLocalInWorld - m_HmdPosLocalInWorld;
         
-
         Vector hmdToControllerWorld2DNormalized;
         VectorCopy(hmdToControllerWorld, hmdToControllerWorld2DNormalized);
         hmdToControllerWorld2DNormalized.z = 0;
         VectorNormalize(hmdToControllerWorld2DNormalized);
-
 
         float dotProduct_hmdToControllerWorld2DNorm_HmdRight = DotProduct2D(hmdToControllerWorld2DNormalized, m_HmdRight);
         float dotProduct_hmdToControllerWorld2DNorm_HmdForward = DotProduct2D(hmdToControllerWorld2DNormalized, m_HmdForward);
@@ -1103,94 +1181,110 @@ void VR::UpdateTracking()
         float hmdToControllerWorldLeftLength = VectorLength(hmdToControllerWorldLeft);
         float hmdToControllerWorldLeftZDist = m_HmdPosLocalInWorld.z - leftControllerPosLocalInWorld.z;
 
-     
-        //if (m_HmdPosLocalInWorld.z <= 40.0f)
-        //{
-        //    // duck
-        //    isCrouching = true;
+         //if (temp == false)
+         //{
+            //writeToFile("");
+            //writeToFile("######");
+            //writeToFile("######");
+
+             //writeToFile("WeaponId", weaponId);
+            //writeToFile("hmdPosLocal", hmdPosLocal);
+            //writeToFile("hmdAngLocal", hmdAngLocal);
+            //writeToFile("m_RotationOffset", m_RotationOffset);
+            //writeToFile("m_HmdPosLocalInWorld", m_HmdPosLocalInWorld);
+
+            //writeToFile("hmdToControllerWorldLength", hmdToControllerWorldLength);
+            //writeToFile("dotProduct_hmdToControllerWorld2DNorm_HmdRight", dotProduct_hmdToControllerWorld2DNorm_HmdRight);
+            //writeToFile("dotProduct_hmdToControllerWorld2DNorm_HmdForward", dotProduct_hmdToControllerWorld2DNorm_HmdForward);
+            //writeToFile("hmdToControllerWorldZDist", hmdToControllerWorldZDist);
+            //
+            //writeToFile("hmdToControllerWorldLeftLength", hmdToControllerWorldLeftLength);
+            //writeToFile("dotProduct_hmdToControllerWorldLeft2DNorm_HmdRight", dotProduct_hmdToControllerWorldLeft2DNorm_HmdRight);
+            //writeToFile("dotProduct_hmdToControllerWorldLeft2DNorm_HmdForward", dotProduct_hmdToControllerWorldLeft2DNorm_HmdForward);
+            //writeToFile("hmdToControllerWorldLeftZDist", hmdToControllerWorldLeftZDist);
+
+
+            //writeToFile("deltaTime", deltaTime);
+            //writeToFile("m_HeightOffset", m_HeightOffset);
+            //writeToFile("m_SetupOrigin.z", m_SetupOrigin.z);
+
+            //temp = true;
         //}
-        //else 
-        //{
-        //    // unduck
-        //    isCrouching = false;
-        //}
-
-        if (temp == false)
-        {
-          
-
-
-            writeToFile("");
-            writeToFile("######");
-            writeToFile("######");
-
-            writeToFile("hmdPosLocal", hmdPosLocal);
-            writeToFile("hmdAngLocal", hmdAngLocal);
-            writeToFile("m_RotationOffset", m_RotationOffset);
-
-            writeToFile("--teste--");
-            writeToFile("handsDistanceLocalInWorld", handsDistanceLocalInWorld);
-            writeToFile("handsDistanceLocalInWorldLength", handsDistanceLocalInWorldLength);
-            writeToFile("rightControllerForward_HandsDistLocalWorld_Angle", rightControllerForward_HandsDistLocalWorld_Angle);
-            writeToFile("dotProduct_RightControllerUp_HandsDistLocalWorld", dotProduct_RightControllerUp_HandsDistLocalWorld);
-            writeToFile("m_HmdPosLocalInWorld", m_HmdPosLocalInWorld);
-            writeToFile("hmdToControllerWorld", hmdToControllerWorld);
-            writeToFile("dotProduct_hmdToControllerWorld2DNorm_HmdRight", dotProduct_hmdToControllerWorld2DNorm_HmdRight);
-            writeToFile("dotProduct_hmdToControllerWorld2DNorm_HmdForward", dotProduct_hmdToControllerWorld2DNorm_HmdForward);
-            writeToFile("hmdToControllerWorldLength", hmdToControllerWorldLength);
-            writeToFile("hmdToControllerWorldZDist", hmdToControllerWorldZDist);
-            writeToFile("--teste--");
-            writeToFile("hmdToControllerWorldLeftLength", hmdToControllerWorldLeftLength);
-            writeToFile("dotProduct_hmdToControllerWorldLeft2DNorm_HmdRight", dotProduct_hmdToControllerWorldLeft2DNorm_HmdRight);
-            writeToFile("dotProduct_hmdToControllerWorldLeft2DNorm_HmdForward", hmdToControllerWorldZDist);
-            writeToFile("hmdToControllerWorldLeftZDist", hmdToControllerWorldLeftZDist);
-
-
-            temp = true;
-        }
 
         if (PressedDigitalAction(m_RightHandGrab))
         {
-            // Check if grabbing primary weapon
-            float hmdToControllerShoulderMaxZDist = 8.0f;
-            float hmdToControllerShoulderDist = 12.0f;
-            float hmdToControllerShoulderDistOffset = 2.0f;
-
-            if (hmdToControllerWorldLength >= (hmdToControllerShoulderDist - hmdToControllerShoulderDistOffset)
-                && hmdToControllerWorldLength <= (hmdToControllerShoulderDist + hmdToControllerShoulderDistOffset)
-                && dotProduct_hmdToControllerWorld2DNorm_HmdRight >= 0.1f
-                && dotProduct_hmdToControllerWorld2DNorm_HmdForward <= -0.7f
-                && hmdToControllerWorldZDist <= hmdToControllerShoulderMaxZDist)
+            if (isPressingRightGrab == false)
             {
-                m_Game->ClientCmd_Unrestricted("slot1");
-            }
+                // Check if grabbing primary weapon
+                float hmdToControllerShoulderMaxZDist = 8.0f;
+                float hmdToControllerShoulderDist = 12.0f;
+                float hmdToControllerShoulderDistOffset = 2.0f;
 
-            // Check in grabbing secondary weapon
-            float hmdToControllerLegHolsterDist = m_PlayerHeightInMeters * 22.5f;
-            float hmdToControllerLegHolsterDistOffset = 5.0f;
-            float hmdToControllerLegMaxZDist = m_PlayerHeightInMeters * 21.5f;
-            float hmdToControllerLegMaxZDistOffset = 5.0f;
+                if (hmdToControllerWorldLength >= (hmdToControllerShoulderDist - hmdToControllerShoulderDistOffset)
+                    && hmdToControllerWorldLength <= (hmdToControllerShoulderDist + hmdToControllerShoulderDistOffset)
+                    && dotProduct_hmdToControllerWorld2DNorm_HmdRight >= 0.1f
+                    && dotProduct_hmdToControllerWorld2DNorm_HmdForward <= -0.7f
+                    )
+                {
+                    if (weaponId == (int)weapon->AK47 || weaponId == (int)weapon->AUTOSHOTGUN || weaponId == (int)weapon->AWP
+                        || weaponId == (int)weapon->GRENADE_LAUNCHER || weaponId == (int)weapon->HUNTING_RIFLE
+                        || weaponId == (int)weapon->M16A1 || weaponId == (int)weapon->M60
+                        || weaponId == (int)weapon->MAC10 || weaponId == (int)weapon->MACHINEGUN || weaponId == (int)weapon->MP5
+                        || weaponId == (int)weapon->PUMPSHOTGUN || weaponId == (int)weapon->SHOTGUN_CHROME || weaponId == (int)weapon->SNIPER_MILITARY
+                        || weaponId == (int)weapon->UZI || weaponId == (int)weapon->AUTOSHOTGUN || weaponId == (int)weapon->SCAR || weaponId == (int)weapon->SPAS
+                        || weaponId == (int)weapon->SG552 || weaponId == (int)weapon->SCOUT
+                        )
+                    {
+                        m_Game->ClientCmd_Unrestricted("slot2");
+                    }
+                    else
+                    {
+                        m_Game->ClientCmd_Unrestricted("slot1");
+                    }
+                }
 
-            if (hmdToControllerWorldLength >= (hmdToControllerLegHolsterDist - hmdToControllerLegHolsterDistOffset)
-                && hmdToControllerWorldLength <= (hmdToControllerLegHolsterDist + hmdToControllerLegHolsterDistOffset)
-                && dotProduct_hmdToControllerWorld2DNorm_HmdRight >= 0.8f
-                && hmdToControllerWorldZDist >= (hmdToControllerLegMaxZDist - hmdToControllerLegMaxZDistOffset)
-                && hmdToControllerWorldZDist <= (hmdToControllerLegMaxZDist + hmdToControllerLegMaxZDistOffset))
-            {
-                m_Game->ClientCmd_Unrestricted("slot2");
-            }
+                // Check in grabbing secondary weapon
+                float hmdToControllerLegHolsterDist = m_PlayerHeightInMeters * 22.5f;
+                float hmdToControllerLegHolsterDistOffset = 5.0f;
+                float hmdToControllerLegMaxZDist = m_PlayerHeightInMeters * 21.5f;
+                float hmdToControllerLegMaxZDistOffset = 5.0f;
 
-            // Check if grabbing Medkit
-            float hmdToControllerBackDist = m_PlayerHeightInMeters * 11.9f;
-            float hmdToControllerBackDistOffset = 5.0f;
+                if (hmdToControllerWorldLength >= (hmdToControllerLegHolsterDist - hmdToControllerLegHolsterDistOffset)
+                    && hmdToControllerWorldLength <= (hmdToControllerLegHolsterDist + hmdToControllerLegHolsterDistOffset)
+                    && dotProduct_hmdToControllerWorld2DNorm_HmdRight >= 0.8f
+                    && hmdToControllerWorldZDist >= (hmdToControllerLegMaxZDist - hmdToControllerLegMaxZDistOffset)
+                    && hmdToControllerWorldZDist <= (hmdToControllerLegMaxZDist + hmdToControllerLegMaxZDistOffset))
+                {
+                    if (weaponId == (int)weapon->MELEE || weaponId == (int)weapon->PISTOL
+                        || weaponId == (int)weapon->MAGNUM || weaponId == (int)weapon->CHAINSAW)
+                    {
+                        m_Game->ClientCmd_Unrestricted("slot1");
+                    }
+                    else
+                    {
+                        m_Game->ClientCmd_Unrestricted("slot2");
+                    }
+                }
 
-            if (dotProduct_hmdToControllerWorld2DNorm_HmdForward < -0.9f
-                && hmdToControllerWorldZDist >= (hmdToControllerBackDist - hmdToControllerBackDistOffset)
-                && hmdToControllerWorldZDist <= (hmdToControllerBackDist + hmdToControllerBackDistOffset))
-            {
-                m_Game->ClientCmd_Unrestricted("slot4");
+                // Check if grabbing Medkit
+                float hmdToControllerBackDist = m_PlayerHeightInMeters * 11.9f;
+                float hmdToControllerBackDistOffset = 5.0f;
+
+                if (dotProduct_hmdToControllerWorld2DNorm_HmdForward < -0.9f
+                    && hmdToControllerWorldZDist >= (hmdToControllerBackDist - hmdToControllerBackDistOffset)
+                    && hmdToControllerWorldZDist <= (hmdToControllerBackDist + hmdToControllerBackDistOffset))
+                {
+                    m_Game->ClientCmd_Unrestricted("slot4");
+                }
+
+                isPressingRightGrab = true;
             }
         }
+        else 
+        {
+            isPressingRightGrab = false;
+        }
+        
         if (PressedDigitalAction(m_LeftHandGrab))
         {
             // Check if holding weapon with 2 hands
@@ -1208,81 +1302,106 @@ void VR::UpdateTracking()
                     isHoldingWeapon2Handed = true;
                 }
 
-                //Vector pivotUp;
-                //Vector rightTemp = m_RightControllerUp;
-                //CrossProduct(forwardTemp, handsDistanceLocalInWorldNormalized, pivotForward);
-                //VectorNormalize(pivotForward);
+                // Change forward vector to angle towards Hands Distance vector
+              /*  Vector pivotUp;
+                CrossProduct(m_RightControllerUp, handsDistanceLocalInWorldNormalized, pivotUp);
+                VectorNormalize(pivotUp);
+
+                rightControllerUp_2handAdjust = VectorRotate(m_RightControllerUp, pivotUp, rightControllerForward_HandsDistLocalWorld_Angle);*/
 
                 // Change forward vector to angle towards Hands Distance vector
                 Vector pivotForward;
-                Vector forwardTemp = m_RightControllerForward - (m_RightControllerForward * 0.2);
-                CrossProduct(forwardTemp, handsDistanceLocalInWorldNormalized, pivotForward);
+                CrossProduct(m_RightControllerForward, handsDistanceLocalInWorldNormalized, pivotForward);
                 VectorNormalize(pivotForward);
 
                 rightControllerForward_2handAdjust = VectorRotate(m_RightControllerForward, pivotForward, rightControllerForward_HandsDistLocalWorld_Angle);
+
+                QAngle::AngleVectors(hmdAngLocal, &m_HmdForward, &m_HmdRight, &m_HmdUp);
             }
 
             // Check if reloading
-            float maxNandsDistanceToReload = 10.0f;
+            float maxHandsDistanceToReload = 15.0f;
 
-            if (isHoldingWeapon2Handed == false 
+            if (isHoldingWeapon2Handed == false
                 && dotProduct_RightControllerUp_HandsDistLocalWorld <= -0.9f
-                && handsDistanceLocalInWorldLength <= maxNandsDistanceToReload)
+                && handsDistanceLocalInWorldLength <= maxHandsDistanceToReload)
             {
                 isReloading = true; // Change value here so that next time it executes "ProcessInput", will perform reload action.
             }
 
-            // Check if grabbing Bomb
-            float hmdToControllerLeftShoulderMaxZDist = 8.0f;
-            float hmdToControllerLeftShoulderDist = 14.0f;
-            float hmdToControllerLeftShoulderDistOffset = 2.0f;
-
-            if (isHoldingWeapon2Handed == false 
-                && hmdToControllerWorldLeftLength >= (hmdToControllerLeftShoulderDist - hmdToControllerLeftShoulderDistOffset)
-                && hmdToControllerWorldLeftLength <= (hmdToControllerLeftShoulderDist + hmdToControllerLeftShoulderDistOffset)
-                && dotProduct_hmdToControllerWorldLeft2DNorm_HmdRight <= -0.4f
-                //&& dotProduct_hmdToControllerWorldLeft2DNorm_HmdForward <= -0.7f
-                && hmdToControllerWorldLeftZDist <= hmdToControllerLeftShoulderMaxZDist)
+            if (isHoldingWeapon2Handed == false && isPressingLeftGrab == false)
             {
-                m_Game->ClientCmd_Unrestricted("slot3");
-            }
+                // Check if grabbing Bomb
+                float hmdToControllerLeftShoulderMaxZDist = 8.0f;
+                float hmdToControllerLeftShoulderDist = 14.0f;
+                float hmdToControllerLeftShoulderDistOffset = 2.0f;
 
-            // Check if grabbing Pills / Adrenaline
-            float hmdToControllerLeftLegHolsterDist = m_PlayerHeightInMeters * 22.5f;
-            float hmdToControllerLeftLegHolsterDistOffset = 5.0f;
-            float hmdToControllerLeftLegMaxZDist = m_PlayerHeightInMeters * 21.5f;
-            float hmdToControllerLeftLegMaxZDistOffset = 5.0f;
+                if (isHoldingWeapon2Handed == false
+                    && hmdToControllerWorldLeftLength >= (hmdToControllerLeftShoulderDist - hmdToControllerLeftShoulderDistOffset)
+                    && hmdToControllerWorldLeftLength <= (hmdToControllerLeftShoulderDist + hmdToControllerLeftShoulderDistOffset)
+                    && dotProduct_hmdToControllerWorldLeft2DNorm_HmdRight <= -0.4f
+                    //&& dotProduct_hmdToControllerWorldLeft2DNorm_HmdForward <= -0.7f
+                    && hmdToControllerWorldLeftZDist <= hmdToControllerLeftShoulderMaxZDist)
+                {
+                    if (weaponId == (int)weapon->PIPE_BOMB || weaponId == (int)weapon->VOMITJAR || weaponId == (int)weapon->MOLOTOV)
+                    {
+                        m_Game->ClientCmd_Unrestricted("slot5");
+                    }
+                    else
+                    {
+                        m_Game->ClientCmd_Unrestricted("slot3");
+                    }
+                }
 
-            if (isHoldingWeapon2Handed == false 
-                && hmdToControllerWorldLeftLength >= (hmdToControllerLeftLegHolsterDist - hmdToControllerLeftLegHolsterDistOffset)
-                && hmdToControllerWorldLeftLength <= (hmdToControllerLeftLegHolsterDist + hmdToControllerLeftLegHolsterDistOffset)
-                && dotProduct_hmdToControllerWorldLeft2DNorm_HmdRight <= -0.8f
-                && hmdToControllerWorldLeftZDist >= (hmdToControllerLeftLegMaxZDist - hmdToControllerLeftLegMaxZDistOffset)
-                && hmdToControllerWorldLeftZDist <= (hmdToControllerLeftLegMaxZDist + hmdToControllerLeftLegMaxZDistOffset))
-            {
-                m_Game->ClientCmd_Unrestricted("slot5");
-            }
+                // Check if grabbing Pills / Adrenaline
+                float hmdToControllerLeftLegHolsterDist = m_PlayerHeightInMeters * 22.5f;
+                float hmdToControllerLeftLegHolsterDistOffset = 5.0f;
+                float hmdToControllerLeftLegMaxZDist = m_PlayerHeightInMeters * 21.5f;
+                float hmdToControllerLeftLegMaxZDistOffset = 5.0f;
 
-            // Check if grabbing Medkit
-            float hmdToControllerLeftBackDist = m_PlayerHeightInMeters * 11.9f; // 0.5f
-            float hmdToControllerLeftBackDistOffset = 5.0f;
+                if (isHoldingWeapon2Handed == false
+                    && hmdToControllerWorldLeftLength >= (hmdToControllerLeftLegHolsterDist - hmdToControllerLeftLegHolsterDistOffset)
+                    && hmdToControllerWorldLeftLength <= (hmdToControllerLeftLegHolsterDist + hmdToControllerLeftLegHolsterDistOffset)
+                    && dotProduct_hmdToControllerWorldLeft2DNorm_HmdRight <= -0.8f
+                    && hmdToControllerWorldLeftZDist >= (hmdToControllerLeftLegMaxZDist - hmdToControllerLeftLegMaxZDistOffset)
+                    && hmdToControllerWorldLeftZDist <= (hmdToControllerLeftLegMaxZDist + hmdToControllerLeftLegMaxZDistOffset))
+                {
+                    if (weaponId == (int)weapon->PAIN_PILLS || weaponId == (int)weapon->ADRENALINE)
+                    {
+                        m_Game->ClientCmd_Unrestricted("slot3");
+                    }
+                    else
+                    {
+                        m_Game->ClientCmd_Unrestricted("slot5");
+                    }
+                }
 
-            if (isHoldingWeapon2Handed == false 
-                && dotProduct_hmdToControllerWorldLeft2DNorm_HmdForward < -0.9f
-                && hmdToControllerWorldLeftZDist >= (hmdToControllerLeftBackDist - hmdToControllerLeftBackDistOffset)
-                && hmdToControllerWorldLeftZDist <= (hmdToControllerLeftBackDist + hmdToControllerLeftBackDistOffset))
-            {
-                m_Game->ClientCmd_Unrestricted("slot4");
+                // Check if grabbing Medkit
+                float hmdToControllerLeftBackDist = m_PlayerHeightInMeters * 11.9f; // 0.5f
+                float hmdToControllerLeftBackDistOffset = 5.0f;
+
+                if (isHoldingWeapon2Handed == false
+                    && dotProduct_hmdToControllerWorldLeft2DNorm_HmdForward < -0.9f
+                    && hmdToControllerWorldLeftZDist >= (hmdToControllerLeftBackDist - hmdToControllerLeftBackDistOffset)
+                    && hmdToControllerWorldLeftZDist <= (hmdToControllerLeftBackDist + hmdToControllerLeftBackDistOffset))
+                {
+                    m_Game->ClientCmd_Unrestricted("slot4");
+                }
+
+                isPressingLeftGrab = true;
             }
         }
         else
         {
             isHoldingWeapon2Handed = false;
+            isPressingLeftGrab = false;
         }
     }
     else
     {
         isHoldingWeapon2Handed = false;
+        isPressingRightGrab = false;
+        isPressingLeftGrab = false;
         temp = false;
     }
 
@@ -1380,9 +1499,12 @@ void VR::ParseConfigFile()
     m_HudSize = std::stof(userConfig["HudSize"]);
     m_HudAlwaysVisible = userConfig["HudAlwaysVisible"] == "true";
     m_ControllerAngleAdjustment = std::stof(userConfig["ControllerAngleAdjustment"]);
+    m_WeaponHorizontalPositionAdjustment = std::stof(userConfig["WeaponHorizontalPositionAdjustment"]);
     m_IsTrackingManualPush = userConfig["IsTrackingManualPush"] == "true";
     m_MeleeSwingVelocityRequired = std::stof(userConfig["MeleeSwingVelocityRequired"]);
     m_PlayerHeightInMeters = std::stof(userConfig["PlayerHeightInMeters"]);
+    m_ActivateCrouchPhisically = userConfig["ActivateCrouchPhisically"] == "true";
+    m_UseCrouchButtonAsToggle = userConfig["UseCrouchButtonAsToggle"] == "true";
 }
 
 void VR::WaitForConfigUpdate()
