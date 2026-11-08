@@ -53,6 +53,8 @@ public:
     Offset FlashlightAttachToViewmodel = { "client.dll", 0x260774, "8B 0D ? ? ? ? 83 79 30 00 0F 84 ? ? ? ? 6A 00 8B CF E8", 2 };
     // "lea eax, [ebp-0x1F0]" (viewmodel attachment angles passed to AngleVectors) inside the first person laser sight update of C_TerrorPlayer
     Offset LaserSightAttachmentAngles =  { "client.dll", 0x25E143, "8D 85 F8 FD FF FF 50 8D 8D E0 FD FF FF 51 8D 95 FC FE FF FF 52 8D 85 10 FE FF FF 50 E8", 0x15 };
+    // C_BasePlayer::GetViewModel(int index), resolves m_hViewModel[index]
+    Offset GetViewModel =                { "client.dll", 0x67330, "55 8B EC 8B 45 08 53 57 8B F9 8B 84 87 ? ? ? ? 83 F8 FF 74 ? 8B 15 ? ? ? ? 8B C8 81 E1 FF 0F 00 00" };
     // FormatViewModelAttachment(C_BasePlayer *player, Vector &origin, bool inverse), converts points between the viewmodel FOV and the world FOV
     Offset FormatViewModelAttachment =   { "client.dll", 0x6A8B0, "55 8B EC 8B 45 08 83 EC 28 53 56 57 33 FF 85 C0 74 ? 50 E8 ? ? ? ? 83 C4 04 83 F8 FF 75 ? 8B 0D ? ? ? ? 8B 01 8B 90 F8 01 00 00 FF D2 8B F8 8B 0D ? ? ? ? 8B 01 8B 50 30 57 FF D2 8B F0 D9 46 34" };
 

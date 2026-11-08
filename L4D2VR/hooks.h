@@ -159,4 +159,6 @@ public:
 
 	static inline int m_PushHUDStep;
 	static inline bool m_PushedHud;
+	// True while dRenderView renders the scope view (no HUD, and no HUD render target redirection)
+	static inline bool m_RenderingScope = false;
 };

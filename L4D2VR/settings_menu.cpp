@@ -411,6 +411,19 @@ void SettingsMenu::DrawMenu()
 			ImGui::EndTabItem();
 		}
 
+		if (ImGui::BeginTabItem("Scope"))
+		{
+			ImGui::BeginChild("Page", ImVec2(0.0f, -footerHeight));
+			DrawCheckbox("Working scope", "Shows a magnified view in the scope of the sniper rifles when you look through it. Renders the game one more time while you aim, which costs performance.", settings.m_ScopeEnabled);
+
+			ImGui::BeginDisabled(!settings.m_ScopeEnabled);
+			DrawSlider("Magnification", "Zoom of the scope.", settings.m_ScopeMagnification, 1.5f, 10.0f, 0.5f, "%.1fx");
+			DrawCheckbox("Debug: always show", "Shows the scope image whenever a sniper rifle is held, even when not looking through it, and writes what the scope is doing to VR\\scope_debug.txt.", settings.m_ScopeDebug);
+			ImGui::EndDisabled();
+			ImGui::EndChild();
+			ImGui::EndTabItem();
+		}
+
 		if (ImGui::BeginTabItem("HUD"))
 		{
 			ImGui::BeginChild("Page", ImVec2(0.0f, -footerHeight));

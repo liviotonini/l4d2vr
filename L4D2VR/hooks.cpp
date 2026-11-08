@@ -169,6 +169,36 @@ void __fastcall Hooks::dRenderView(void *ecx, void *edx, CViewSetup &setup, CVie
 
 	IMatRenderContext *rndrContext = m_Game->m_MaterialSystem->GetRenderContext();
 
+	// Scope view of the sniper rifles. Rendered before the eyes so the last view rendered in the frame is still an eye.
+	if (m_VR->UpdateScope())
+	{
+		CViewSetup scopeView = setup;
+		scopeView.x = 0;
+		scopeView.y = 0;
+		scopeView.width = VR::kScopeTextureSize;
+		scopeView.height = VR::kScopeTextureSize;
+		scopeView.m_nUnscaledX = 0;
+		scopeView.m_nUnscaledY = 0;
+		scopeView.m_nUnscaledWidth = VR::kScopeTextureSize;
+		scopeView.m_nUnscaledHeight = VR::kScopeTextureSize;
+		scopeView.fov = m_VR->m_ScopeFov;
+		scopeView.fovViewmodel = m_VR->m_ScopeFov;
+		scopeView.m_flAspectRatio = 1.0f;
+		scopeView.zNear = 6;
+		scopeView.zNearViewmodel = 6;
+		scopeView.origin = m_VR->m_ScopeCameraPos;
+		scopeView.angles = Vector(m_VR->m_ScopeCameraAng.x, m_VR->m_ScopeCameraAng.y, m_VR->m_ScopeCameraAng.z);
+
+		constexpr int kRenderViewDrawViewModel = 1 << 0; // RENDERVIEW_DRAWVIEWMODEL
+
+		m_RenderingScope = true;
+		rndrContext->SetRenderTarget(m_VR->m_ScopeTexture);
+		hkRenderView.fOriginal(ecx, scopeView, hudViewSetup, nClearFlags, whatToDraw & ~kRenderViewDrawViewModel);
+		m_RenderingScope = false;
+
+		m_VR->m_ScopeRendered = true;
+	}
+
 	CViewSetup leftEyeView = setup;
 	CViewSetup rightEyeView = setup;
 
@@ -570,7 +600,7 @@ void Hooks::dDrawModelExecute(void *ecx, void *edx, void *state, const ModelRend
 
 void Hooks::dPushRenderTargetAndViewport(void *ecx, void *edx, ITexture *pTexture, ITexture *pDepthTexture, int nViewX, int nViewY, int nViewW, int nViewH)
 {
-	if (!m_VR->m_CreatedVRTextures)
+	if (!m_VR->m_CreatedVRTextures || m_RenderingScope)
 		return hkPushRenderTargetAndViewport.fOriginal(ecx, pTexture, pDepthTexture, nViewX, nViewY, nViewW, nViewH);
 
 	if (m_PushHUDStep == 2)
@@ -605,7 +635,7 @@ void Hooks::dPushRenderTargetAndViewport(void *ecx, void *edx, ITexture *pTextur
 
 void Hooks::dPopRenderTargetAndViewport(void *ecx, void *edx)
 {
-	if (!m_VR->m_CreatedVRTextures)
+	if (!m_VR->m_CreatedVRTextures || m_RenderingScope)
 		return hkPopRenderTargetAndViewport.fOriginal(ecx);
 
 	m_PushHUDStep = 0;
@@ -624,6 +654,10 @@ void Hooks::dVGui_Paint(void *ecx, void *edx, int mode)
 	if (!m_VR->m_CreatedVRTextures)
 		return hkVgui_Paint.fOriginal(ecx, mode);
 
+	// No HUD in the scope view
+	if (m_RenderingScope)
+		return;
+
 	if (m_PushedHud)
 		mode = PAINT_UIPANELS | PAINT_INGAMEPANELS;
 
@@ -632,6 +666,9 @@ void Hooks::dVGui_Paint(void *ecx, void *edx, int mode)
 
 int Hooks::dIsSplitScreen()
 {
+	if (m_RenderingScope)
+		return hkIsSplitScreen.fOriginal();
+
 	if (m_PushHUDStep == 0)
 		++m_PushHUDStep;
 	else
@@ -642,6 +679,9 @@ int Hooks::dIsSplitScreen()
 
 DWORD *Hooks::dPrePushRenderTarget(void *ecx, void *edx, int a2)
 {
+	if (m_RenderingScope)
+		return hkPrePushRenderTarget.fOriginal(ecx, a2);
+
 	if (m_PushHUDStep == 1)
 		++m_PushHUDStep;
 	else

@@ -13,6 +13,7 @@
 #include <thread>
 #include <algorithm>
 #include <vector>
+#include <cstdarg>
 #include <d3d9_vr.h>
 #include "settings_menu.h"
 
@@ -95,6 +96,8 @@ VR::VR(Game *game)
 
     const vr::HmdVector2_t mouseScaleMenu = {m_RenderWidth, m_RenderHeight};
     m_Overlay->SetOverlayMouseScale(m_MainMenuHandle, &mouseScaleMenu);
+
+    CreateScopeOverlays();
 
     UpdatePosesAndActions();
 
@@ -213,7 +216,10 @@ void VR::CreateVRTextures()
     
     m_CreatingTextureID = Texture_Blank;
     m_BlankTexture = m_Game->m_MaterialSystem->CreateNamedRenderTargetTextureEx("blankTexture", 512, 512, RT_SIZE_NO_CHANGE, m_Game->m_MaterialSystem->GetBackBufferFormat(), MATERIAL_RT_DEPTH_SHARED, TEXTUREFLAGS_NOMIP);
-    
+
+    m_CreatingTextureID = Texture_Scope;
+    m_ScopeTexture = m_Game->m_MaterialSystem->CreateNamedRenderTargetTextureEx("vrScope", kScopeTextureSize, kScopeTextureSize, RT_SIZE_NO_CHANGE, m_Game->m_MaterialSystem->GetBackBufferFormat(), MATERIAL_RT_DEPTH_SHARED, TEXTUREFLAGS_NOMIP);
+
     m_CreatingTextureID = Texture_None;
 
     m_Game->m_MaterialSystem->EndRenderTargetAllocation();
@@ -234,6 +240,7 @@ void VR::SubmitVRTextures()
         vr::VROverlay()->SetOverlayTexture(m_MainMenuHandle, &m_VKBackBuffer.m_VRTexture);
         vr::VROverlay()->ShowOverlay(m_MainMenuHandle);
         vr::VROverlay()->HideOverlay(m_HUDHandle);
+        HideScopeOverlays();
 
         if (!m_Game->m_EngineClient->IsInGame())
         {
@@ -252,6 +259,8 @@ void VR::SubmitVRTextures()
         // We're in the pause menu
         vr::VROverlay()->ShowOverlay(m_HUDHandle);
     }
+
+    SubmitScopeOverlays();
 
     vr::VRCompositor()->Submit(vr::Eye_Left, &m_VKLeftEye.m_VRTexture, &(m_TextureBounds)[0], vr::Submit_Default);
     vr::VRCompositor()->Submit(vr::Eye_Right, &m_VKRightEye.m_VRTexture, &(m_TextureBounds)[1], vr::Submit_Default);
@@ -370,6 +379,8 @@ void VR::GetPoses()
 
     if (m_LeftHanded)
         std::swap(leftControllerIndex, rightControllerIndex);
+
+    m_RightControllerDeviceIndex = rightControllerIndex;
 
     vr::TrackedDevicePose_t leftControllerPose = m_Poses[leftControllerIndex];
     vr::TrackedDevicePose_t rightControllerPose = m_Poses[rightControllerIndex];
@@ -1099,6 +1110,339 @@ void VR::PatchLaserSight()
     PatchCodeBytes(blendCompareAddress, blendPatch, sizeof(blendPatch));
 }
 
+// ---------------------------------------------------------------------------------------------------------------
+// Scope
+//
+// The game's scope is only a 2D HUD overlay (black in VR), so the sniper rifles get a "render to texture" scope:
+// while an eye is behind the eyepiece, Hooks::dRenderView renders the game a third time from the scope with a
+// narrow field of view into m_ScopeTexture. The texture is shown on an overlay placed at the eyepiece of the
+// weapon model, with a second overlay on top (black ring + reticle) that makes it round.
+// The overlays are positioned relative to the controller, so SteamVR keeps them on the weapon.
+// ---------------------------------------------------------------------------------------------------------------
+
+namespace
+{
+    struct ScopeInfo
+    {
+        int weaponId;
+        // Center of the eyepiece in the frame of the viewmodel's "flashlight" attachment (forward, left, up),
+        // measured from the models (models/v_models/v_huntingrifle, v_sniper_military, v_snip_awp, v_snip_scout)
+        Vector eyepiece;
+        // Radius of the visible image, game units
+        float radius;
+    };
+
+    const ScopeInfo kScopes[] =
+    {
+        { C_WeaponCSBase::HUNTING_RIFLE,   { -13.5f,  1.28f,  2.14f }, 0.95f },
+        { C_WeaponCSBase::SNIPER_MILITARY, { -31.0f,  5.79f,  0.0f  }, 0.80f },
+        { C_WeaponCSBase::AWP,             { -21.05f, 3.81f, -1.17f }, 1.30f },
+        { C_WeaponCSBase::SCOUT,           { -18.0f,  3.43f,  0.02f }, 0.90f },
+    };
+
+    // Field of view seen through the eyepiece at 1x magnification
+    constexpr float kScopeReferenceFov = 40.0f;
+
+    // The scope image fades in when an eye gets behind the eyepiece and roughly in line with it
+    constexpr float kScopeFadeStartDistance = 0.30f; // meters
+    constexpr float kScopeFullDistance = 0.20f;
+    constexpr float kScopeFadeStartAngle = 25.0f;    // degrees off the scope axis
+    constexpr float kScopeFullAngle = 12.0f;
+
+    // The mask overlay is bigger than the image so its black ring covers the corners of the square image
+    constexpr float kScopeMaskScale = 1.4142f;
+    constexpr int kScopeMaskSize = 512;
+
+    float SmoothStep(float edge0, float edge1, float x)
+    {
+        float t = std::clamp((x - edge0) / (edge1 - edge0), 0.0f, 1.0f);
+        return t * t * (3.0f - 2.0f * t);
+    }
+
+    const ScopeInfo *FindScope(int weaponId)
+    {
+        for (const ScopeInfo &scope : kScopes)
+        {
+            if (scope.weaponId == weaponId)
+                return &scope;
+        }
+        return nullptr;
+    }
+
+    // ScopeDebug: appends a line to VR\scope_debug.txt, at most once per second for each caller
+    ULONGLONG g_ScopeUpdateDebugTime = 0;
+    ULONGLONG g_ScopeSubmitDebugTime = 0;
+
+    void WriteScopeDebug(ULONGLONG &lastWrite, const char *format, ...)
+    {
+        ULONGLONG now = GetTickCount64();
+        if (now - lastWrite < 1000)
+            return;
+        lastWrite = now;
+
+        char line[1024];
+        va_list args;
+        va_start(args, format);
+        vsnprintf(line, sizeof(line), format, args);
+        va_end(args);
+
+        std::ofstream file("VR\\scope_debug.txt", std::ios::app);
+        file << now / 1000 << "s " << line << "\n";
+    }
+
+    // Black ring around the image and a duplex reticle, transparent everywhere else
+    std::vector<uint8_t> CreateScopeMask()
+    {
+        std::vector<uint8_t> pixels(kScopeMaskSize * kScopeMaskSize * 4, 0);
+
+        const float halfSize = kScopeMaskSize * 0.5f;
+        const float pixelSize = 1.0f / halfSize;            // one pixel, in units of the mask radius
+        const float imageRadius = 1.0f / kScopeMaskScale;   // edge of the visible image
+        const float vignette = 0.08f;                       // soft darkening at the edge of the image
+        const float thinLine = 0.006f;                      // reticle half widths, in units of the image radius
+        const float thickLine = 0.025f;
+        const float thickStart = 0.45f;                     // the thick posts start at 45% of the radius
+
+        for (int y = 0; y < kScopeMaskSize; ++y)
+        {
+            for (int x = 0; x < kScopeMaskSize; ++x)
+            {
+                float nx = (x + 0.5f - halfSize) / halfSize;
+                float ny = (y + 0.5f - halfSize) / halfSize;
+                float r = sqrtf(nx * nx + ny * ny);
+
+                float ring = std::clamp((1.0f - r) / pixelSize, 0.0f, 1.0f)
+                    * std::clamp((r - (imageRadius - vignette)) / vignette, 0.0f, 1.0f);
+
+                float reticle = 0.0f;
+                if (r < imageRadius)
+                {
+                    float ax = fabsf(nx) / imageRadius;
+                    float ay = fabsf(ny) / imageRadius;
+                    float linePixel = pixelSize / imageRadius;
+                    float horizontalHalf = ax > thickStart ? thickLine : thinLine;
+                    float verticalHalf = ay > thickStart ? thickLine : thinLine;
+                    float horizontal = std::clamp((horizontalHalf - ay) / linePixel + 0.5f, 0.0f, 1.0f);
+                    float vertical = std::clamp((verticalHalf - ax) / linePixel + 0.5f, 0.0f, 1.0f);
+                    reticle = std::max(horizontal, vertical) * 0.9f;
+                }
+
+                pixels[(y * kScopeMaskSize + x) * 4 + 3] = (uint8_t)(std::max(ring, reticle) * 255.0f + 0.5f);
+            }
+        }
+        return pixels;
+    }
+}
+
+void VR::CreateScopeOverlays()
+{
+    vr::EVROverlayError imageError = m_Overlay->CreateOverlay("ScopeOverlayKey", "ScopeOverlay", &m_ScopeHandle);
+    if (imageError != vr::VROverlayError_None)
+        m_ScopeHandle = vr::k_ulOverlayHandleInvalid;
+    vr::EVROverlayError maskError = m_Overlay->CreateOverlay("ScopeMaskOverlayKey", "ScopeMaskOverlay", &m_ScopeMaskHandle);
+    if (maskError != vr::VROverlayError_None)
+        m_ScopeMaskHandle = vr::k_ulOverlayHandleInvalid;
+    m_ScopeOverlayCreateError = imageError != vr::VROverlayError_None ? imageError : maskError;
+
+    if (m_ScopeHandle == vr::k_ulOverlayHandleInvalid || m_ScopeMaskHandle == vr::k_ulOverlayHandleInvalid)
+    {
+        if (m_ScopeHandle != vr::k_ulOverlayHandleInvalid)
+            m_Overlay->DestroyOverlay(m_ScopeHandle);
+        if (m_ScopeMaskHandle != vr::k_ulOverlayHandleInvalid)
+            m_Overlay->DestroyOverlay(m_ScopeMaskHandle);
+        m_ScopeHandle = vr::k_ulOverlayHandleInvalid;
+        m_ScopeMaskHandle = vr::k_ulOverlayHandleInvalid;
+        return;
+    }
+
+    m_Overlay->SetOverlaySortOrder(m_ScopeHandle, 1);
+    m_Overlay->SetOverlaySortOrder(m_ScopeMaskHandle, 2);
+
+    std::vector<uint8_t> mask = CreateScopeMask();
+    m_Overlay->SetOverlayRaw(m_ScopeMaskHandle, mask.data(), kScopeMaskSize, kScopeMaskSize, 4);
+}
+
+// Called by Hooks::dRenderView before the eyes are rendered. Returns true if the scope view must be rendered this frame.
+bool VR::UpdateScope()
+{
+    m_ScopeAlpha = 0.0f;
+
+    auto skip = [this](const char *reason)
+    {
+        if (m_ScopeDebug)
+            WriteScopeDebug(g_ScopeUpdateDebugTime, "update: not rendered, %s (weapon id %d)", reason, m_ActiveWeaponId);
+        return false;
+    };
+
+    if (!m_IsVREnabled || !m_ScopeEnabled)
+        return skip("VR or ScopeEnabled is off");
+    if (!m_ScopeTexture)
+        return skip("the scope render target wasn't created");
+    if (m_ScopeHandle == vr::k_ulOverlayHandleInvalid)
+    {
+        if (m_ScopeDebug)
+            WriteScopeDebug(g_ScopeUpdateDebugTime, "update: not rendered, creating the overlays failed (error %d)", m_ScopeOverlayCreateError);
+        return false;
+    }
+    if (m_RightControllerDeviceIndex == vr::k_unTrackedDeviceIndexInvalid)
+        return skip("no right controller");
+
+    const ScopeInfo *scope = FindScope(m_ActiveWeaponId);
+    if (!scope)
+        return skip("this weapon has no scope");
+
+    uintptr_t getViewModelAddress = m_Game->m_Offsets->GetViewModel.address;
+    if (!getViewModelAddress)
+        return skip("GetViewModel signature not found");
+
+    C_BasePlayer *localPlayer = (C_BasePlayer *)m_Game->GetClientEntity(m_Game->m_EngineClient->GetLocalPlayer());
+    if (!localPlayer)
+        return skip("no local player");
+
+    typedef void *(__thiscall *tGetViewModel)(void *player, int index);
+    void *viewModel = ((tGetViewModel)getViewModelAddress)(localPlayer, 0);
+    if (!viewModel)
+        return skip("no viewmodel");
+
+    // Same calls the game makes for the laser sight: IClientRenderable::LookupAttachment and GetAttachment of the viewmodel
+    void *renderable = (uint8_t *)viewModel + 4;
+    void **renderableVtable = *(void ***)renderable;
+    typedef int(__thiscall *tLookupAttachment)(void *renderable, const char *name);
+    typedef bool(__thiscall *tGetAttachment)(void *renderable, int number, Vector &origin, QAngle &angles);
+
+    int attachment = ((tLookupAttachment)renderableVtable[0x84 / 4])(renderable, "flashlight");
+    if (attachment <= 0)
+        return skip("the viewmodel has no flashlight attachment");
+
+    Vector attachmentOrigin;
+    QAngle attachmentAngles;
+    if (!((tGetAttachment)renderableVtable[0x8C / 4])(renderable, attachment, attachmentOrigin, attachmentAngles))
+        return skip("GetAttachment failed");
+
+    Vector attachmentForward, attachmentRight, attachmentUp;
+    QAngle::AngleVectors(attachmentAngles, &attachmentForward, &attachmentRight, &attachmentUp);
+
+    Vector eyepiece = attachmentOrigin + attachmentForward * scope->eyepiece.x - attachmentRight * scope->eyepiece.y + attachmentUp * scope->eyepiece.z;
+
+    // The scope looks where the bullets go
+    Vector scopeForward, scopeRight, scopeUp;
+    QAngle::AngleVectors(m_RightControllerAngAbs, &scopeForward, &scopeRight, &scopeUp);
+
+    // Only show (and render) the scope while an eye is behind the eyepiece
+    const Vector eyes[2] = { GetViewOriginLeft(), GetViewOriginRight() };
+    float alpha = 0.0f;
+    float eyeBehind[2], eyeOffAxis[2], eyeAngle[2]; // meters, meters, degrees (only for ScopeDebug)
+    for (int i = 0; i < 2; ++i)
+    {
+        Vector toEye = eyes[i] - eyepiece;
+        float behind = -DotProduct(toEye, scopeForward);
+        Vector lateral = toEye + scopeForward * behind;
+        float angle = RAD2DEG(atan2f(VectorLength(lateral), behind)); // over 90 when the eye is in front of the eyepiece
+        float distance = behind / m_VRScale;
+
+        eyeBehind[i] = distance;
+        eyeOffAxis[i] = VectorLength(lateral) / m_VRScale;
+        eyeAngle[i] = angle;
+
+        if (behind <= 0.0f)
+            continue;
+
+        float eyeAlpha = SmoothStep(kScopeFadeStartDistance, kScopeFullDistance, distance) * SmoothStep(kScopeFadeStartAngle, kScopeFullAngle, angle);
+        alpha = std::max(alpha, eyeAlpha);
+    }
+
+    float alignmentAlpha = alpha;
+    if (m_ScopeDebug)
+        alpha = 1.0f;
+
+    // Overlay transform relative to the (real) right controller, in its OpenVR frame (x right, y up, z back), meters
+    auto toController = [this](const Vector &v)
+    {
+        return Vector(DotProduct(v, m_RightControllerRightRaw), DotProduct(v, m_RightControllerUpRaw), -DotProduct(v, m_RightControllerForwardRaw));
+    };
+
+    Vector position = toController(eyepiece - m_RightControllerPosAbsRaw) * (1.0f / m_VRScale);
+    Vector axisX = toController(scopeRight);
+    Vector axisY = toController(scopeUp);
+    Vector axisZ = toController(scopeForward * -1.0f); // the overlay faces the eye
+
+    m_ScopeOverlayTransform =
+    {
+        axisX.x, axisY.x, axisZ.x, position.x,
+        axisX.y, axisY.y, axisZ.y, position.y,
+        axisX.z, axisY.z, axisZ.z, position.z
+    };
+    m_ScopeOverlayWidth = 2.0f * scope->radius / m_VRScale;
+
+    if (m_ScopeDebug)
+    {
+        WriteScopeDebug(g_ScopeUpdateDebugTime,
+            "update: weapon id %d, attachment %d at (%.1f %.1f %.1f), eyepiece (%.1f %.1f %.1f), controller (%.1f %.1f %.1f), "
+            "left eye %.3f m behind %.3f m off axis %.0f deg, right eye %.3f m behind %.3f m off axis %.0f deg, alignment alpha %.2f, "
+            "overlay at (%.3f %.3f %.3f) m from the controller, width %.3f m",
+            m_ActiveWeaponId, attachment, attachmentOrigin.x, attachmentOrigin.y, attachmentOrigin.z,
+            eyepiece.x, eyepiece.y, eyepiece.z, m_RightControllerPosAbsRaw.x, m_RightControllerPosAbsRaw.y, m_RightControllerPosAbsRaw.z,
+            eyeBehind[0], eyeOffAxis[0], eyeAngle[0], eyeBehind[1], eyeOffAxis[1], eyeAngle[1], alignmentAlpha,
+            position.x, position.y, position.z, m_ScopeOverlayWidth);
+    }
+
+    if (alpha < 0.01f)
+        return false;
+
+    float magnification = std::max(m_ScopeMagnification, 1.0f);
+    m_ScopeFov = 2.0f * RAD2DEG(atanf(tanf(DEG2RAD(kScopeReferenceFov * 0.5f)) / magnification));
+    m_ScopeCameraPos = eyepiece;
+    m_ScopeCameraAng = m_RightControllerAngAbs;
+    m_ScopeAlpha = alpha;
+
+    return true;
+}
+
+void VR::SubmitScopeOverlays()
+{
+    if (m_ScopeHandle == vr::k_ulOverlayHandleInvalid)
+        return;
+
+    bool rendered = m_ScopeRendered;
+    m_ScopeRendered = false;
+
+    if (!rendered || m_ScopeAlpha < 0.01f || !m_VKScope.m_VRTexture.handle || m_RightControllerDeviceIndex == vr::k_unTrackedDeviceIndexInvalid)
+    {
+        if (m_ScopeDebug && rendered)
+            WriteScopeDebug(g_ScopeSubmitDebugTime, "submit: hidden, alpha %.2f, scope texture %s, controller device %u",
+                m_ScopeAlpha, m_VKScope.m_VRTexture.handle ? "ok" : "MISSING", m_RightControllerDeviceIndex);
+        HideScopeOverlays();
+        return;
+    }
+
+    // The mask sits half a millimeter in front of the image
+    vr::HmdMatrix34_t maskTransform = m_ScopeOverlayTransform;
+    for (int i = 0; i < 3; ++i)
+        maskTransform.m[i][3] += maskTransform.m[i][2] * 0.0005f;
+
+    vr::EVROverlayError textureError = m_Overlay->SetOverlayTexture(m_ScopeHandle, &m_VKScope.m_VRTexture);
+    m_Overlay->SetOverlayWidthInMeters(m_ScopeHandle, m_ScopeOverlayWidth);
+    m_Overlay->SetOverlayWidthInMeters(m_ScopeMaskHandle, m_ScopeOverlayWidth * kScopeMaskScale);
+    vr::EVROverlayError transformError = m_Overlay->SetOverlayTransformTrackedDeviceRelative(m_ScopeHandle, m_RightControllerDeviceIndex, &m_ScopeOverlayTransform);
+    m_Overlay->SetOverlayTransformTrackedDeviceRelative(m_ScopeMaskHandle, m_RightControllerDeviceIndex, &maskTransform);
+    m_Overlay->SetOverlayAlpha(m_ScopeHandle, m_ScopeAlpha);
+    m_Overlay->SetOverlayAlpha(m_ScopeMaskHandle, m_ScopeAlpha);
+    vr::EVROverlayError showError = m_Overlay->ShowOverlay(m_ScopeHandle);
+    m_Overlay->ShowOverlay(m_ScopeMaskHandle);
+
+    if (m_ScopeDebug)
+        WriteScopeDebug(g_ScopeSubmitDebugTime, "submit: shown, alpha %.2f, errors: texture %d, transform %d, show %d, visible %d, controller device %u",
+            m_ScopeAlpha, textureError, transformError, showError, m_Overlay->IsOverlayVisible(m_ScopeHandle), m_RightControllerDeviceIndex);
+}
+
+void VR::HideScopeOverlays()
+{
+    if (m_ScopeHandle != vr::k_ulOverlayHandleInvalid)
+        m_Overlay->HideOverlay(m_ScopeHandle);
+    if (m_ScopeMaskHandle != vr::k_ulOverlayHandleInvalid)
+        m_Overlay->HideOverlay(m_ScopeMaskHandle);
+}
+
 // L4D2 attaches the first person flashlight to the "flashlight" attachment of the viewmodel when
 // r_flashlight_attach_to_viewmodel is 1 (default). Since the viewmodel follows the controller, swinging
 // a melee weapon swings the light around too. When the ConVar is 0 (or while on a ladder) the game
@@ -1158,6 +1502,7 @@ void VR::UpdateTracking()
     }
 
     m_Game->m_IsMeleeWeaponActive = localPlayer->IsMeleeWeaponActive();
+    m_ActiveWeaponId = weaponId;
 
     UpdateFlashlightAttachment();
 
@@ -1292,7 +1637,12 @@ void VR::UpdateTracking()
     leftControllerAngLocal.y -= 360 * std::floor((leftControllerAngLocal.y + 180) / 360);
 
     QAngle::AngleVectors(leftControllerAngLocal, &m_LeftControllerForward, &m_LeftControllerRight, &m_LeftControllerUp);			
-    QAngle::AngleVectors(rightControllerAngLocal, &m_RightControllerForward, &m_RightControllerRight, &m_RightControllerUp);	
+    QAngle::AngleVectors(rightControllerAngLocal, &m_RightControllerForward, &m_RightControllerRight, &m_RightControllerUp);
+
+    m_RightControllerPosAbsRaw = m_RightControllerPosAbs;
+    m_RightControllerForwardRaw = m_RightControllerForward;
+    m_RightControllerRightRaw = m_RightControllerRight;
+    m_RightControllerUpRaw = m_RightControllerUp;
 
     // Adjust controller angle with value specified in config. (default 45 degrees downward.)
     m_LeftControllerForward = VectorRotate(m_LeftControllerForward, m_LeftControllerRight, m_ControllerAngleAdjustment);
@@ -1685,6 +2035,11 @@ void VR::ParseConfigFile()
     m_ActivateCrouchPhisically = userConfig["ActivateCrouchPhisically"] == "true";
     m_UseCrouchButtonAsToggle = userConfig["UseCrouchButtonAsToggle"] == "true";
     m_AttachFlashlightToHeadWhenMelee = userConfig["AttachFlashlightToHeadWhenMelee"] != "false"; // enabled if missing from config
+    m_ScopeEnabled = userConfig["ScopeEnabled"] != "false"; // enabled if missing from config
+
+    const std::string &scopeMagnification = userConfig["ScopeMagnification"];
+    m_ScopeMagnification = scopeMagnification.empty() ? 4.0f : std::clamp(std::stof(scopeMagnification), 1.0f, 20.0f);
+    m_ScopeDebug = userConfig["ScopeDebug"] == "true";
 }
 
 static std::string ConfigBoolString(bool value)
@@ -1737,6 +2092,9 @@ bool VR::SaveConfigFile()
         { "ActivateCrouchPhisically", ConfigBoolString(m_ActivateCrouchPhisically) },
         { "UseCrouchButtonAsToggle", ConfigBoolString(m_UseCrouchButtonAsToggle) },
         { "AttachFlashlightToHeadWhenMelee", ConfigBoolString(m_AttachFlashlightToHeadWhenMelee) },
+        { "ScopeEnabled", ConfigBoolString(m_ScopeEnabled) },
+        { "ScopeMagnification", ConfigFloatString(m_ScopeMagnification) },
+        { "ScopeDebug", ConfigBoolString(m_ScopeDebug) },
     };
 
     std::vector<std::string> lines;

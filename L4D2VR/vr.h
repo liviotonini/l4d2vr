@@ -91,9 +91,15 @@ public:
 	float m_HeightOffset = 0.0;
 	bool m_RoomscaleActive = false;
 
-	Vector m_LeftControllerPosAbs;											
+	Vector m_LeftControllerPosAbs;
 	QAngle m_LeftControllerAngAbs;
 	Vector m_RightControllerPosAbs;
+	// Right controller pose in the game world without the angle and horizontal position adjustments (the real controller)
+	Vector m_RightControllerPosAbsRaw = { 0,0,0 };
+	Vector m_RightControllerForwardRaw = { 1,0,0 };
+	Vector m_RightControllerRightRaw = { 0,-1,0 };
+	Vector m_RightControllerUpRaw = { 0,0,1 };
+	vr::TrackedDeviceIndex_t m_RightControllerDeviceIndex = vr::k_unTrackedDeviceIndexInvalid;
 	QAngle m_RightControllerAngAbs = { 0,0,0 }; // Weapon aim angles. Also read directly by the patched laser sight code in client.dll
 
 	Vector m_ViewmodelPosOffset;
@@ -110,24 +116,28 @@ public:
 		Texture_LeftEye,
 		Texture_RightEye,
 		Texture_HUD,
-		Texture_Blank
+		Texture_Blank,
+		Texture_Scope
 	};
 
 	ITexture *m_LeftEyeTexture;
 	ITexture *m_RightEyeTexture;
 	ITexture *m_HUDTexture;
 	ITexture *m_BlankTexture = nullptr;
+	ITexture *m_ScopeTexture = nullptr;
 
 	IDirect3DSurface9 *m_D9LeftEyeSurface;
 	IDirect3DSurface9 *m_D9RightEyeSurface;
 	IDirect3DSurface9 *m_D9HUDSurface;
 	IDirect3DSurface9 *m_D9BlankSurface;
+	IDirect3DSurface9 *m_D9ScopeSurface = nullptr;
 
 	SharedTextureHolder m_VKLeftEye;
 	SharedTextureHolder m_VKRightEye;
 	SharedTextureHolder m_VKBackBuffer;
 	SharedTextureHolder m_VKHUD;
 	SharedTextureHolder m_VKBlankTexture;
+	SharedTextureHolder m_VKScope;
 
 	bool m_IsVREnabled = false;
 	bool m_IsInitialized = false;
@@ -197,6 +207,27 @@ public:
 	bool m_ActivateCrouchPhisically = false;
 	bool m_UseCrouchButtonAsToggle = false;
 	bool m_AttachFlashlightToHeadWhenMelee = true;
+	bool m_ScopeEnabled = true;
+	float m_ScopeMagnification = 4.0f;
+	// Shows the scope whenever a sniper rifle is held (even when not looking through it) and writes its state
+	// to VR\scope_debug.txt once per second
+	bool m_ScopeDebug = false;
+
+	// Scope of the sniper rifles: the game's view is rendered again from the scope into m_ScopeTexture,
+	// which is shown on two overlays at the eyepiece (the image and a mask with the black ring and the reticle)
+	static constexpr int kScopeTextureSize = 768;
+	vr::VROverlayHandle_t m_ScopeHandle = vr::k_ulOverlayHandleInvalid;
+	vr::VROverlayHandle_t m_ScopeMaskHandle = vr::k_ulOverlayHandleInvalid;
+	int m_ScopeOverlayCreateError = 0;
+	int m_ActiveWeaponId = 0;
+	// Written by Hooks::dRenderView (UpdateScope), read by SubmitVRTextures
+	bool m_ScopeRendered = false;
+	float m_ScopeAlpha = 0.0f;
+	float m_ScopeOverlayWidth = 0.05f;
+	vr::HmdMatrix34_t m_ScopeOverlayTransform = {};
+	Vector m_ScopeCameraPos = { 0,0,0 };
+	QAngle m_ScopeCameraAng = { 0,0,0 };
+	float m_ScopeFov = 10.0f;
 
 	// r_flashlight_attach_to_viewmodel ConVar (found through FlashlightAttachToViewmodel offset)
 	ConVarData *m_FlashlightAttachConVar = nullptr;
@@ -251,6 +282,10 @@ public:
 	void UpdateTracking();
 	void UpdateFlashlightAttachment();
 	void PatchLaserSight();
+	void CreateScopeOverlays();
+	bool UpdateScope();
+	void SubmitScopeOverlays();
+	void HideScopeOverlays();
 	Vector GetViewAngle();
 	Vector GetViewOriginLeft();
 	Vector GetViewOriginRight();
