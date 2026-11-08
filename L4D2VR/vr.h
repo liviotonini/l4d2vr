@@ -3,6 +3,8 @@
 #include "vector.h"
 #include <atomic>
 #include <chrono>
+#include <deque>
+#include <mutex>
 
 #define MAX_STR_LEN 256
 
@@ -212,6 +214,41 @@ public:
 	// Shows the scope whenever a sniper rifle is held (even when not looking through it) and writes its state
 	// to VR\scope_debug.txt once per second
 	bool m_ScopeDebug = false;
+	// Throw the molotov, pipe bomb and bile jar with the arm: hold the trigger, swing and let go
+	bool m_GrenadeThrowGesture = true;
+	// Makes fast throws stronger, up to this many times the speed of the hand (the game's own throw is about 17 m/s).
+	// Gentle throws keep the real speed of the hand.
+	float m_GrenadeThrowStrength = 2.0f;
+
+	// Grenade throw. The release is detected in ProcessInput (VR::Update) and the throw is used by the server hooks
+	// (Hooks::dStartGrenadeThrow and dEmitGrenade) and sent to the server in the usercmds (Hooks::dWriteUsercmd),
+	// both on the game thread, so it's behind a mutex.
+	struct GrenadeThrow
+	{
+		bool pending = false;                        // not used by the local server yet
+		bool gesture = false;                        // thrown with the arm, otherwise aimed with the controller
+		int sequence = 0;                            // 1 to 3, tells the server apart the throws it receives
+		std::chrono::steady_clock::time_point time;  // when the trigger was let go
+		Vector armVelocity = { 0,0,0 };              // game units per second, without the player's velocity
+		float handSpeed = 0.0f;                      // m/s
+	};
+	// How long after the release the server can still use a throw (the game throws later when the trigger is let go
+	// before the pin is pulled)
+	static constexpr std::chrono::milliseconds kGrenadeThrowValidTime{ 1500 };
+	// Speed of the game's own throw, units/s
+	static constexpr float kGameThrowSpeed = 750.0f;
+	int m_GrenadeThrowSequence = 0;
+	struct HandVelocitySample
+	{
+		std::chrono::steady_clock::time_point time;
+		Vector velocity; // m/s, game axes, relative to the player
+	};
+	std::mutex m_GrenadeThrowMutex;
+	GrenadeThrow m_GrenadeThrow;
+	std::deque<HandVelocitySample> m_HandVelocityHistory;
+	bool m_GrenadeTriggerHeld = false;
+	std::chrono::steady_clock::time_point m_GrenadeReleaseTime;
+
 
 	// Scope of the sniper rifles: the game's view is rendered again from the scope into m_ScopeTexture,
 	// which is shown on two overlays at the eyepiece (the image and a mask with the black ring and the reticle)
@@ -286,6 +323,16 @@ public:
 	bool UpdateScope();
 	void SubmitScopeOverlays();
 	void HideScopeOverlays();
+	static bool IsThrowableWeapon(int weaponId);
+	void UpdateGrenadeThrow();
+	bool IsGrenadeThrowInProgress();
+	bool HasPendingGestureThrow();
+	bool TakeGrenadeThrow(const Vector &gameOrigin, Vector &origin, Vector &armVelocity, int &ageMs);
+	Vector GetGrenadeThrowOrigin(const Vector &start, const Vector &hand, const Vector &gameOrigin);
+	bool GetGrenadeThrowMessage(short &mousedx, short &mousedy);
+	static void EncodeGrenadeThrow(bool gesture, int sequence, const Vector &armVelocity, short &mousedx, short &mousedy);
+	static bool DecodeGrenadeThrow(short mousedx, short mousedy, bool &gesture, int &sequence, Vector &armVelocity);
+	static void WriteGrenadeThrowLog(const char *format, ...);
 	Vector GetViewAngle();
 	Vector GetViewOriginLeft();
 	Vector GetViewOriginRight();

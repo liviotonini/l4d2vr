@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <array>
+#include <chrono>
 #include "vector.h"
 
 class IClientEntityList;
@@ -35,6 +36,13 @@ struct Player
     bool isMeleeing;
     bool isNewSwing;
     QAngle prevControllerAngle;
+
+    // Last grenade throw received from the player (VR::EncodeGrenadeThrow, decoded in Hooks::dReadUsercmd)
+    int throwSequence = 0;
+    bool throwPending = false;  // not thrown yet
+    bool throwGesture = false;  // thrown with the arm
+    Vector throwArmVelocity = { 0,0,0 };
+    std::chrono::steady_clock::time_point throwTime; // when it was received
 
     Player()
         : isUsingVR(false),

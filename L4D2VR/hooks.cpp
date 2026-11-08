@@ -5,6 +5,7 @@
 #include "sdk_server.h"
 #include "vr.h"
 #include "offsets.h"
+#include <algorithm>
 #include <iostream>
 
 Hooks::Hooks(Game *game)
@@ -50,6 +51,8 @@ Hooks::Hooks(Game *game)
 	hkIsSplitScreen.enableHook();
 	hkPrePushRenderTarget.enableHook();
 	hkFormatViewModelAttachment.enableHook();
+	if (hkStartGrenadeThrow.pTarget)
+		hkStartGrenadeThrow.enableHook();
 }
 
 Hooks::~Hooks()
@@ -144,6 +147,8 @@ int Hooks::initSourceHooks()
 	LPVOID FormatViewModelAttachmentAddr = (LPVOID)(m_Game->m_Offsets->FormatViewModelAttachment.address);
 	hkFormatViewModelAttachment.createHook(FormatViewModelAttachmentAddr, &dFormatViewModelAttachment);
 
+	initGrenadeThrowHooks();
+
 	void *clientMode = nullptr;
 	while (!clientMode)
 	{
@@ -153,6 +158,44 @@ int Hooks::initSourceHooks()
 	hkCreateMove.createHook( (*(void ***)clientMode)[27], dCreateMove );
 
 	return 1;
+}
+
+// Grenade throw with the arm (VR::UpdateGrenadeThrow).
+// EmitGrenade is a virtual function that each grenade class overrides, so it's replaced in their vtables
+// (HookEmitGrenade) instead of with MinHook. Its vtable offset and the owner lookup are read from the code of
+// CBaseCSGrenade::ThrowGrenade:
+//   +0x018  call CBaseCombatWeapon::GetPlayerOwner
+//   +0x3EB  mov edx, [edx + EmitGrenade offset]   (regular throw)
+// The throws are replaced for the host's own player and for VR players who joined (Player::throw*).
+void Hooks::initGrenadeThrowHooks()
+{
+	const uintptr_t throwGrenade = m_Game->m_Offsets->ThrowGrenade.address;
+	const uintptr_t startGrenadeThrow = m_Game->m_Offsets->StartGrenadeThrow.address;
+	if (!throwGrenade || !startGrenadeThrow)
+		return;
+
+	const uint8_t *code = (const uint8_t *)throwGrenade;
+	const int emitGrenadeOffset = *(const int32_t *)(code + 0x3ED);
+	if (code[0x18] != 0xE8 || code[0x3EB] != 0x8B || code[0x3EC] != 0x92 || emitGrenadeOffset <= 0 || emitGrenadeOffset > 0x2000 || emitGrenadeOffset % 4 != 0)
+	{
+		Game::errorMsg("CBaseCSGrenade::ThrowGrenade doesn't look as expected, throwing grenades with the arm is disabled.");
+		return;
+	}
+
+	// +0x356  movss xmm3, [esi + m_vecAbsVelocity]   (the player's velocity added to the throw)
+	const int absVelocityOffset = *(const int32_t *)(code + 0x35A);
+	if (code[0x356] != 0xF3 || code[0x357] != 0x0F || code[0x358] != 0x10 || code[0x359] != 0x9E || absVelocityOffset <= 0 || absVelocityOffset > 0x4000)
+	{
+		Game::errorMsg("CBaseCSGrenade::ThrowGrenade doesn't look as expected, throwing grenades with the arm is disabled.");
+		return;
+	}
+
+	m_GetGrenadeOwner = (tGetPlayerOwner)(throwGrenade + 0x18 + 5 + *(const int32_t *)(code + 0x19));
+	m_EmitGrenadeVtableOffset = emitGrenadeOffset;
+	m_AbsVelocityOffset = absVelocityOffset;
+	m_ThrowGrenade = (tThrowGrenade)throwGrenade;
+
+	hkStartGrenadeThrow.createHook((LPVOID)startGrenadeThrow, &dStartGrenadeThrow);
 }
 
 
@@ -418,8 +461,30 @@ int Hooks::dReadUsercmd(void *buf, CUserCmd *move, CUserCmd *from)
 		}
 
 		m_Game->m_PlayersVRInfo[i].isUsingVR = true;
-		m_Game->m_PlayersVRInfo[i].controllerAngle.x = (float)move->mousedx / 10;
-		m_Game->m_PlayersVRInfo[i].controllerAngle.y = (float)move->mousedy / 10;
+
+		bool throwGesture;
+		int throwSequence;
+		Vector throwArmVelocity;
+		if (VR::DecodeGrenadeThrow(move->mousedx, move->mousedy, throwGesture, throwSequence, throwArmVelocity))
+		{
+			// A grenade throw in place of the controller angles (VR::GetGrenadeThrowMessage), which keep their last value.
+			// The same throw comes in several usercmds.
+			Player &player = m_Game->m_PlayersVRInfo[i];
+			const auto now = std::chrono::steady_clock::now();
+			if (throwSequence != player.throwSequence || now - player.throwTime > std::chrono::seconds(3))
+			{
+				player.throwSequence = throwSequence;
+				player.throwPending = true;
+				player.throwGesture = throwGesture;
+				player.throwArmVelocity = throwArmVelocity;
+				player.throwTime = now;
+			}
+		}
+		else
+		{
+			m_Game->m_PlayersVRInfo[i].controllerAngle.x = (float)move->mousedx / 10;
+			m_Game->m_PlayersVRInfo[i].controllerAngle.y = (float)move->mousedy / 10;
+		}
 		m_Game->m_PlayersVRInfo[i].controllerPos.x = move->viewangles.z;
 		m_Game->m_PlayersVRInfo[i].controllerPos.y = move->upmove;
 
@@ -466,8 +531,18 @@ int Hooks::dWriteUsercmd(void *buf, CUserCmd *to, CUserCmd *from)
 		int originalCommandNum = to->command_number;
 
 		QAngle controllerAngles = m_VR->GetRightControllerAbsAngle();
-		to->mousedx = controllerAngles.x * 10; // Strip off 2nd decimal to save bits.
-		to->mousedy = controllerAngles.y * 10;
+		short throwMousedx, throwMousedy;
+		if (m_VR->GetGrenadeThrowMessage(throwMousedx, throwMousedy))
+		{
+			// Just let go of a grenade: send the throw instead of the angles (no gun to aim while throwing)
+			to->mousedx = throwMousedx;
+			to->mousedy = throwMousedy;
+		}
+		else
+		{
+			to->mousedx = controllerAngles.x * 10; // Strip off 2nd decimal to save bits.
+			to->mousedy = controllerAngles.y * 10;
+		}
 		int rollEncoding = (((int)controllerAngles.z + 180) / 2 * 10000000);
 		to->command_number += rollEncoding;
 
@@ -702,4 +777,170 @@ void Hooks::dFormatViewModelAttachment(void *player, Vector &origin, bool invers
 		return;
 
 	hkFormatViewModelAttachment.fOriginal(player, origin, inverse);
+}
+
+int Hooks::GetServerEntityIndex(void *entity)
+{
+	if (!entity)
+		return -1;
+
+	typedef int(__thiscall *tEntindex)(void *thisptr);
+	static tEntindex oEntindex = (tEntindex)(m_Game->m_Offsets->CBaseEntity_entindex.address);
+	return oEntindex(entity);
+}
+
+// The host's own player in VR, or a VR player who joined
+bool Hooks::IsVRThrower(int playerIndex, bool &isLocalPlayer)
+{
+	isLocalPlayer = m_VR->m_IsVREnabled && playerIndex == m_Game->m_EngineClient->GetLocalPlayer();
+	if (isLocalPlayer)
+		return true;
+
+	return playerIndex >= 0 && playerIndex < (int)m_Game->m_PlayersVRInfo.size() && m_Game->m_PlayersVRInfo[playerIndex].isUsingVR;
+}
+
+namespace
+{
+	// A throw received from a player who joined, that wasn't used yet
+	bool HasJoinedPlayerThrow(const Player &player)
+	{
+		return player.throwPending && std::chrono::steady_clock::now() - player.throwTime < VR::kGrenadeThrowValidTime;
+	}
+
+	float PitchUp(const Vector &v)
+	{
+		return RAD2DEG(atan2f(v.z, sqrtf(v.x * v.x + v.y * v.y)));
+	}
+}
+
+// CBaseCSGrenade::StartGrenadeThrow, on the server when the trigger is let go with a molotov, pipe bomb or bile jar
+void __fastcall Hooks::dStartGrenadeThrow(void *ecx, void *edx)
+{
+	hkStartGrenadeThrow.fOriginal(ecx);
+
+	bool isLocalPlayer;
+	const int playerIndex = GetServerEntityIndex(m_GetGrenadeOwner(ecx));
+	if (!IsVRThrower(playerIndex, isLocalPlayer))
+		return;
+
+	// EmitGrenade gets the origin and velocity of the throw
+	HookEmitGrenade(ecx);
+
+	// Thrown with the arm: throw now instead of 0.2 s later, when the hand would be somewhere else.
+	// ThrowGrenade clears m_fThrowTime, so the game doesn't throw a second time.
+	bool armThrow;
+	if (isLocalPlayer)
+	{
+		armThrow = m_VR->HasPendingGestureThrow();
+	}
+	else
+	{
+		const Player &player = m_Game->m_PlayersVRInfo[playerIndex];
+		armThrow = HasJoinedPlayerThrow(player) && player.throwGesture;
+	}
+
+	if (armThrow)
+		m_ThrowGrenade(ecx);
+}
+
+namespace
+{
+	// Grenade classes whose EmitGrenade was replaced, with the original function
+	struct EmitGrenadeHook
+	{
+		void **vtable;
+		tEmitGrenade original;
+	};
+	EmitGrenadeHook g_EmitGrenadeHooks[8];
+	int g_EmitGrenadeHookCount = 0;
+}
+
+// Only called from the server (game thread)
+void Hooks::HookEmitGrenade(void *grenade)
+{
+	void **vtable = *(void ***)grenade;
+	for (int i = 0; i < g_EmitGrenadeHookCount; ++i)
+	{
+		if (g_EmitGrenadeHooks[i].vtable == vtable)
+			return;
+	}
+
+	if (g_EmitGrenadeHookCount == ARRAYSIZE(g_EmitGrenadeHooks))
+		return;
+
+	void **slot = (void **)((uintptr_t)vtable + m_EmitGrenadeVtableOffset);
+	DWORD oldProtect;
+	if (!VirtualProtect(slot, sizeof(void *), PAGE_READWRITE, &oldProtect))
+		return;
+
+	g_EmitGrenadeHooks[g_EmitGrenadeHookCount++] = { vtable, (tEmitGrenade)*slot };
+	*slot = (void *)&dEmitGrenade;
+	VirtualProtect(slot, sizeof(void *), oldProtect, &oldProtect);
+}
+
+// CMolotov / CPipeBomb / CItem_VomitJar::EmitGrenade, called by CBaseCSGrenade::ThrowGrenade to create the projectile
+void *__fastcall Hooks::dEmitGrenade(void *ecx, void *edx, VectorValue origin, VectorValue angles, VectorValue velocity, VectorValue angularImpulse, void *owner)
+{
+	tEmitGrenade original = nullptr;
+	void **vtable = *(void ***)ecx;
+	for (int i = 0; i < g_EmitGrenadeHookCount; ++i)
+	{
+		if (g_EmitGrenadeHooks[i].vtable == vtable)
+			original = g_EmitGrenadeHooks[i].original;
+	}
+	if (!original)
+		return nullptr;
+
+	// The angular impulse is (600, random, 0) for a throw and zero when the grenade is dropped
+	bool isLocalPlayer;
+	const int playerIndex = GetServerEntityIndex(owner);
+	if (angularImpulse.x != 0.0f && IsVRThrower(playerIndex, isLocalPlayer))
+	{
+		const Vector gameOrigin(origin.x, origin.y, origin.z);
+		const Vector gameVelocity(velocity.x, velocity.y, velocity.z);
+		Vector newOrigin, armVelocity;
+		int ageMs = 0;
+		bool replace = false;
+
+		if (isLocalPlayer)
+		{
+			replace = m_VR->TakeGrenadeThrow(gameOrigin, newOrigin, armVelocity, ageMs);
+		}
+		else
+		{
+			// From the hand position the player sends with every usercmd, checked against walls from the eyes
+			Player &player = m_Game->m_PlayersVRInfo[playerIndex];
+			if (HasJoinedPlayerThrow(player))
+			{
+				player.throwPending = false;
+				Vector eyePosition;
+				hkEyePosition.fOriginal(owner, &eyePosition);
+				newOrigin = m_VR->GetGrenadeThrowOrigin(eyePosition, player.controllerPos, gameOrigin);
+				armVelocity = player.throwArmVelocity;
+				ageMs = (int)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - player.throwTime).count();
+				replace = true;
+			}
+		}
+
+		if (replace)
+		{
+			// Like the game: the throw plus the player's velocity (ThrowGrenade just updated it)
+			const Vector playerVelocity = *(const Vector *)((uintptr_t)owner + m_AbsVelocityOffset);
+			const Vector newVelocity = armVelocity + playerVelocity;
+
+			VR::WriteGrenadeThrowLog("thrown by player %d (%s) %d ms after %s, %.0f units from the game's spawn point: %.0f units/s at %.0f deg up, player velocity %.0f. Game's throw: %.0f units/s at %.0f deg up",
+				playerIndex, isLocalPlayer ? "this game" : "joined", ageMs, isLocalPlayer ? "the release" : "the throw arrived",
+				VectorLength(newOrigin - gameOrigin), VectorLength(newVelocity), PitchUp(newVelocity), VectorLength(playerVelocity),
+				VectorLength(gameVelocity), PitchUp(gameVelocity));
+
+			origin = { newOrigin.x, newOrigin.y, newOrigin.z };
+			velocity = { newVelocity.x, newVelocity.y, newVelocity.z };
+
+			// The game's spin is for a full throw: a gentle toss or a drop spins less
+			const float spin = std::clamp(VectorLength(armVelocity) / VR::kGameThrowSpeed, 0.0f, 1.0f);
+			angularImpulse = { angularImpulse.x * spin, angularImpulse.y * spin, angularImpulse.z * spin };
+		}
+	}
+
+	return original(ecx, origin, angles, velocity, angularImpulse, owner);
 }

@@ -525,6 +525,11 @@ void SettingsMenu::DrawMenu()
 			DrawCheckbox("Hide arms", "Hide the first person arms.", settings.m_HideArms);
 			DrawCheckbox("Shove by swinging", "Shove by swinging the left controller (or the right one when not holding a melee weapon).", settings.m_IsTrackingManualPush);
 			DrawSlider("Melee swing speed", "How fast the controller has to move to hit with a melee weapon.", settings.m_MeleeSwingVelocityRequired, 0.5f, 4.0f, 0.05f, "%.2f m/s");
+			DrawCheckbox("Throw grenades with your arm", "Hold the trigger, swing your arm and let go: the molotov, pipe bomb or bile jar leaves your hand in the direction and with the speed of the swing. Letting go with a still hand drops it. In a game you joined, the host needs this version of the mod.", settings.m_GrenadeThrowGesture);
+
+			ImGui::BeginDisabled(!settings.m_GrenadeThrowGesture);
+			DrawSlider("Throw strength", "Makes fast throws stronger, up to this many times the speed of your hand. Gentle throws and drops always keep the real speed of your hand. 1.0 is real speed for every throw.", settings.m_GrenadeThrowStrength, 1.0f, 4.0f, 0.1f, "%.1fx");
+			ImGui::EndDisabled();
 			DrawCheckbox("Flashlight on head with melee", "While holding a melee weapon the flashlight follows your head instead of your hand.", settings.m_AttachFlashlightToHeadWhenMelee);
 			ImGui::EndChild();
 			ImGui::EndTabItem();

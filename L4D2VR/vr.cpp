@@ -640,6 +640,8 @@ void VR::ProcessInput()
         m_Game->ClientCmd_Unrestricted("-moveright");
     }
 
+    UpdateGrenadeThrow();
+
     if (PressedDigitalAction(m_ActionPrimaryAttack))
     {
         m_Game->ClientCmd_Unrestricted("+attack");
@@ -678,7 +680,9 @@ void VR::ProcessInput()
     }
 
     //if (PressedDigitalAction(m_ActionSecondaryAttack) || (m_IsTrackingManualPush && VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 5.0))
-    if (PressedDigitalAction(m_ActionSecondaryAttack) || (m_IsTrackingManualPush && (VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 4.0 || ( !m_Game->m_IsMeleeWeaponActive && VectorLength(m_RightControllerPose.TrackedDeviceVel) > 4.0))))
+    // The swing gestures don't shove while throwing a grenade with the arm (both arms move fast, and holding the shove
+    // button stops the game from throwing)
+    if (PressedDigitalAction(m_ActionSecondaryAttack) || (m_IsTrackingManualPush && !IsGrenadeThrowInProgress() && (VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 4.0 || ( !m_Game->m_IsMeleeWeaponActive && VectorLength(m_RightControllerPose.TrackedDeviceVel) > 4.0))))
     {
         m_Game->ClientCmd_Unrestricted("+attack2");       
     }
@@ -1443,6 +1447,296 @@ void VR::HideScopeOverlays()
         m_Overlay->HideOverlay(m_ScopeMaskHandle);
 }
 
+// ---------------------------------------------------------------------------------------------------------------
+// Grenade throw
+//
+// The game throws the molotov, pipe bomb and bile jar from 16 units in front of the eyes at 750 units/s plus the
+// player's velocity, 0.2 s after the trigger is let go (CBaseCSGrenade::StartGrenadeThrow / ThrowGrenade).
+// With GrenadeThrowGesture the grenade leaves from the hand instead, right away (Hooks::dStartGrenadeThrow), with the
+// velocity the hand had when the trigger was let go. Gentle throws keep the real speed of the hand (letting go with a
+// still hand drops the grenade), fast throws are made stronger by up to GrenadeThrowStrength.
+//
+// The throw is replaced in server.dll by the host of the game:
+// - the host's own throws come straight from here (TakeGrenadeThrow),
+// - players who joined send their throw to the host in the usercmds, in place of the controller angles
+//   (GetGrenadeThrowMessage / EncodeGrenadeThrow, decoded by Hooks::dReadUsercmd), and their hand position is the one
+//   they send with every usercmd.
+// The host adds the player's velocity on the server, like the game does.
+// ---------------------------------------------------------------------------------------------------------------
+
+namespace
+{
+    constexpr float kMaxThrowSpeed = 1100.0f;     // units/s, for the arm part of the throw
+    constexpr auto kHandVelocityHistory = std::chrono::milliseconds(150);
+    // Hand velocity at the release: the average of the last samples
+    constexpr auto kReleaseAverageWindow = std::chrono::milliseconds(35);
+    // Fast throws use the fastest point of the swing in this window before the release instead, since people let go a
+    // bit late. Gentle throws use the velocity at the release, so stopping the hand and letting go drops the grenade.
+    constexpr auto kLateReleaseWindow = std::chrono::milliseconds(100);
+    constexpr float kGentleHandSpeed = 2.0f;      // m/s, up to this the grenade gets the real velocity of the hand
+    constexpr float kLateReleaseSpeed = 4.0f;     // m/s, fastest point from which the late release is fully corrected
+    constexpr float kFullStrengthSpeed = 6.0f;    // m/s, from this hand speed on GrenadeThrowStrength applies fully
+    // No shoving with the swing gestures while throwing (the arms move fast)
+    constexpr auto kNoShoveAfterRelease = std::chrono::milliseconds(500);
+    // Throws from further than this from the game's spawn point are not trusted (tracking lost)
+    constexpr float kMaxThrowOriginDistance = 80.0f;
+    // The throw is sent in every usercmd for this long after the release, so a lost packet doesn't lose it
+    constexpr auto kThrowMessageTime = std::chrono::milliseconds(500);
+    // Throw message in mousedx / mousedy (normally the controller angles * 10, so never above 3600):
+    // mousedy = 0x4000 | payload bits 16-29, mousedx = payload bits 0-15.
+    // Payload: 3 x 9 bit signed velocity in steps of 5 units/s (x, y, z: +-1275), 1 bit "arm throw", 2 bit sequence (1-3)
+    constexpr int kThrowMessageMarker = 0x4000;
+    constexpr float kThrowMessageVelocityStep = 5.0f;
+
+    float PitchUp(const Vector &v)
+    {
+        return RAD2DEG(atan2f(v.z, sqrtf(v.x * v.x + v.y * v.y)));
+    }
+}
+
+// Writes a line to VR\grenade_throw_log.txt (recreated each time the game starts), a line or two per throw.
+// Called from VR::Update and from the server hooks.
+void VR::WriteGrenadeThrowLog(const char *format, ...)
+{
+    static std::mutex s_Mutex;
+    static bool s_Truncated = false;
+
+    char line[512];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(line, sizeof(line), format, args);
+    va_end(args);
+
+    SYSTEMTIME time;
+    GetLocalTime(&time);
+    char stamp[32];
+    snprintf(stamp, sizeof(stamp), "%02d:%02d:%02d.%03d ", time.wHour, time.wMinute, time.wSecond, time.wMilliseconds);
+
+    std::lock_guard<std::mutex> lock(s_Mutex);
+    std::ofstream file("VR\\grenade_throw_log.txt", s_Truncated ? std::ios::app : std::ios::trunc);
+    s_Truncated = true;
+    file << stamp << line << "\n";
+}
+
+bool VR::IsThrowableWeapon(int weaponId)
+{
+    return weaponId == C_WeaponCSBase::MOLOTOV || weaponId == C_WeaponCSBase::PIPE_BOMB || weaponId == C_WeaponCSBase::VOMITJAR;
+}
+
+// Called by ProcessInput every frame, before the trigger is sent to the game
+void VR::UpdateGrenadeThrow()
+{
+    const auto now = std::chrono::steady_clock::now();
+
+    if (!m_GrenadeThrowGesture || !IsThrowableWeapon(m_ActiveWeaponId))
+    {
+        m_GrenadeTriggerHeld = false;
+        m_HandVelocityHistory.clear();
+        return;
+    }
+
+    // Hand velocity in game axes: the tracking space turned by the thumbstick turning
+    Vector handVelocity = m_RightControllerPose.TrackedDeviceVel;
+    VectorPivotXY(handVelocity, Vector(0, 0, 0), m_RotationOffset);
+    m_HandVelocityHistory.push_back({ now, handVelocity });
+    while (!m_HandVelocityHistory.empty() && now - m_HandVelocityHistory.front().time > kHandVelocityHistory)
+        m_HandVelocityHistory.pop_front();
+
+    if (PressedDigitalAction(m_ActionPrimaryAttack))
+    {
+        m_GrenadeTriggerHeld = true;
+        return;
+    }
+
+    if (!m_GrenadeTriggerHeld)
+        return;
+
+    // The trigger was let go: the game starts the throw
+    m_GrenadeTriggerHeld = false;
+    m_GrenadeReleaseTime = now;
+
+    // Velocity at the release: average of the last samples (always at least the newest one)
+    Vector releaseVelocity = { 0,0,0 };
+    int releaseSamples = 0;
+    for (size_t i = m_HandVelocityHistory.size(); i-- > 0;)
+    {
+        if (releaseSamples > 0 && now - m_HandVelocityHistory[i].time > kReleaseAverageWindow)
+            break;
+        releaseVelocity += m_HandVelocityHistory[i].velocity;
+        ++releaseSamples;
+    }
+    if (releaseSamples > 0)
+        releaseVelocity *= 1.0f / (float)releaseSamples;
+
+    // Fastest point of the swing just before the release, averaged with the samples next to it
+    size_t peak = m_HandVelocityHistory.size();
+    float peakSpeed = -1.0f;
+    for (size_t i = 0; i < m_HandVelocityHistory.size(); ++i)
+    {
+        if (now - m_HandVelocityHistory[i].time > kLateReleaseWindow)
+            continue;
+        const float speed = VectorLength(m_HandVelocityHistory[i].velocity);
+        if (speed > peakSpeed)
+        {
+            peakSpeed = speed;
+            peak = i;
+        }
+    }
+
+    Vector peakVelocity = releaseVelocity;
+    if (peak < m_HandVelocityHistory.size())
+    {
+        peakVelocity = { 0,0,0 };
+        const size_t first = peak > 0 ? peak - 1 : 0;
+        const size_t last = std::min(peak + 1, m_HandVelocityHistory.size() - 1);
+        for (size_t i = first; i <= last; ++i)
+            peakVelocity += m_HandVelocityHistory[i].velocity;
+        peakVelocity *= 1.0f / (float)(last - first + 1);
+    }
+
+    // Gentle throws: the velocity at the release. Fast throws: the fastest point (late release).
+    const float lateRelease = SmoothStep(kGentleHandSpeed, kLateReleaseSpeed, VectorLength(peakVelocity));
+    const Vector throwHandVelocity = releaseVelocity + (peakVelocity - releaseVelocity) * lateRelease;
+    const float handSpeed = VectorLength(throwHandVelocity);
+
+    // Real speed for gentle throws, up to GrenadeThrowStrength times for fast ones
+    const float strength = 1.0f + (m_GrenadeThrowStrength - 1.0f) * SmoothStep(kGentleHandSpeed, kFullStrengthSpeed, handSpeed);
+    Vector armVelocity = throwHandVelocity * (m_VRScale * strength);
+    const float armSpeed = VectorLength(armVelocity);
+    if (armSpeed > kMaxThrowSpeed)
+        armVelocity *= kMaxThrowSpeed / armSpeed;
+
+    GrenadeThrow grenadeThrow;
+    grenadeThrow.pending = true;
+    grenadeThrow.gesture = true;
+    grenadeThrow.time = now;
+    grenadeThrow.handSpeed = handSpeed;
+    grenadeThrow.armVelocity = armVelocity;
+    m_GrenadeThrowSequence = m_GrenadeThrowSequence % 3 + 1;
+    grenadeThrow.sequence = m_GrenadeThrowSequence;
+
+    {
+        std::lock_guard<std::mutex> lock(m_GrenadeThrowMutex);
+        m_GrenadeThrow = grenadeThrow;
+    }
+
+    WriteGrenadeThrowLog("released: hand %.2f m/s (%.2f at the release, %.2f at the fastest point), strength %.2fx, arm part of the throw %.0f units/s at %.0f deg up, %d velocity samples",
+        handSpeed, VectorLength(releaseVelocity), VectorLength(peakVelocity), strength, VectorLength(armVelocity),
+        PitchUp(armVelocity), (int)m_HandVelocityHistory.size());
+}
+
+// True while the trigger is held with a throwable, and shortly after it's let go
+bool VR::IsGrenadeThrowInProgress()
+{
+    if (!m_GrenadeThrowGesture || !IsThrowableWeapon(m_ActiveWeaponId))
+        return false;
+
+    return m_GrenadeTriggerHeld || std::chrono::steady_clock::now() - m_GrenadeReleaseTime < kNoShoveAfterRelease;
+}
+
+// Server side (Hooks::dStartGrenadeThrow): was the trigger just let go during a swing?
+bool VR::HasPendingGestureThrow()
+{
+    std::lock_guard<std::mutex> lock(m_GrenadeThrowMutex);
+    return m_GrenadeThrow.pending && m_GrenadeThrow.gesture
+        && std::chrono::steady_clock::now() - m_GrenadeThrow.time < kGrenadeThrowValidTime;
+}
+
+// Server side (Hooks::dEmitGrenade): origin and arm velocity for the grenade the local player is throwing.
+// Returns false to keep the game's throw.
+bool VR::TakeGrenadeThrow(const Vector &gameOrigin, Vector &origin, Vector &armVelocity, int &ageMs)
+{
+    GrenadeThrow grenadeThrow;
+    {
+        std::lock_guard<std::mutex> lock(m_GrenadeThrowMutex);
+        grenadeThrow = m_GrenadeThrow;
+        m_GrenadeThrow.pending = false;
+    }
+
+    const auto age = std::chrono::steady_clock::now() - grenadeThrow.time;
+    if (!grenadeThrow.pending || age > kGrenadeThrowValidTime)
+        return false;
+
+    origin = GetGrenadeThrowOrigin(m_HmdPosAbs, m_RightControllerPosAbsRaw, gameOrigin);
+    armVelocity = grenadeThrow.armVelocity;
+    ageMs = (int)std::chrono::duration_cast<std::chrono::milliseconds>(age).count();
+    return true;
+}
+
+// The hand, or the point where a wall between the start (head) and the hand is. Players and NPCs are ignored.
+Vector VR::GetGrenadeThrowOrigin(const Vector &start, const Vector &hand, const Vector &gameOrigin)
+{
+    if (VectorLength(hand - gameOrigin) > kMaxThrowOriginDistance)
+        return gameOrigin;
+
+    // Same box as the game's own spawn point trace
+    CGameTrace trace;
+    Ray_t ray;
+    ray.Init(start, hand, Vector(-2, -2, -2), Vector(2, 2, 2));
+    CTraceFilterSkipNPCsAndPlayers traceFilter(nullptr, 0);
+    m_Game->m_EngineTrace->TraceRay(ray, MASK_STATICWORLD | CONTENTS_MOVEABLE, &traceFilter, &trace);
+
+    if (trace.startsolid || trace.allsolid)
+        return gameOrigin;
+
+    return trace.endpos;
+}
+
+// Called by Hooks::dWriteUsercmd: the throw to send in this usercmd instead of the controller angles, for a short
+// time after the trigger was let go
+bool VR::GetGrenadeThrowMessage(short &mousedx, short &mousedy)
+{
+    GrenadeThrow grenadeThrow;
+    {
+        std::lock_guard<std::mutex> lock(m_GrenadeThrowMutex);
+        grenadeThrow = m_GrenadeThrow;
+    }
+
+    if (grenadeThrow.sequence == 0 || std::chrono::steady_clock::now() - grenadeThrow.time > kThrowMessageTime)
+        return false;
+
+    EncodeGrenadeThrow(grenadeThrow.gesture, grenadeThrow.sequence, grenadeThrow.armVelocity, mousedx, mousedy);
+    return true;
+}
+
+void VR::EncodeGrenadeThrow(bool gesture, int sequence, const Vector &armVelocity, short &mousedx, short &mousedy)
+{
+    auto quantize = [](float value) -> uint32_t
+    {
+        const int steps = std::clamp((int)lroundf(value / kThrowMessageVelocityStep), -255, 255);
+        return (uint32_t)steps & 0x1FF;
+    };
+
+    const uint32_t payload = quantize(armVelocity.x) | (quantize(armVelocity.y) << 9) | (quantize(armVelocity.z) << 18)
+        | ((gesture ? 1u : 0u) << 27) | (((uint32_t)sequence & 3) << 28);
+
+    mousedx = (short)(uint16_t)(payload & 0xFFFF);
+    mousedy = (short)(uint16_t)(kThrowMessageMarker | ((payload >> 16) & 0x3FFF));
+}
+
+// Returns false if mousedx / mousedy are the controller angles (or a usercmd from an older version of the mod)
+bool VR::DecodeGrenadeThrow(short mousedx, short mousedy, bool &gesture, int &sequence, Vector &armVelocity)
+{
+    const uint16_t high = (uint16_t)mousedy;
+    if ((high & 0xC000) != kThrowMessageMarker)
+        return false;
+
+    const uint32_t payload = (uint32_t)(uint16_t)mousedx | ((uint32_t)(high & 0x3FFF) << 16);
+
+    auto unquantize = [](uint32_t bits) -> float
+    {
+        int steps = (int)(bits & 0x1FF);
+        if (steps & 0x100)
+            steps -= 0x200;
+        return steps * kThrowMessageVelocityStep;
+    };
+
+    armVelocity = Vector(unquantize(payload), unquantize(payload >> 9), unquantize(payload >> 18));
+    gesture = ((payload >> 27) & 1) != 0;
+    sequence = (int)((payload >> 28) & 3);
+    return sequence != 0;
+}
+
 // L4D2 attaches the first person flashlight to the "flashlight" attachment of the viewmodel when
 // r_flashlight_attach_to_viewmodel is 1 (default). Since the viewmodel follows the controller, swinging
 // a melee weapon swings the light around too. When the ConVar is 0 (or while on a ladder) the game
@@ -2040,6 +2334,10 @@ void VR::ParseConfigFile()
     const std::string &scopeMagnification = userConfig["ScopeMagnification"];
     m_ScopeMagnification = scopeMagnification.empty() ? 4.0f : std::clamp(std::stof(scopeMagnification), 1.0f, 20.0f);
     m_ScopeDebug = userConfig["ScopeDebug"] == "true";
+
+    m_GrenadeThrowGesture = userConfig["GrenadeThrowGesture"] != "false"; // enabled if missing from config
+    const std::string &grenadeThrowStrength = userConfig["GrenadeThrowStrength"];
+    m_GrenadeThrowStrength = grenadeThrowStrength.empty() ? 2.0f : std::clamp(std::stof(grenadeThrowStrength), 0.5f, 5.0f);
 }
 
 static std::string ConfigBoolString(bool value)
@@ -2095,6 +2393,8 @@ bool VR::SaveConfigFile()
         { "ScopeEnabled", ConfigBoolString(m_ScopeEnabled) },
         { "ScopeMagnification", ConfigFloatString(m_ScopeMagnification) },
         { "ScopeDebug", ConfigBoolString(m_ScopeDebug) },
+        { "GrenadeThrowGesture", ConfigBoolString(m_GrenadeThrowGesture) },
+        { "GrenadeThrowStrength", ConfigFloatString(m_GrenadeThrowStrength) },
     };
 
     std::vector<std::string> lines;

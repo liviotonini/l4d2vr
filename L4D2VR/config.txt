@@ -19,3 +19,5 @@ AttachFlashlightToHeadWhenMelee=true
 ScopeEnabled=true
 ScopeMagnification=4.0
 ScopeDebug=false
+GrenadeThrowGesture=true
+GrenadeThrowStrength=2.0

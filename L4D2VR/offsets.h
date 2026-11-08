@@ -7,7 +7,7 @@ struct Offset
 {
     std::string moduleName;
     int offset;
-    int address;
+    int address = 0; // stays 0 if the signature isn't found
     std::string signature;
     int sigOffset;
 
@@ -60,6 +60,10 @@ public:
 
     Offset ServerFireTerrorBullets =     { "server.dll", 0x3C3FC0, "55 8B EC 81 EC ? ? ? ? A1 ? ? ? ? 33 C5 89 45 FC 8B 45 08 8B 4D 10" };
     Offset ReadUserCmd =                 { "server.dll", 0x205100, "55 8B EC 53 8B 5D 10 56 57 8B 7D 0C 53" };
+    // CBaseCSGrenade::StartGrenadeThrow, called when the trigger is let go: m_fThrowTime = curtime + 0.2
+    Offset StartGrenadeThrow =           { "server.dll", 0x24E230, "55 8B EC 51 A1 ? ? ? ? F3 0F 10 40 0C F3 0F 58 05 ? ? ? ? 56 8B F1 F3 0F 10 8E ? ? ? ? 0F 2E C8" };
+    // CBaseCSGrenade::ThrowGrenade, called when m_fThrowTime is reached. Calls the virtual EmitGrenade(origin, angles, velocity, angular impulse, owner)
+    Offset ThrowGrenade =                { "server.dll", 0x24E2A0, "55 8B EC 81 EC 94 00 00 00 A1 ? ? ? ? 33 C5 89 45 FC 53 56 57 8B F9 E8 ? ? ? ? 8B F0 85 F6 0F 84 ? ? ? ? 8B 06 8B 90 68 01 00 00 8B CE FF D2 84 C0" };
     Offset ProcessUsercmds =             { "server.dll", 0xEF710, "55 8B EC B8 ? ? ? ? E8 ? ? ? ? A1 ? ? ? ? 33 C5 89 45 FC 8B 45 0C 8B 55 08" };
     Offset CBaseEntity_entindex =        { "server.dll", 0x25390, "8B 41 28 85 C0 75 01 C3 8B 0D ? ? ? ? 2B 41 58 C1 F8 04 C3 CC CC CC CC CC CC CC CC CC CC CC 55"};
     Offset TestMeleeSwingServer =        { "server.dll", 0x3E79E0, "24 FF D2 5B 5F 5E C3", 20};

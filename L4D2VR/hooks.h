@@ -82,6 +82,13 @@ typedef int(__cdecl *tIsSplitScreen)();
 typedef DWORD *(__thiscall *tPrePushRenderTarget)(void *thisptr, int a2);
 typedef void(__cdecl *tFormatViewModelAttachment)(void *player, Vector &origin, bool inverse);
 
+// A Vector passed by value (CBaseCSGrenade::EmitGrenade takes its vectors by value)
+struct VectorValue { float x, y, z; };
+typedef void(__thiscall *tStartGrenadeThrow)(void *thisptr);
+typedef void(__thiscall *tThrowGrenade)(void *thisptr);
+typedef void *(__thiscall *tEmitGrenade)(void *thisptr, VectorValue origin, VectorValue angles, VectorValue velocity, VectorValue angularImpulse, void *owner);
+typedef void *(__thiscall *tGetPlayerOwner)(void *thisptr);
+
 
 class Hooks
 {
@@ -118,6 +125,13 @@ public:
 	static inline Hook<tIsSplitScreen> hkIsSplitScreen;
 	static inline Hook<tPrePushRenderTarget> hkPrePushRenderTarget;
 	static inline Hook<tFormatViewModelAttachment> hkFormatViewModelAttachment;
+	static inline Hook<tStartGrenadeThrow> hkStartGrenadeThrow;
+
+	// Read from the code of CBaseCSGrenade::ThrowGrenade by initGrenadeThrowHooks (null / 0 if it doesn't look as expected)
+	static inline tThrowGrenade m_ThrowGrenade = nullptr;
+	static inline tGetPlayerOwner m_GetGrenadeOwner = nullptr;
+	static inline int m_EmitGrenadeVtableOffset = 0;
+	static inline int m_AbsVelocityOffset = 0; // CBaseEntity::m_vecAbsVelocity
 
 	Hooks() {};
 	Hooks(Game *game);
@@ -125,6 +139,7 @@ public:
 	~Hooks();
 
 	int initSourceHooks();
+	void initGrenadeThrowHooks();
 
 	// Detour functions
 	static ITexture *__fastcall dGetRenderTarget(void *ecx, void *edx);
@@ -156,6 +171,11 @@ public:
 	static int __fastcall dIsSplitScreen();
 	static DWORD *__fastcall dPrePushRenderTarget(void *ecx, void *edx, int a2);
 	static void dFormatViewModelAttachment(void *player, Vector &origin, bool inverse);
+	static void __fastcall dStartGrenadeThrow(void *ecx, void *edx);
+	static void *__fastcall dEmitGrenade(void *ecx, void *edx, VectorValue origin, VectorValue angles, VectorValue velocity, VectorValue angularImpulse, void *owner);
+	static void HookEmitGrenade(void *grenade);
+	static int GetServerEntityIndex(void *entity);
+	static bool IsVRThrower(int playerIndex, bool &isLocalPlayer);
 
 	static inline int m_PushHUDStep;
 	static inline bool m_PushedHud;
