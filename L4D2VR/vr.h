@@ -1,6 +1,7 @@
 #pragma once
 #include "openvr.h"
 #include "vector.h"
+#include "haptics.h"
 #include <atomic>
 #include <chrono>
 #include <deque>
@@ -153,7 +154,10 @@ public:
 
 	// action set
 	vr::VRActionSetHandle_t m_ActionSet;
-	vr::VRActiveActionSet_t m_ActiveActionSet;
+	vr::VRActionSetHandle_t m_ActionSetBase = vr::k_ulInvalidActionSetHandle; // poses, skeletons and the vibrations
+	vr::VRActiveActionSet_t m_ActiveActionSets[2] = {};
+	int m_ActiveActionSetCount = 1;
+	Haptics m_Haptics;
 
 	// actions
 	vr::VRActionHandle_t m_ActionJump;
@@ -249,6 +253,19 @@ public:
 	bool m_GrenadeTriggerHeld = false;
 	std::chrono::steady_clock::time_point m_GrenadeReleaseTime;
 
+	// Cancelling a throw: while the trigger is held, the other hand presses its trigger (shove) next to the grenade.
+	// The grenade is put away and taken out again (putting it away puts the pin back, CBaseCSGrenade::Holster),
+	// and the trigger has to be let go before the next throw.
+	enum GrenadeCancelState
+	{
+		GrenadeCancel_None,
+		GrenadeCancel_PuttingAway,        // switching to the secondary weapon, the attack stays held so it doesn't throw
+		GrenadeCancel_WaitTriggerRelease, // grenade taken out again, the attack is held back until the trigger is let go
+	};
+	GrenadeCancelState m_GrenadeCancelState = GrenadeCancel_None;
+	std::chrono::steady_clock::time_point m_GrenadeCancelTime;
+	bool m_ShoveButtonDown = false;
+	bool m_ShoveButtonUsedForCancel = false; // the shove button press that cancelled doesn't shove
 
 	// Scope of the sniper rifles: the game's view is rendered again from the scope into m_ScopeTexture,
 	// which is shown on two overlays at the eyepiece (the image and a mask with the black ring and the reticle)
@@ -325,6 +342,8 @@ public:
 	void HideScopeOverlays();
 	static bool IsThrowableWeapon(int weaponId);
 	void UpdateGrenadeThrow();
+	void UpdateGrenadeCancel(std::chrono::steady_clock::time_point now, bool trigger);
+	bool GetAttackButton(bool trigger);
 	bool IsGrenadeThrowInProgress();
 	bool HasPendingGestureThrow();
 	bool TakeGrenadeThrow(const Vector &gameOrigin, Vector &origin, Vector &armVelocity, int &ageMs);

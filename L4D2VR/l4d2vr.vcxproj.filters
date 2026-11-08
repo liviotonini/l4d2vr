@@ -30,6 +30,9 @@
     <ClInclude Include="settings_menu.h">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="haptics.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
     <ClInclude Include="..\thirdparty\imgui\imconfig.h">
       <Filter>imgui</Filter>
     </ClInclude>
@@ -849,6 +852,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="settings_menu.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="haptics.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\thirdparty\imgui\imgui.cpp">

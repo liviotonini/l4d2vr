@@ -449,6 +449,7 @@
     <ClInclude Include="sdk\texture.h" />
     <ClInclude Include="sdk\trace.h" />
     <ClInclude Include="sdk\vector.h" />
+    <ClInclude Include="haptics.h" />
     <ClInclude Include="settings_menu.h" />
     <ClInclude Include="sigscanner.h" />
     <ClInclude Include="vr.h" />
@@ -598,6 +599,7 @@
     <ClCompile Include="game.cpp" />
     <ClCompile Include="hooks.cpp" />
     <ClCompile Include="sdk\checksum_crc.cpp" />
+    <ClCompile Include="haptics.cpp" />
     <ClCompile Include="settings_menu.cpp" />
     <ClCompile Include="vr.cpp" />
     <ClCompile Include="..\thirdparty\imgui\imgui.cpp" />

@@ -150,8 +150,19 @@ int VR::SetActionManifest(const char *fileName)
     m_Input->GetActionHandle("/actions/main/in/ToggleWalkSpeed", &m_ToggleWalkSpeed);
 
     m_Input->GetActionSetHandle("/actions/main", &m_ActionSet);
-    m_ActiveActionSet = {};
-    m_ActiveActionSet.ulActionSet = m_ActionSet;
+    m_ActiveActionSets[0] = {};
+    m_ActiveActionSets[0].ulActionSet = m_ActionSet;
+    m_ActiveActionSetCount = 1;
+
+    // The vibration actions are in /actions/base, which has to be active for them to work
+    if (m_Input->GetActionSetHandle("/actions/base", &m_ActionSetBase) == vr::VRInputError_None)
+    {
+        m_ActiveActionSets[1] = {};
+        m_ActiveActionSets[1].ulActionSet = m_ActionSetBase;
+        m_ActiveActionSetCount = 2;
+    }
+
+    m_Haptics.Init(m_Input, &m_LeftHanded);
 
     return 0;
 }
@@ -393,7 +404,7 @@ void VR::GetPoses()
 void VR::UpdatePosesAndActions() 
 {
     vr::VRCompositor()->WaitGetPoses(m_Poses, vr::k_unMaxTrackedDeviceCount, NULL, 0);
-    m_Input->UpdateActionState(&m_ActiveActionSet, sizeof(vr::VRActiveActionSet_t), 1);
+    m_Input->UpdateActionState(m_ActiveActionSets, sizeof(vr::VRActiveActionSet_t), m_ActiveActionSetCount);
 }
 
 void VR::GetViewParameters() 
@@ -642,7 +653,7 @@ void VR::ProcessInput()
 
     UpdateGrenadeThrow();
 
-    if (PressedDigitalAction(m_ActionPrimaryAttack))
+    if (GetAttackButton(PressedDigitalAction(m_ActionPrimaryAttack)))
     {
         m_Game->ClientCmd_Unrestricted("+attack");
     }
@@ -681,8 +692,8 @@ void VR::ProcessInput()
 
     //if (PressedDigitalAction(m_ActionSecondaryAttack) || (m_IsTrackingManualPush && VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 5.0))
     // The swing gestures don't shove while throwing a grenade with the arm (both arms move fast, and holding the shove
-    // button stops the game from throwing)
-    if (PressedDigitalAction(m_ActionSecondaryAttack) || (m_IsTrackingManualPush && !IsGrenadeThrowInProgress() && (VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 4.0 || ( !m_Game->m_IsMeleeWeaponActive && VectorLength(m_RightControllerPose.TrackedDeviceVel) > 4.0))))
+    // button stops the game from throwing). Neither does the shove button press that cancelled a throw.
+    if ((PressedDigitalAction(m_ActionSecondaryAttack) && !m_ShoveButtonUsedForCancel) || (m_IsTrackingManualPush && !IsGrenadeThrowInProgress() && (VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 4.0 || ( !m_Game->m_IsMeleeWeaponActive && VectorLength(m_RightControllerPose.TrackedDeviceVel) > 4.0))))
     {
         m_Game->ClientCmd_Unrestricted("+attack2");       
     }
@@ -1480,6 +1491,10 @@ namespace
     constexpr auto kNoShoveAfterRelease = std::chrono::milliseconds(500);
     // Throws from further than this from the game's spawn point are not trusted (tracking lost)
     constexpr float kMaxThrowOriginDistance = 80.0f;
+    // Cancel: distance between the controllers (meters), and how long to wait for the grenade to be put away
+    constexpr float kCancelHandDistance = 0.2f;
+    constexpr auto kCancelSwitchTimeout = std::chrono::milliseconds(1000);
+
     // The throw is sent in every usercmd for this long after the release, so a lost packet doesn't lose it
     constexpr auto kThrowMessageTime = std::chrono::milliseconds(500);
     // Throw message in mousedx / mousedy (normally the controller angles * 10, so never above 3600):
@@ -1523,12 +1538,36 @@ bool VR::IsThrowableWeapon(int weaponId)
     return weaponId == C_WeaponCSBase::MOLOTOV || weaponId == C_WeaponCSBase::PIPE_BOMB || weaponId == C_WeaponCSBase::VOMITJAR;
 }
 
-// Called by ProcessInput every frame, before the trigger is sent to the game
+// Called by ProcessInput every frame, before the trigger and the shove button are sent to the game
 void VR::UpdateGrenadeThrow()
 {
     const auto now = std::chrono::steady_clock::now();
+    const bool trigger = PressedDigitalAction(m_ActionPrimaryAttack);
 
-    if (!m_GrenadeThrowGesture || !IsThrowableWeapon(m_ActiveWeaponId))
+    const bool shoveButton = PressedDigitalAction(m_ActionSecondaryAttack);
+    const bool shoveButtonPressed = shoveButton && !m_ShoveButtonDown;
+    m_ShoveButtonDown = shoveButton;
+    if (!shoveButton)
+        m_ShoveButtonUsedForCancel = false;
+
+    UpdateGrenadeCancel(now, trigger);
+
+    const bool throwable = IsThrowableWeapon(m_ActiveWeaponId);
+
+    // Cancel: with the trigger held, the other hand presses its trigger (shove) next to the grenade.
+    // Works with the game's own throw too (GrenadeThrowGesture off).
+    if (throwable && trigger && m_GrenadeCancelState == GrenadeCancel_None && shoveButtonPressed
+        && VectorLength(m_LeftControllerPose.TrackedDevicePos - m_RightControllerPose.TrackedDevicePos) < kCancelHandDistance)
+    {
+        m_GrenadeCancelState = GrenadeCancel_PuttingAway;
+        m_GrenadeCancelTime = now;
+        m_ShoveButtonUsedForCancel = true;
+        m_Game->ClientCmd_Unrestricted("slot2");
+        m_Haptics.Play(Haptics::Hand::BothHands, HapticEffects::Cancel);
+        WriteGrenadeThrowLog("cancel: putting the grenade away");
+    }
+
+    if (!m_GrenadeThrowGesture || !throwable || m_GrenadeCancelState != GrenadeCancel_None)
     {
         m_GrenadeTriggerHeld = false;
         m_HandVelocityHistory.clear();
@@ -1542,7 +1581,7 @@ void VR::UpdateGrenadeThrow()
     while (!m_HandVelocityHistory.empty() && now - m_HandVelocityHistory.front().time > kHandVelocityHistory)
         m_HandVelocityHistory.pop_front();
 
-    if (PressedDigitalAction(m_ActionPrimaryAttack))
+    if (trigger)
     {
         m_GrenadeTriggerHeld = true;
         return;
@@ -1623,6 +1662,51 @@ void VR::UpdateGrenadeThrow()
     WriteGrenadeThrowLog("released: hand %.2f m/s (%.2f at the release, %.2f at the fastest point), strength %.2fx, arm part of the throw %.0f units/s at %.0f deg up, %d velocity samples",
         handSpeed, VectorLength(releaseVelocity), VectorLength(peakVelocity), strength, VectorLength(armVelocity),
         PitchUp(armVelocity), (int)m_HandVelocityHistory.size());
+}
+
+void VR::UpdateGrenadeCancel(std::chrono::steady_clock::time_point now, bool trigger)
+{
+    switch (m_GrenadeCancelState)
+    {
+    case GrenadeCancel_PuttingAway:
+        // The secondary weapon is out (the pin is back in): take the grenade out again. The attack is let go in the same
+        // usercmd, which doesn't throw since the grenade is being drawn.
+        if (!IsThrowableWeapon(m_ActiveWeaponId))
+        {
+            m_Game->ClientCmd_Unrestricted("slot3");
+            m_GrenadeCancelState = GrenadeCancel_WaitTriggerRelease;
+            WriteGrenadeThrowLog("cancel: grenade put away after %d ms, taking it out again",
+                (int)std::chrono::duration_cast<std::chrono::milliseconds>(now - m_GrenadeCancelTime).count());
+        }
+        else if (now - m_GrenadeCancelTime > kCancelSwitchTimeout)
+        {
+            m_GrenadeCancelState = GrenadeCancel_WaitTriggerRelease;
+            WriteGrenadeThrowLog("cancel failed: the grenade couldn't be put away");
+        }
+        break;
+
+    case GrenadeCancel_WaitTriggerRelease:
+        if (!trigger)
+            m_GrenadeCancelState = GrenadeCancel_None;
+        break;
+
+    default:
+        break;
+    }
+}
+
+// The attack sent to the game for the state of the trigger, held or held back while a throw is cancelled
+bool VR::GetAttackButton(bool trigger)
+{
+    switch (m_GrenadeCancelState)
+    {
+    case GrenadeCancel_PuttingAway:
+        return true;
+    case GrenadeCancel_WaitTriggerRelease:
+        return false;
+    default:
+        return trigger;
+    }
 }
 
 // True while the trigger is held with a throwable, and shortly after it's let go
