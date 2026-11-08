@@ -49,6 +49,7 @@ Hooks::Hooks(Game *game)
 	hkVgui_Paint.enableHook();
 	hkIsSplitScreen.enableHook();
 	hkPrePushRenderTarget.enableHook();
+	hkFormatViewModelAttachment.enableHook();
 }
 
 Hooks::~Hooks()
@@ -139,6 +140,9 @@ int Hooks::initSourceHooks()
 
 	LPVOID PrePushRenderTargetAddr = (LPVOID)(m_Game->m_Offsets->PrePushRenderTarget.address);
 	hkPrePushRenderTarget.createHook(PrePushRenderTargetAddr, &dPrePushRenderTarget);
+
+	LPVOID FormatViewModelAttachmentAddr = (LPVOID)(m_Game->m_Offsets->FormatViewModelAttachment.address);
+	hkFormatViewModelAttachment.createHook(FormatViewModelAttachmentAddr, &dFormatViewModelAttachment);
 
 	void *clientMode = nullptr;
 	while (!clientMode)
@@ -644,4 +648,18 @@ DWORD *Hooks::dPrePushRenderTarget(void *ecx, void *edx, int a2)
 		m_PushHUDStep = -999;
 
 	return hkPrePushRenderTarget.fOriginal(ecx, a2);
+}
+
+// The regular game draws the viewmodel with its own, narrower field of view (fovViewmodel), so points attached to the
+// viewmodel (laser sight, flashlight, muzzle flash, viewmodel particles) are converted between the viewmodel and the
+// world projection by scaling their offset from the center of the screen.
+// In VR both eyes draw the viewmodel with the world FOV (fovViewmodel == fov in dRenderView), so there is nothing to
+// convert: the conversion only moved those points around depending on where the HMD was looking.
+// (That made the laser trace start away from the weapon, so the dot wasn't on the beam.)
+void Hooks::dFormatViewModelAttachment(void *player, Vector &origin, bool inverse)
+{
+	if (m_VR->m_IsVREnabled)
+		return;
+
+	hkFormatViewModelAttachment.fOriginal(player, origin, inverse);
 }

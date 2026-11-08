@@ -80,6 +80,7 @@ typedef void(__thiscall *tPopRenderTargetAndViewport)(void *thisptr);
 typedef void(__thiscall *tVgui_Paint)(void *thisptr, int mode);
 typedef int(__cdecl *tIsSplitScreen)();
 typedef DWORD *(__thiscall *tPrePushRenderTarget)(void *thisptr, int a2);
+typedef void(__cdecl *tFormatViewModelAttachment)(void *player, Vector &origin, bool inverse);
 
 
 class Hooks
@@ -116,6 +117,7 @@ public:
 	static inline Hook<tVgui_Paint> hkVgui_Paint;
 	static inline Hook<tIsSplitScreen> hkIsSplitScreen;
 	static inline Hook<tPrePushRenderTarget> hkPrePushRenderTarget;
+	static inline Hook<tFormatViewModelAttachment> hkFormatViewModelAttachment;
 
 	Hooks() {};
 	Hooks(Game *game);
@@ -153,6 +155,7 @@ public:
 	static void __fastcall dVGui_Paint(void *ecx, void *edx, int mode);
 	static int __fastcall dIsSplitScreen();
 	static DWORD *__fastcall dPrePushRenderTarget(void *ecx, void *edx, int a2);
+	static void dFormatViewModelAttachment(void *player, Vector &origin, bool inverse);
 
 	static inline int m_PushHUDStep;
 	static inline bool m_PushedHud;
