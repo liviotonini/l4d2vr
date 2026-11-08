@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
+#include <cstdarg>
 #include <cstdio>
 #include "thirdparty/imgui/imgui.h"
 #include "thirdparty/imgui/imgui_impl_dx11.h"
@@ -23,7 +24,9 @@ namespace
 	constexpr float kFontSize = 26.0f;
 	constexpr float kUiScale = 1.5f;
 
-	constexpr auto kFrameInterval = std::chrono::milliseconds(22); // ~45 fps while the tab is open
+	constexpr auto kFrameInterval = std::chrono::milliseconds(22);      // ~45 fps while the laser is used on the tab
+	constexpr auto kIdleFrameInterval = std::chrono::milliseconds(250); // while the tab is open but nobody points at it
+	constexpr auto kInputActiveTime = std::chrono::seconds(1);          // how long after the last input to keep the full rate
 	constexpr auto kSaveDelay = std::chrono::milliseconds(750);   // wait for the user to stop changing values before writing config.txt
 
 	typedef HRESULT(WINAPI *CreateDXGIFactory1Fn)(REFIID riid, void **factory);
@@ -52,6 +55,34 @@ namespace
 	bool FileExists(const char *path)
 	{
 		return GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES;
+	}
+
+	// Writes a line to VR\settings_menu_log.txt (recreated each time the game starts). Only used for rare events.
+	void Log(const char *format, ...)
+	{
+		static bool s_Truncated = false;
+
+		char currentDir[MAX_PATH];
+		GetCurrentDirectoryA(MAX_PATH, currentDir);
+		char path[MAX_PATH];
+		snprintf(path, MAX_PATH, "%s\\VR\\settings_menu_log.txt", currentDir);
+
+		FILE *file = nullptr;
+		if (fopen_s(&file, path, s_Truncated ? "a" : "w") != 0 || !file)
+			return;
+		s_Truncated = true;
+
+		SYSTEMTIME time;
+		GetLocalTime(&time);
+		fprintf(file, "%02d:%02d:%02d.%03d ", time.wHour, time.wMinute, time.wSecond, time.wMilliseconds);
+
+		va_list args;
+		va_start(args, format);
+		vfprintf(file, format, args);
+		va_end(args);
+
+		fputc('\n', file);
+		fclose(file);
 	}
 
 	void ApplyStyle()
@@ -121,9 +152,11 @@ void SettingsMenu::Update()
 		if (!m_Initialized)
 		{
 			OutputDebugStringA("[L4D2VR] Settings menu could not be created, the SteamVR dashboard tab is disabled.\n");
+			Log("Init failed, the dashboard tab is disabled");
 			Shutdown();
 			return;
 		}
+		Log("Init done");
 	}
 
 	if (!m_Initialized)
@@ -133,34 +166,71 @@ void SettingsMenu::Update()
 
 	ProcessOverlayEvents();
 
-	const bool visible = vr::VROverlay()->IsOverlayVisible(m_OverlayHandle);
-	const auto now = std::chrono::steady_clock::now();
+	vr::IVROverlay *overlay = vr::VROverlay();
+	const bool overlayVisible = overlay->IsOverlayVisible(m_OverlayHandle);
+	const bool activeDashboardOverlay = overlay->IsActiveDashboardOverlay(m_OverlayHandle);
+	const bool dashboardVisible = overlay->IsDashboardVisible();
 
-	if (m_NeedsRedraw || (visible && now - m_LastFrameTime >= kFrameInterval))
+	const int visibilityState = (overlayVisible ? 1 : 0) | (activeDashboardOverlay ? 2 : 0) | (dashboardVisible ? 4 : 0);
+	if (visibilityState != m_LastVisibilityState)
 	{
-		Render();
+		Log("visibility: overlay visible %d, active dashboard overlay %d, dashboard visible %d (%d frames drawn so far)",
+			overlayVisible, activeDashboardOverlay, dashboardVisible, m_FramesDrawn);
+		m_LastVisibilityState = visibilityState;
+		m_NeedsRedraw = true;
+	}
+
+	const bool tabVisible = overlayVisible || activeDashboardOverlay;
+
+	// ImGui needs a second frame to lay out the tab bar and show the contents of the selected tab
+	if (m_NeedsRedraw)
+	{
+		m_PendingFrames = 2;
 		m_NeedsRedraw = false;
 	}
 
+	// Every frame is read back and uploaded through the CPU, so only draw at full rate while the menu is being used
+	const auto now = std::chrono::steady_clock::now();
+	const bool inUse = now - m_LastInputTime < kInputActiveTime || ImGui::IsAnyItemActive();
+	const auto frameInterval = inUse ? kFrameInterval : kIdleFrameInterval;
+
+	if (m_PendingFrames > 0 || (tabVisible && now - m_LastFrameTime >= frameInterval))
+	{
+		Render();
+		if (m_PendingFrames > 0)
+			m_PendingFrames--;
+	}
+
 	// Save right away when the dashboard is closed
-	SaveIfNeeded(!visible);
+	SaveIfNeeded(!dashboardVisible);
 }
 
 bool SettingsMenu::Init()
 {
 	vr::IVROverlay *overlay = vr::VROverlay();
 	if (!overlay)
+	{
+		Log("Init: no IVROverlay interface");
 		return false;
+	}
 
 	// d3d11.dll and d3dcompiler_47.dll are delay loaded (so the mod still loads without them). Make sure they exist before using them.
 	if (!LoadLibraryA("d3d11.dll") || !LoadLibraryA("d3dcompiler_47.dll"))
+	{
+		Log("Init: could not load d3d11.dll or d3dcompiler_47.dll");
 		return false;
+	}
 
 	if (!CreateDevice())
-		return false;
-
-	if (overlay->CreateDashboardOverlay(kOverlayKey, kOverlayName, &m_OverlayHandle, &m_ThumbnailHandle) != vr::VROverlayError_None)
 	{
+		Log("Init: could not create the D3D11 device or texture");
+		return false;
+	}
+
+	const vr::EVROverlayError createError = overlay->CreateDashboardOverlay(kOverlayKey, kOverlayName, &m_OverlayHandle, &m_ThumbnailHandle);
+	if (createError != vr::VROverlayError_None)
+	{
+		Log("Init: CreateDashboardOverlay failed: %s (%d)", overlay->GetOverlayErrorNameFromEnum(createError), (int)createError);
 		m_OverlayHandle = vr::k_ulOverlayHandleInvalid;
 		m_ThumbnailHandle = vr::k_ulOverlayHandleInvalid;
 		return false;
@@ -207,6 +277,8 @@ bool SettingsMenu::InitImGui()
 		io.Fonts->AddFontDefaultVector();
 
 	m_ImGuiRendererInitialized = ImGui_ImplDX11_Init(m_Device, m_Context);
+	if (!m_ImGuiRendererInitialized)
+		Log("Init: ImGui_ImplDX11_Init failed");
 	return m_ImGuiRendererInitialized;
 }
 
@@ -236,6 +308,7 @@ bool SettingsMenu::CreateDevice()
 		featureLevels, ARRAYSIZE(featureLevels), D3D11_SDK_VERSION, &m_Device, nullptr, &m_Context);
 	SafeRelease(adapter);
 
+	Log("D3D11CreateDevice on adapter %d: 0x%08X", adapterIndex, (unsigned)result);
 	if (FAILED(result))
 		return false;
 
@@ -250,6 +323,14 @@ bool SettingsMenu::CreateDevice()
 	textureDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
 
 	if (FAILED(m_Device->CreateTexture2D(&textureDesc, nullptr, &m_Texture)))
+		return false;
+
+	// CPU readable copy of the texture, for SetOverlayRaw
+	D3D11_TEXTURE2D_DESC stagingDesc = textureDesc;
+	stagingDesc.Usage = D3D11_USAGE_STAGING;
+	stagingDesc.BindFlags = 0;
+	stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+	if (FAILED(m_Device->CreateTexture2D(&stagingDesc, nullptr, &m_StagingTexture)))
 		return false;
 
 	return SUCCEEDED(m_Device->CreateRenderTargetView(m_Texture, nullptr, &m_RenderTargetView));
@@ -269,6 +350,7 @@ void SettingsMenu::Shutdown()
 
 	SafeRelease(m_RenderTargetView);
 	SafeRelease(m_Texture);
+	SafeRelease(m_StagingTexture);
 	SafeRelease(m_Context);
 	SafeRelease(m_Device);
 
@@ -287,6 +369,10 @@ void SettingsMenu::ProcessOverlayEvents()
 	vr::VREvent_t event;
 	while (vr::VROverlay()->PollNextOverlayEvent(m_OverlayHandle, &event, sizeof(event)))
 	{
+		if (event.eventType == vr::VREvent_MouseMove || event.eventType == vr::VREvent_MouseButtonDown
+			|| event.eventType == vr::VREvent_MouseButtonUp || event.eventType == vr::VREvent_ScrollDiscrete)
+			m_LastInputTime = std::chrono::steady_clock::now();
+
 		switch (event.eventType)
 		{
 		case vr::VREvent_MouseMove:
@@ -317,7 +403,12 @@ void SettingsMenu::ProcessOverlayEvents()
 			break;
 
 		case vr::VREvent_OverlayShown:
+			Log("event: OverlayShown");
 			m_NeedsRedraw = true;
+			break;
+
+		case vr::VREvent_OverlayHidden:
+			Log("event: OverlayHidden");
 			break;
 		}
 	}
@@ -344,10 +435,38 @@ void SettingsMenu::Render()
 	m_Context->OMSetRenderTargets(1, &m_RenderTargetView, nullptr);
 	m_Context->ClearRenderTargetView(m_RenderTargetView, clearColor);
 	ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
-	m_Context->Flush();
 
-	vr::Texture_t texture = { m_Texture, vr::TextureType_DirectX, vr::ColorSpace_Auto };
-	vr::VROverlay()->SetOverlayTexture(m_OverlayHandle, &texture);
+	// Send the pixels with SetOverlayRaw instead of sharing the D3D11 texture with SetOverlayTexture. Inside the game's
+	// process the shared texture was accepted without errors but the dashboard tab stayed empty, while the same code in a
+	// standalone process worked. Copying through the CPU avoids GPU texture sharing completely.
+	const auto uploadStart = std::chrono::steady_clock::now();
+
+	m_Context->CopyResource(m_StagingTexture, m_Texture);
+	D3D11_MAPPED_SUBRESOURCE mapped;
+	const HRESULT mapResult = m_Context->Map(m_StagingTexture, 0, D3D11_MAP_READ, 0, &mapped);
+	if (FAILED(mapResult))
+	{
+		if (!m_LoggedMapError)
+			Log("Map of the staging texture failed: 0x%08X", (unsigned)mapResult);
+		m_LoggedMapError = true;
+		return;
+	}
+
+	const size_t rowSize = (size_t)kTextureWidth * 4;
+	m_Pixels.resize(rowSize * kTextureHeight);
+	for (int y = 0; y < kTextureHeight; y++)
+		memcpy(&m_Pixels[y * rowSize], (const unsigned char *)mapped.pData + (size_t)y * mapped.RowPitch, rowSize);
+	m_Context->Unmap(m_StagingTexture, 0);
+
+	const vr::EVROverlayError error = vr::VROverlay()->SetOverlayRaw(m_OverlayHandle, m_Pixels.data(), kTextureWidth, kTextureHeight, 4);
+
+	m_FramesDrawn++;
+	const float uploadMs = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - uploadStart).count();
+	if (error != m_LastTextureError || m_FramesDrawn == 1 || m_FramesDrawn % 500 == 0)
+	{
+		Log("SetOverlayRaw: %s (%d) on frame %d, read back and upload took %.2f ms", vr::VROverlay()->GetOverlayErrorNameFromEnum(error), (int)error, m_FramesDrawn, uploadMs);
+		m_LastTextureError = error;
+	}
 }
 
 void SettingsMenu::DrawMenu()

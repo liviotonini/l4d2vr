@@ -1,6 +1,7 @@
 #pragma once
 #include "openvr.h"
 #include <chrono>
+#include <vector>
 
 class VR;
 struct ID3D11Device;
@@ -13,6 +14,7 @@ struct ImGuiContext;
 // Changes are applied immediately and saved to VR\config.txt.
 //
 // The menu is drawn with Dear ImGui on its own D3D11 device, so it never touches the state of the game's D3D9 (DXVK) device.
+// The pixels are read back and sent with SetOverlayRaw (sharing the D3D11 texture with SetOverlayTexture showed an empty tab).
 // Everything runs on the game's render thread from VR::Update(), like the other overlay calls.
 class SettingsMenu
 {
@@ -48,13 +50,25 @@ private:
 	ID3D11Device *m_Device = nullptr;
 	ID3D11DeviceContext *m_Context = nullptr;
 	ID3D11Texture2D *m_Texture = nullptr;
+	ID3D11Texture2D *m_StagingTexture = nullptr; // CPU readable copy of m_Texture, for SetOverlayRaw
 	ID3D11RenderTargetView *m_RenderTargetView = nullptr;
+	std::vector<unsigned char> m_Pixels;
 
 	ImGuiContext *m_ImGuiContext = nullptr;
 	bool m_ImGuiRendererInitialized = false;
 
 	bool m_NeedsRedraw = true;
+	int m_PendingFrames = 0; // frames to draw even when the dashboard is closed
 	std::chrono::steady_clock::time_point m_LastFrameTime;
+
+	// Diagnostics, written to VR\settings_menu_log.txt
+	int m_FramesDrawn = 0;
+	int m_LastVisibilityState = -1;
+	vr::EVROverlayError m_LastTextureError = vr::VROverlayError_None;
+	bool m_LoggedMapError = false;
+
+	// Last laser pointer input on the tab, to draw at full rate only while it's being used
+	std::chrono::steady_clock::time_point m_LastInputTime;
 
 	bool m_HasUnsavedChanges = false;
 	bool m_SavedOnce = false;
