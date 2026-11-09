@@ -455,6 +455,7 @@
     <ClInclude Include="sdk\vector.h" />
     <ClInclude Include="haptics.h" />
     <ClInclude Include="pose_relay.h" />
+    <ClInclude Include="reload_logic.h" />
     <ClInclude Include="settings_menu.h" />
     <ClInclude Include="stability.h" />
     <ClInclude Include="sigscanner.h" />
@@ -611,6 +612,7 @@
     <ClCompile Include="hooks.cpp" />
     <ClCompile Include="sdk\checksum_crc.cpp" />
     <ClCompile Include="haptics.cpp" />
+    <ClCompile Include="manual_reload.cpp" />
     <ClCompile Include="pose_relay.cpp" />
     <ClCompile Include="settings_menu.cpp" />
     <ClCompile Include="stability.cpp" />

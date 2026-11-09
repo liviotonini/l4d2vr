@@ -288,7 +288,7 @@ void PoseRelay::OnAcknowledged()
 
 void PoseRelay::Update(VR *vr, C_BasePlayer *localPlayer)
 {
-	if ((!vr->m_ShareBodyMovement && !vr->m_ShowOtherPlayersMovement) || !localPlayer)
+	if (!localPlayer)
 		return;
 
 	const unsigned long long now = NowMs();
@@ -305,6 +305,9 @@ void PoseRelay::Update(VR *vr, C_BasePlayer *localPlayer)
 		}
 		return;
 	}
+
+	if (!vr->m_ShareBodyMovement && !vr->m_ShowOtherPlayersMovement)
+		return;
 
 	// Only receiving: the server forgets players it hasn't heard from
 	if (!vr->m_ShareBodyMovement)
@@ -397,6 +400,13 @@ bool PoseRelay::HandleServerCommand(edict_t *player, const void *commandObject)
 	const CommandArgs &args = *(const CommandArgs *)commandObject;
 	const char *name = args.Arg(0);
 
+	if (strcmp(name, "l4d2vr_reload") == 0)
+	{
+		if (args.Count() == 4)
+			ApplyReload(player, atoi(args.Arg(1)), atoi(args.Arg(2)), atoi(args.Arg(3)));
+		return true;
+	}
+
 	const bool isHello = strcmp(name, "l4d2vr_pose_hello") == 0;
 	const bool isUpload = strcmp(name, "l4d2vr_pose_upload") == 0;
 	if (!isHello && !isUpload)
@@ -474,6 +484,67 @@ bool PoseRelay::HandleServerCommand(edict_t *player, const void *commandObject)
 	}
 
 	return true;
+}
+
+// On the server: finishes a reload done with the hands, for the weapon the player is holding. The ammo is worked out
+// here, the client only says what it did.
+void PoseRelay::ApplyReload(edict_t *player, int shell, int ammoType, int expectedReserve)
+{
+	const int kClipOffset = 0x1414;
+	const int kInReloadOffset = 0x144D;
+	const int kPartialReloadOffset = 0x17D8;
+	const int kReloadFromEmptyOffset = 0x17DF;
+	const int kAmmoArrayOffset = 0x1874;
+	const int kMaxReserveDifference = 80; // the client's number can be a little behind
+
+	if (!player || !player->m_pUnk || ammoType < 0 || ammoType >= 32)
+		return;
+
+	void *serverPlayer = player->m_pUnk->GetBaseEntity();
+	if (!serverPlayer)
+		return;
+
+	typedef Server_WeaponCSBase *(__thiscall *tGetActiveWeapon)(void *thisptr);
+	tGetActiveWeapon getActiveWeapon = (tGetActiveWeapon)(m_Game->m_Offsets->GetActiveWeapon.address);
+	Server_WeaponCSBase *weapon = getActiveWeapon ? getActiveWeapon(serverPlayer) : nullptr;
+	if (!weapon)
+		return;
+
+	const int capacity = VR::GetReloadCapacity(weapon->GetWeaponID());
+	if (capacity <= 0)
+		return;
+
+	int &clip = *(int *)((uint8_t *)weapon + kClipOffset);
+	int &reserve = *(int *)((uint8_t *)serverPlayer + kAmmoArrayOffset + ammoType * 4);
+
+	// If this isn't the number the client has, these offsets are wrong for this version of the game: nothing is written
+	if (clip < 0 || clip > 1000 || reserve < 0 || abs(reserve - expectedReserve) > kMaxReserveDifference)
+	{
+		Diagnostics::Log("manual reload: unexpected values on the server (clip %d, reserve %d, client's reserve %d), ignored", clip, reserve, expectedReserve);
+		return;
+	}
+
+	if (shell)
+	{
+		if (clip < capacity && reserve > 0)
+		{
+			++clip;
+			--reserve;
+		}
+	}
+	else
+	{
+		// What was left in the old magazine isn't lost, like in the game's reload
+		const int total = clip + reserve;
+		const int newClip = std::min(std::max(capacity, clip), total);
+		reserve = total - newClip;
+		clip = newClip;
+	}
+
+	// If the game had started its own reload
+	*((uint8_t *)weapon + kInReloadOffset) = 0;
+	*((uint8_t *)weapon + kPartialReloadOffset) = 0;
+	*((uint8_t *)weapon + kReloadFromEmptyOffset) = 0;
 }
 
 void PoseRelay::OnPoseReceived(int playerIndex, uint16_t sequence, const char *payload)

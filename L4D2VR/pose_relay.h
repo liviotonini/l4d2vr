@@ -53,6 +53,7 @@ public:
 	bool GetPose(int playerIndex, Frame &out);
 
 	bool HasRemotePlayers() const { return m_RemoteCount > 0; }
+	bool IsServerCapable() const { return m_ServerCapable; }
 
 	// How the mod moved the right hand of a player, applied to the weapon in that hand
 	void SetWeaponDelta(int playerIndex, const HandMath::Mat34 &delta);
@@ -100,4 +101,5 @@ private:
 	int m_RemoteCount = 0;
 
 	bool SendToClient(edict_t *edict, const char *command);
+	void ApplyReload(edict_t *player, int shell, int ammoType, int expectedReserve);
 };

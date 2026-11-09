@@ -327,6 +327,14 @@ public:
 	// HUD on the wrist of the hand that doesn't hold the weapon (wrist_hud.cpp)
 	bool m_WristHudEnabled = true;
 
+	// Reloading with the hands (manual_reload.cpp, reload_logic.h)
+	bool m_ManualReloadEnabled = true;
+	bool m_ReloadActive = false;
+	bool m_ReloadUsesShells = false;
+	int m_ReloadClip = 0;
+	HandMath::Vec3 m_WaistWorld;
+	HandMath::Vec3 m_WaistForward;
+
 	// Other players' movements (pose_relay.cpp, world_pose.cpp)
 	bool m_ShareBodyMovement = true;       // the others see my arms
 	bool m_ShowOtherPlayersMovement = true; // I see theirs
@@ -386,6 +394,15 @@ public:
 	bool BuildFirstPersonHands(const void *studioHeader, const void *customBones, void *outBones);
 	void ClearModelCaches();
 	void UpdateWristHud();
+	void UpdateManualReload();
+	static int GetReloadCapacity(int weaponId);
+	bool ManualReloadBlocksFire() const;
+	bool ManualReloadBlocksNativeReload() const;
+	bool ManualReloadHandIsBusy() const;
+	void ClearManualReloadCache();
+	bool BuildReloadViewmodel(const void *studioHeader, const void *customBones, void *outBones, void *outDetached, bool &drawDetached);
+	HandMath::Vec3 GetLeftPalm() const;
+	HandMath::Mat34 GetLeftHandGrabFrame() const;
 	HandMath::Vec3 GetRightWristAbs() const;
 	bool BuildRemotePlayerBones(int playerIndex, const void *studioHeader, const void *customBones, void *outBones);
 	bool BuildRemoteWeaponBones(int entityIndex, const void *studioHeader, const void *customBones, void *outBones);

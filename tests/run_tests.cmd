@@ -11,5 +11,5 @@ if not defined VSPATH (
 call "%VSPATH%\VC\Auxiliary\Build\vcvars32.bat" >nul || exit /b 1
 cd /d "%~dp0"
 if not exist bin mkdir bin
-cl /nologo /EHsc /std:c++17 /O2 /Fobin\ /Febin\tests.exe main.cpp test_hands.cpp test_wrist_hud.cpp test_pose.cpp %* || exit /b 1
+cl /nologo /EHsc /std:c++17 /O2 /Fobin\ /Febin\tests.exe main.cpp test_hands.cpp test_wrist_hud.cpp test_pose.cpp test_reload.cpp %* || exit /b 1
 bin\tests.exe

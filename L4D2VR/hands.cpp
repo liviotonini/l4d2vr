@@ -149,7 +149,8 @@ bool VR::BuildFirstPersonHands(const void *studioHeader, const void *customBones
 		}
 		else
 		{
-			alignas(16) Mat34 posed[Studio::kMaxBones];
+			alignas(16) unsigned char storage[sizeof(Mat34) * Studio::kMaxBones];
+			Mat34 *posed = (Mat34 *)storage;
 			memcpy(posed, bones, boneCount * sizeof(Mat34));
 			rig.PoseHand(HandRig::Left, hand, m_LeftFingerCurls, posed);
 			rig.BlendHand(HandRig::Left, (const Mat34 *)customBones, posed, m_LeftHandFollow, bones);

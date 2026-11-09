@@ -194,6 +194,7 @@ void VR::Update()
             IMatRenderContext *rndrContext = m_Game->m_MaterialSystem->GetRenderContext();
             rndrContext->SetRenderTarget(NULL);
             ClearModelCaches();
+            ClearManualReloadCache();
             m_Game->m_PoseRelay->Reset();
             m_CreatedVRTextures = false; // Have to recreate textures otherwise some workshop maps won't render
         }
@@ -709,7 +710,7 @@ void VR::ProcessInput()
         m_Game->ClientCmd_Unrestricted("-use");
     }
 
-    if (PressedDigitalAction(m_ActionReload) || isReloading)
+    if ((PressedDigitalAction(m_ActionReload) && !ManualReloadBlocksNativeReload()) || isReloading)
     {
         m_Game->ClientCmd_Unrestricted("+reload");
         isReloading = false;
@@ -1745,7 +1746,7 @@ bool VR::GetAttackButton(bool trigger)
     case GrenadeCancel_WaitTriggerRelease:
         return false;
     default:
-        return trigger;
+        return trigger && !ManualReloadBlocksFire();
     }
 }
 
@@ -2238,6 +2239,8 @@ void VR::UpdateTracking()
     Vector rightControllerForward_2handAdjust = m_RightControllerForward;
     Vector rightControllerRight_2handAdjust = m_RightControllerRight;
     Vector rightControllerUp_2handAdjust = m_RightControllerUp;
+    UpdateManualReload();
+
     if (PressedDigitalAction(m_RightHandGrab) || PressedDigitalAction(m_LeftHandGrab))
     {
         Vector handsDistanceLocalInWorld = leftControllerPosLocalInWorld - rightControllerPosLocalInWorld;
@@ -2273,7 +2276,11 @@ void VR::UpdateTracking()
             float handsDistanceFor2HandWeaponOffset = 5.0f;
 
             float angleLimitFor2HandWeapon = 15.0f;
-            if (isHoldingWeapon2Handed ||
+            if (ManualReloadHandIsBusy())
+            {
+                isHoldingWeapon2Handed = false;
+            }
+            else if (isHoldingWeapon2Handed ||
                 (handsDistanceLocalInWorldLength >= (handsDistanceFor2HandWeapon - handsDistanceFor2HandWeaponOffset)
                     && handsDistanceLocalInWorldLength <= (handsDistanceFor2HandWeapon + handsDistanceFor2HandWeaponOffset)
                     && rightControllerForward_HandsDistLocalWorld_Angle <= angleLimitFor2HandWeapon))
@@ -2313,7 +2320,8 @@ void VR::UpdateTracking()
             // Check if reloading
             float maxHandsDistanceToReload = 15.0f;
 
-            if (isHoldingWeapon2Handed == false
+            if (!ManualReloadBlocksNativeReload()
+                && isHoldingWeapon2Handed == false
                 && dotProduct_RightControllerUp_HandsDistLocalWorld <= -0.9f
                 && handsDistanceLocalInWorldLength <= maxHandsDistanceToReload)
             {
@@ -2322,7 +2330,8 @@ void VR::UpdateTracking()
 
             if (isHoldingWeapon2Handed == false && isPressingLeftGrab == false)
             {
-                UpdateBodyGrab(false, leftControllerPosLocalInWorld, weaponId);
+                if (!ManualReloadHandIsBusy())
+                    UpdateBodyGrab(false, leftControllerPosLocalInWorld, weaponId);
 
                 isPressingLeftGrab = true;
             }
@@ -2452,6 +2461,7 @@ void VR::ParseConfigFile()
     m_DiagnosticsEnabled = userConfig["DiagnosticsEnabled"] == "true";
     m_InteractWithHand = userConfig["InteractWithHand"] != "false"; // enabled if missing from config
     m_WristHudEnabled = userConfig["WristHudEnabled"] != "false"; // enabled if missing from config
+    m_ManualReloadEnabled = userConfig["ManualReload"] != "false"; // enabled if missing from config
     m_ShareBodyMovement = userConfig["ShareBodyMovement"] != "false"; // enabled if missing from config
     m_ShowOtherPlayersMovement = userConfig["ShowOtherPlayersMovement"] != "false"; // enabled if missing from config
 
@@ -2525,6 +2535,7 @@ bool VR::SaveConfigFile()
         { "DiagnosticsEnabled", ConfigBoolString(m_DiagnosticsEnabled) },
         { "InteractWithHand", ConfigBoolString(m_InteractWithHand) },
         { "WristHudEnabled", ConfigBoolString(m_WristHudEnabled) },
+        { "ManualReload", ConfigBoolString(m_ManualReloadEnabled) },
         { "ShareBodyMovement", ConfigBoolString(m_ShareBodyMovement) },
         { "ShowOtherPlayersMovement", ConfigBoolString(m_ShowOtherPlayersMovement) },
     };

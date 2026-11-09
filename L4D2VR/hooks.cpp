@@ -731,11 +731,28 @@ void Hooks::dDrawModelExecute(void *ecx, void *edx, void *state, const ModelRend
 	if (kind == ModelKind::Viewmodel || kind == ModelKind::DualPistolsViewmodel)
 		m_VR->m_ViewmodelHasTwoWeapons = kind == ModelKind::DualPistolsViewmodel;
 
+	if (kind == ModelKind::Viewmodel && pCustomBoneToWorld)
+	{
+		Diagnostics::ScopedTimer timer(Diagnostics::Section_Models);
+
+		alignas(16) unsigned char bones[sizeof(HandMath::Mat34) * Studio::kMaxBones];
+		alignas(16) unsigned char detached[sizeof(HandMath::Mat34) * Studio::kMaxBones];
+		bool drawDetached = false;
+
+		if (m_VR->BuildReloadViewmodel(*(const void **)state, pCustomBoneToWorld, bones, detached, drawDetached))
+		{
+			hkDrawModelExecute.fOriginal(ecx, state, info, bones);
+			if (drawDetached)
+				hkDrawModelExecute.fOriginal(ecx, state, info, detached);
+			return;
+		}
+	}
+
 	if (pCustomBoneToWorld && kind != ModelKind::Other && kind != ModelKind::Viewmodel && kind != ModelKind::DualPistolsViewmodel)
 	{
 		Diagnostics::ScopedTimer timer(Diagnostics::Section_Models);
 
-		alignas(16) HandMath::Mat34 bones[Studio::kMaxBones];
+		alignas(16) unsigned char bones[sizeof(HandMath::Mat34) * Studio::kMaxBones];
 		const void *studioHeader = *(const void **)state;
 
 		bool changed = false;
