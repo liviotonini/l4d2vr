@@ -87,10 +87,6 @@ public:
     bool IsValidPlayerIndex(int index) const { return index >= 0 && index < (int)m_PlayersVRInfo.size(); }
     bool m_PerformingMelee = false;
 
-    model_t *m_ArmsModel = nullptr;
-    IMaterial *m_ArmsMaterial = nullptr;
-    bool m_CachedArmsModel = false;
-
     bool m_IsMeleeWeaponActive = false;
     bool m_SwitchedWeapons = false;
 

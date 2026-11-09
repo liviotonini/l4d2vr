@@ -1,5 +1,6 @@
 #pragma once
 #include <iostream>
+#include <unordered_map>
 #include "MinHook.h"
 
 class Game;
@@ -135,6 +136,10 @@ public:
 	static inline tGetPlayerOwner m_GetGrenadeOwner = nullptr;
 	static inline int m_EmitGrenadeVtableOffset = 0;
 	static inline int m_AbsVelocityOffset = 0; // CBaseEntity::m_vecAbsVelocity
+
+	enum class ModelKind { Other, FirstPersonArms, Viewmodel, DualPistolsViewmodel };
+	static inline std::unordered_map<const void *, ModelKind> m_ModelKinds;
+	static ModelKind GetModelKind(const void *model);
 
 	Hooks() {};
 	Hooks(Game *game);

@@ -6,6 +6,8 @@
 #include <chrono>
 #include <deque>
 #include <mutex>
+#include <unordered_map>
+#include "hand_rig.h"
 
 #define MAX_STR_LEN 256
 
@@ -103,6 +105,7 @@ public:
 	Vector m_RightControllerRightRaw = { 0,-1,0 };
 	Vector m_RightControllerUpRaw = { 0,0,1 };
 	vr::TrackedDeviceIndex_t m_RightControllerDeviceIndex = vr::k_unTrackedDeviceIndexInvalid;
+	vr::TrackedDeviceIndex_t m_LeftControllerDeviceIndex = vr::k_unTrackedDeviceIndexInvalid;
 	QAngle m_RightControllerAngAbs = { 0,0,0 }; // Weapon aim angles. Also read directly by the patched laser sight code in client.dll
 
 	Vector m_ViewmodelPosOffset;
@@ -187,6 +190,8 @@ public:
 	vr::VRActionHandle_t m_LeftHandGrab;
 	vr::VRActionHandle_t m_RightHandGrab;
 	vr::VRActionHandle_t m_ToggleWalkSpeed;
+	vr::VRActionHandle_t m_ActionSkeletonLeft = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_ActionSkeletonRight = vr::k_ulInvalidActionHandle;
 
 	TrackedDevicePoseData m_HmdPose;
 	TrackedDevicePoseData m_LeftControllerPose;
@@ -202,7 +207,6 @@ public:
 	bool m_LeftHanded = false;
 	float m_VRScale = 43.2;
 	float m_IpdScale = 1.0;
-	bool m_HideArms = false;
 	float m_HudDistance = 1.3;
 	float m_HudSize = 1.1;
 	bool m_HudAlwaysVisible = false;
@@ -273,6 +277,8 @@ public:
 	// Scope of the sniper rifles: the game's view is rendered again from the scope into m_ScopeTexture,
 	// which is shown on two overlays at the eyepiece (the image and a mask with the black ring and the reticle)
 	static constexpr int kScopeTextureSize = 768;
+	// Degrees from the pose SteamVR reports for the controller to the direction the fingers point when holding it
+	static constexpr float kHandGripTilt = -45.0f;
 	vr::VROverlayHandle_t m_ScopeHandle = vr::k_ulOverlayHandleInvalid;
 	vr::VROverlayHandle_t m_ScopeMaskHandle = vr::k_ulOverlayHandleInvalid;
 	int m_ScopeOverlayCreateError = 0;
@@ -295,6 +301,25 @@ public:
 	SettingsMenu *m_SettingsMenu = nullptr;
 	// Write time of the last config.txt saved by SaveConfigFile(), so WaitForConfigUpdate() doesn't reload our own save
 	std::atomic<long long> m_ConfigWriteTimeSavedByMenu{ 0 };
+
+	// The two hands (hands.cpp). Only the hands of the first person arms are drawn. The right one stays on the weapon,
+	// the left one follows the controller except when the weapon needs it.
+	struct HandModel
+	{
+		HandRig rig;
+		bool valid = false;
+	};
+	std::unordered_map<const void *, HandModel> m_HandModels;
+	HandMath::Mat34 m_LeftHandTarget;       // hand bone, world
+	HandMath::Vec3 m_LeftHandForward;       // fingers
+	HandMath::Vec3 m_LeftHandUp;            // thumb side
+	HandMath::Vec3 m_LeftHandWrist;
+	float m_LeftFingerCurls[HandRig::FingerCount] = { HandRig::kRelaxedCurl, HandRig::kRelaxedCurl, HandRig::kRelaxedCurl, HandRig::kRelaxedCurl, HandRig::kRelaxedCurl };
+	float m_LeftHandFollow = 0.0f;          // 0 = the weapon's animation, 1 = the controller
+	bool m_ViewmodelHasTwoWeapons = false;  // dual pistols, both hands are holding one
+	// Where the wrist is from the controller and how the hand is turned, see DefaultHandOffset. Not in the menu.
+	Vector m_HandOffsetMeters = { -0.10f, 0.0f, -0.08f }; // forward, right, up
+	QAngle m_HandAngleOffset = { 0.0f, 0.0f, 0.0f };
 
 	// Weapon orientation stored relative to the "two hands" frame at the moment the left hand grabs the weapon
 	Vector m_TwoHandForwardLocal = { 1,0,0 };
@@ -337,6 +362,11 @@ public:
 	Vector GetRecommendedViewmodelAbsPos();
 	QAngle GetRecommendedViewmodelAbsAngle();
 	void UpdateTracking();
+	void UpdateHands(float deltaSeconds);
+	bool WantsLeftHandOnController() const;
+	bool IsWeaponReloading() const;
+	bool BuildFirstPersonHands(const void *studioHeader, const void *customBones, void *outBones);
+	void ClearModelCaches();
 	void UpdateFlashlightAttachment();
 	void PatchLaserSight();
 	void CreateScopeOverlays();

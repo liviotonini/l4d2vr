@@ -440,6 +440,9 @@
     <ClInclude Include="..\dxvk\tests\test_utils.h" />
     <ClInclude Include="diagnostics.h" />
     <ClInclude Include="game.h" />
+    <ClInclude Include="hand_math.h" />
+    <ClInclude Include="hand_rig.h" />
+    <ClInclude Include="studio.h" />
     <ClInclude Include="hooks.h" />
     <ClInclude Include="offsets.h" />
     <ClInclude Include="sdk\checksum_crc.h" />
@@ -599,6 +602,8 @@
     <ClCompile Include="..\dxvk\src\vulkan\vulkan_presenter.cpp" />
     <ClCompile Include="diagnostics.cpp" />
     <ClCompile Include="dllmain.cpp" />
+    <ClCompile Include="hands.cpp" />
+    <ClCompile Include="hand_rig.cpp" />
     <ClCompile Include="game.cpp" />
     <ClCompile Include="hooks.cpp" />
     <ClCompile Include="sdk\checksum_crc.cpp" />

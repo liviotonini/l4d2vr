@@ -149,6 +149,8 @@ int VR::SetActionManifest(const char *fileName)
     m_Input->GetActionHandle("/actions/main/in/LeftHandGrab", &m_LeftHandGrab);
     m_Input->GetActionHandle("/actions/main/in/RightHandGrab", &m_RightHandGrab);
     m_Input->GetActionHandle("/actions/main/in/ToggleWalkSpeed", &m_ToggleWalkSpeed);
+    m_Input->GetActionHandle("/actions/base/in/skeleton_lefthand", &m_ActionSkeletonLeft);
+    m_Input->GetActionHandle("/actions/base/in/skeleton_righthand", &m_ActionSkeletonRight);
 
     m_Input->GetActionSetHandle("/actions/main", &m_ActionSet);
     m_ActiveActionSets[0] = {};
@@ -190,7 +192,7 @@ void VR::Update()
         {
             IMatRenderContext *rndrContext = m_Game->m_MaterialSystem->GetRenderContext();
             rndrContext->SetRenderTarget(NULL);
-            m_Game->m_CachedArmsModel = false;
+            ClearModelCaches();
             m_CreatedVRTextures = false; // Have to recreate textures otherwise some workshop maps won't render
         }
     }
@@ -414,6 +416,7 @@ void VR::GetPoses()
         std::swap(leftControllerIndex, rightControllerIndex);
 
     m_RightControllerDeviceIndex = rightControllerIndex;
+    m_LeftControllerDeviceIndex = leftControllerIndex;
 
     vr::TrackedDevicePose_t leftControllerPose = m_Poses[leftControllerIndex];
     vr::TrackedDevicePose_t rightControllerPose = m_Poses[rightControllerIndex];
@@ -2189,6 +2192,7 @@ void VR::UpdateTracking()
     Vector leftControllerPosLocalInWorld = LeftControllerPosCorrected * m_VRScale;
 
     m_RightControllerPosAbs = m_CameraAnchor - Vector(0, 0, 64) + rightControllerPosLocalInWorld;
+    m_LeftControllerPosAbs = m_CameraAnchor - Vector(0, 0, 64) + leftControllerPosLocalInWorld;
 
     rightControllerAngLocal.y += m_RotationOffset;
     // Wrap angle from -180 to 180
@@ -2200,6 +2204,14 @@ void VR::UpdateTracking()
 
     QAngle::AngleVectors(leftControllerAngLocal, &m_LeftControllerForward, &m_LeftControllerRight, &m_LeftControllerUp);			
     QAngle::AngleVectors(rightControllerAngLocal, &m_RightControllerForward, &m_RightControllerRight, &m_RightControllerUp);
+
+    // The hand holds the controller at a fixed angle, whatever the aim is set to
+    {
+        const Vector tiltedForward = VectorRotate(m_LeftControllerForward, m_LeftControllerRight, kHandGripTilt);
+        const Vector tiltedUp = VectorRotate(m_LeftControllerUp, m_LeftControllerRight, kHandGripTilt);
+        m_LeftHandForward = { tiltedForward.x, tiltedForward.y, tiltedForward.z };
+        m_LeftHandUp = { tiltedUp.x, tiltedUp.y, tiltedUp.z };
+    }
 
     m_RightControllerPosAbsRaw = m_RightControllerPosAbs;
     m_RightControllerForwardRaw = m_RightControllerForward;
@@ -2351,6 +2363,7 @@ void VR::UpdateTracking()
     m_ViewmodelRight = VectorRotate(m_ViewmodelRight, m_ViewmodelForward, m_ViewmodelAngOffset.z);
     m_ViewmodelUp = VectorRotate(m_ViewmodelUp, m_ViewmodelForward, m_ViewmodelAngOffset.z);
 
+    UpdateHands(deltaTime * 0.001f);
 }
 
 
@@ -2414,7 +2427,6 @@ void VR::ParseConfigFile()
     m_LeftHanded = userConfig["LeftHanded"] == "true";
     m_VRScale = std::stof(userConfig["VRScale"]);
     m_IpdScale = std::stof(userConfig["IPDScale"]);
-    m_HideArms = userConfig["HideArms"] == "true";
     m_HudDistance = std::stof(userConfig["HudDistance"]);
     m_HudSize = std::stof(userConfig["HudSize"]);
     m_HudAlwaysVisible = userConfig["HudAlwaysVisible"] == "true";
@@ -2433,6 +2445,15 @@ void VR::ParseConfigFile()
     m_ScopeDebug = userConfig["ScopeDebug"] == "true";
 
     m_DiagnosticsEnabled = userConfig["DiagnosticsEnabled"] == "true";
+
+    // Fine tuning of the hand, only by editing config.txt
+    Vector handOffset = m_HandOffsetMeters;
+    if (sscanf_s(userConfig["HandOffsetMeters"].c_str(), "%f,%f,%f", &handOffset.x, &handOffset.y, &handOffset.z) == 3)
+        m_HandOffsetMeters = handOffset;
+    QAngle handAngle = m_HandAngleOffset;
+    if (sscanf_s(userConfig["HandAngleOffset"].c_str(), "%f,%f,%f", &handAngle.x, &handAngle.y, &handAngle.z) == 3)
+        m_HandAngleOffset = handAngle;
+
     m_GrenadeThrowGesture = userConfig["GrenadeThrowGesture"] != "false"; // enabled if missing from config
     const std::string &grenadeThrowStrength = userConfig["GrenadeThrowStrength"];
     m_GrenadeThrowStrength = grenadeThrowStrength.empty() ? 2.0f : std::clamp(std::stof(grenadeThrowStrength), 0.5f, 5.0f);
@@ -2476,7 +2497,6 @@ bool VR::SaveConfigFile()
         { "LeftHanded", ConfigBoolString(m_LeftHanded) },
         { "VRScale", ConfigFloatString(m_VRScale) },
         { "IPDScale", ConfigFloatString(m_IpdScale) },
-        { "HideArms", ConfigBoolString(m_HideArms) },
         { "HudDistance", ConfigFloatString(m_HudDistance) },
         { "HudSize", ConfigFloatString(m_HudSize) },
         { "HudAlwaysVisible", ConfigBoolString(m_HudAlwaysVisible) },

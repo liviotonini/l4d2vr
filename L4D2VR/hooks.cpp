@@ -6,6 +6,7 @@
 #include "vr.h"
 #include "offsets.h"
 #include "diagnostics.h"
+#include "studio.h"
 #include <algorithm>
 #include <iostream>
 
@@ -653,31 +654,44 @@ Vector *Hooks::dEyePosition(void *ecx, void *edx, Vector *eyePos)
 	return result;
 }
 
-void Hooks::dDrawModelExecute(void *ecx, void *edx, void *state, const ModelRenderInfo_t &info, void *pCustomBoneToWorld)
+// What a model is, by the path of its file. Called for every model drawn, so it's looked up by pointer.
+Hooks::ModelKind Hooks::GetModelKind(const void *model)
 {
-	if (m_Game->m_SwitchedWeapons)
-		m_Game->m_CachedArmsModel = false;
+	auto found = m_ModelKinds.find(model);
+	if (found != m_ModelKinds.end())
+		return found->second;
 
-	bool hideArms = m_Game->m_IsMeleeWeaponActive || m_VR->m_HideArms;
-	
-	if (info.pModel && hideArms && !m_Game->m_CachedArmsModel)
+	const char *name = m_Game->m_ModelInfo->GetModelName((void *)model);
+	ModelKind kind = ModelKind::Other;
+	if (name)
 	{
-		std::string modelName = m_Game->m_ModelInfo->GetModelName(info.pModel);
-		if (modelName.find("/arms/") != std::string::npos)
-		{
-			m_Game->m_ArmsMaterial = m_Game->m_MaterialSystem->FindMaterial(modelName.c_str(), "Model textures");
-			m_Game->m_ArmsModel = info.pModel;
-			m_Game->m_CachedArmsModel = true;
-		}
+		if (strstr(name, "/arms/v_arms"))
+			kind = ModelKind::FirstPersonArms;
+		else if (strstr(name, "models/v_models/v_"))
+			kind = strstr(name, "dual_pistola") ? ModelKind::DualPistolsViewmodel : ModelKind::Viewmodel;
 	}
 
-	if (info.pModel && info.pModel == m_Game->m_ArmsModel && hideArms)
+	m_ModelKinds[model] = kind;
+	return kind;
+}
+
+void Hooks::dDrawModelExecute(void *ecx, void *edx, void *state, const ModelRenderInfo_t &info, void *pCustomBoneToWorld)
+{
+	if (!m_VR->m_IsVREnabled || !info.pModel || !state)
+		return hkDrawModelExecute.fOriginal(ecx, state, info, pCustomBoneToWorld);
+
+	const ModelKind kind = GetModelKind(info.pModel);
+
+	if (kind == ModelKind::Viewmodel || kind == ModelKind::DualPistolsViewmodel)
+		m_VR->m_ViewmodelHasTwoWeapons = kind == ModelKind::DualPistolsViewmodel;
+
+	if (kind == ModelKind::FirstPersonArms && pCustomBoneToWorld)
 	{
-		m_Game->m_ArmsMaterial->SetMaterialVarFlag(MATERIAL_VAR_NO_DRAW, true);
-		m_Game->m_ModelRender->ForcedMaterialOverride(m_Game->m_ArmsMaterial);
-		hkDrawModelExecute.fOriginal(ecx, state, info, pCustomBoneToWorld);
-		m_Game->m_ModelRender->ForcedMaterialOverride(NULL);
-		return;
+		Diagnostics::ScopedTimer timer(Diagnostics::Section_Models);
+
+		alignas(16) HandMath::Mat34 bones[Studio::kMaxBones];
+		if (m_VR->BuildFirstPersonHands(*(const void **)state, pCustomBoneToWorld, bones))
+			return hkDrawModelExecute.fOriginal(ecx, state, info, bones);
 	}
 
 	hkDrawModelExecute.fOriginal(ecx, state, info, pCustomBoneToWorld);
