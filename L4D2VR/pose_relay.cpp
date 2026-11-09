@@ -132,12 +132,48 @@ namespace
 		virtual void RegisterConCommand(void *command) = 0;
 	};
 
-	class IServerPluginHelpersCommand
+	// IVEngineServer::ClientCommand sends a command to the client's console. It takes variable arguments, so `this` is on
+	// the stack. (IServerPluginHelpers::ClientCommand has the same name but runs the command on the server, as if the
+	// client had sent it, so the client never sees it.)
+	typedef void(__cdecl *tEngineClientCommand)(void *thisptr, edict_t *edict, const char *format, ...);
+
+	// Finds it in the interface by the error message only that function has, so a game update doesn't break it
+	tEngineClientCommand FindEngineClientCommand(void *engineServer)
 	{
-	public:
-		virtual void CreateMessage(edict_t *, int, void *, void *) = 0;
-		virtual void ClientCommand(edict_t *, const char *) = 0;
-	};
+		HMODULE engine = GetModuleHandleA("engine.dll");
+		if (!engine || !engineServer)
+			return nullptr;
+
+		const uint8_t *base = (const uint8_t *)engine;
+		const IMAGE_NT_HEADERS *nt = (const IMAGE_NT_HEADERS *)(base + ((const IMAGE_DOS_HEADER *)base)->e_lfanew);
+		const uintptr_t start = (uintptr_t)base, end = start + nt->OptionalHeader.SizeOfImage;
+		const auto inEngine = [&](uintptr_t address, size_t size) { return address >= start && address + size <= end; };
+
+		const char kMessage[] = "StuffCmd:  Some entity tried to stuff";
+
+		void **vtable = *(void ***)engineServer;
+		for (int i = 0; i < 200 && inEngine((uintptr_t)vtable[i], 1); ++i)
+		{
+			const uint8_t *code = (const uint8_t *)vtable[i];
+			if (!inEngine((uintptr_t)code, 0x200))
+				continue;
+
+			for (int offset = 0; offset < 0x1F0; ++offset)
+			{
+				if (code[offset] != 0x68) // push <address>
+					continue;
+
+				const uintptr_t text = *(const uint32_t *)(code + offset + 1);
+				if (inEngine(text, 64) && strstr((const char *)text, kMessage) && strlen((const char *)text) < 200)
+				{
+					Diagnostics::Log("pose relay: IVEngineServer::ClientCommand is at index %d", i);
+					return (tEngineClientCommand)vtable[i];
+				}
+			}
+		}
+
+		return nullptr;
+	}
 
 	PoseRelay *g_Relay = nullptr;
 
@@ -254,7 +290,10 @@ void PoseRelay::Init(Game *game)
 	m_Game = game;
 	g_Relay = this;
 
-	m_ServerPluginHelpers = TryInterface("engine.dll", "ISERVERPLUGINHELPERS001");
+	m_EngineServer = TryInterface("engine.dll", "VEngineServer022");
+	m_EngineClientCommand = (void *)FindEngineClientCommand(m_EngineServer);
+	if (!m_EngineClientCommand)
+		Diagnostics::Log("pose relay: IVEngineServer::ClientCommand not found, this game won't forward poses when hosting");
 
 	void *cvar = TryInterface("vstdlib.dll", "VEngineCvar007");
 	if (!cvar)
@@ -381,12 +420,12 @@ void PoseRelay::Update(VR *vr, C_BasePlayer *localPlayer)
 
 bool PoseRelay::SendToClient(edict_t *edict, const char *command)
 {
-	if (!m_ServerPluginHelpers || !edict)
+	if (!m_EngineClientCommand || !edict)
 		return false;
 
 	__try
 	{
-		((IServerPluginHelpersCommand *)m_ServerPluginHelpers)->ClientCommand(edict, command);
+		((tEngineClientCommand)m_EngineClientCommand)(m_EngineServer, edict, "%s", command);
 		return true;
 	}
 	__except (EXCEPTION_EXECUTE_HANDLER)

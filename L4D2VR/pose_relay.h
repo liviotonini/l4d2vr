@@ -88,7 +88,8 @@ private:
 	};
 
 	Game *m_Game = nullptr;
-	void *m_ServerPluginHelpers = nullptr;
+	void *m_EngineServer = nullptr;
+	void *m_EngineClientCommand = nullptr;
 
 	bool m_ServerCapable = false;
 	int m_HelloAttempts = 0;

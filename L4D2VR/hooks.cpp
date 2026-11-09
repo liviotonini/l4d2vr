@@ -728,6 +728,12 @@ void Hooks::dDrawModelExecute(void *ecx, void *edx, void *state, const ModelRend
 
 	const ModelKind kind = GetModelKind(info.pModel);
 
+	if (kind == ModelKind::FirstPersonArms && !m_LoggedArmsDraw)
+	{
+		m_LoggedArmsDraw = true;
+		Diagnostics::Log("hands: the arms are drawn with %s", pCustomBoneToWorld ? "their bones in the draw call" : "no bones in the draw call, they can't be changed");
+	}
+
 	if (kind == ModelKind::Viewmodel || kind == ModelKind::DualPistolsViewmodel)
 		m_VR->m_ViewmodelHasTwoWeapons = kind == ModelKind::DualPistolsViewmodel;
 

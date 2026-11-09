@@ -153,6 +153,7 @@ public:
 	enum class ModelKind { Other, FirstPersonArms, Viewmodel, DualPistolsViewmodel, Survivor, WorldWeapon };
 	static inline std::unordered_map<const void *, ModelKind> m_ModelKinds;
 	static ModelKind GetModelKind(const void *model);
+	static inline bool m_LoggedArmsDraw = false;
 
 	Hooks() {};
 	Hooks(Game *game);

@@ -5,6 +5,7 @@
 #include "game.h"
 #include "hooks.h"
 #include "studio.h"
+#include "diagnostics.h"
 
 using namespace HandMath;
 
@@ -116,6 +117,8 @@ bool VR::BuildFirstPersonHands(const void *studioHeader, const void *customBones
 	{
 		model.rig.Build(Studio::ReadBones(studioHeader));
 		model.valid = true;
+		Diagnostics::Log("hands: %s has %d bones, left hand %s, right hand %s", Studio::ModelName(studioHeader), boneCount,
+			model.rig.HasHand(HandRig::Left) ? "found" : "NOT FOUND", model.rig.HasHand(HandRig::Right) ? "found" : "NOT FOUND");
 	}
 
 	const HandRig &rig = model.rig;
