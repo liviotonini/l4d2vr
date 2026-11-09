@@ -458,6 +458,7 @@
     <ClInclude Include="stability.h" />
     <ClInclude Include="sigscanner.h" />
     <ClInclude Include="vr.h" />
+    <ClInclude Include="wrist_hud_draw.h" />
     <ClInclude Include="..\thirdparty\imgui\imconfig.h" />
     <ClInclude Include="..\thirdparty\imgui\imgui.h" />
     <ClInclude Include="..\thirdparty\imgui\imgui_impl_dx11.h" />
@@ -611,6 +612,7 @@
     <ClCompile Include="settings_menu.cpp" />
     <ClCompile Include="stability.cpp" />
     <ClCompile Include="vr.cpp" />
+    <ClCompile Include="wrist_hud.cpp" />
     <ClCompile Include="..\thirdparty\imgui\imgui.cpp" />
     <ClCompile Include="..\thirdparty\imgui\imgui_draw.cpp" />
     <ClCompile Include="..\thirdparty\imgui\imgui_impl_dx11.cpp" />

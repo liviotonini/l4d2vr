@@ -554,6 +554,7 @@ void SettingsMenu::DrawMenu()
 			DrawSlider("HUD distance", "Distance of the HUD from your eyes.", settings.m_HudDistance, 0.3f, 3.0f, 0.05f, "%.2f m");
 			DrawSlider("HUD size", "Width of the HUD.", settings.m_HudSize, 0.3f, 3.0f, 0.05f, "%.2f m");
 			DrawCheckbox("HUD always visible", "Keep the HUD visible instead of showing it only with the HUD button or with the controller held upright.", settings.m_HudAlwaysVisible);
+			DrawCheckbox("HUD on the wrist", "Shows your health, your ammo and your teammates on the wrist of the hand that doesn't hold the weapon.", settings.m_WristHudEnabled);
 			DrawCheckbox("Record performance", "Writes the time of each part of the frame to VR\\perf.csv once per second, to find what is slow. Leave it off when not needed.", settings.m_DiagnosticsEnabled);
 			ImGui::EndChild();
 			ImGui::EndTabItem();

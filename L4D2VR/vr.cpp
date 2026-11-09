@@ -220,6 +220,8 @@ void VR::Update()
     if (m_SettingsMenu)
         m_SettingsMenu->Update();
 
+    UpdateWristHud();
+
     // The engine replaces the crash handler while it starts, so it's installed again once the game is running
     if (!m_CrashHandlerReinstalled && m_Game->m_EngineClient->IsInGame())
     {
@@ -2446,6 +2448,7 @@ void VR::ParseConfigFile()
 
     m_DiagnosticsEnabled = userConfig["DiagnosticsEnabled"] == "true";
     m_InteractWithHand = userConfig["InteractWithHand"] != "false"; // enabled if missing from config
+    m_WristHudEnabled = userConfig["WristHudEnabled"] != "false"; // enabled if missing from config
 
     // Fine tuning of the hand, only by editing config.txt
     Vector handOffset = m_HandOffsetMeters;
@@ -2516,6 +2519,7 @@ bool VR::SaveConfigFile()
         { "GrenadeThrowStrength", ConfigFloatString(m_GrenadeThrowStrength) },
         { "DiagnosticsEnabled", ConfigBoolString(m_DiagnosticsEnabled) },
         { "InteractWithHand", ConfigBoolString(m_InteractWithHand) },
+        { "WristHudEnabled", ConfigBoolString(m_WristHudEnabled) },
     };
 
     std::vector<std::string> lines;

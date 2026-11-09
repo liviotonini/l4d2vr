@@ -7,6 +7,7 @@
 #include <deque>
 #include <mutex>
 #include <unordered_map>
+#include <vector>
 #include "hand_rig.h"
 
 #define MAX_STR_LEN 256
@@ -323,6 +324,17 @@ public:
 	Vector m_HandOffsetMeters = { -0.10f, 0.0f, -0.08f }; // forward, right, up
 	QAngle m_HandAngleOffset = { 0.0f, 0.0f, 0.0f };
 
+	// HUD on the wrist of the hand that doesn't hold the weapon (wrist_hud.cpp)
+	bool m_WristHudEnabled = true;
+	vr::VROverlayHandle_t m_WristHudHandle = vr::k_ulOverlayHandleInvalid;
+	vr::TrackedDeviceIndex_t m_WristHudDevice = vr::k_unTrackedDeviceIndexInvalid;
+	bool m_WristHudVisible = false;
+	bool m_WristHudDrawn = false;
+	unsigned long long m_WristHudLastRefresh = 0;
+	int m_WristHudUploadFailures = 0;
+	std::vector<uint8_t> m_WristHudPixels;
+	unsigned char m_WristHudLastState[128] = {}; // WristHud::State, kept here so vr.h doesn't need its header
+
 	// Weapon orientation stored relative to the "two hands" frame at the moment the left hand grabs the weapon
 	Vector m_TwoHandForwardLocal = { 1,0,0 };
 	Vector m_TwoHandUpLocal = { 0,0,1 };
@@ -369,6 +381,8 @@ public:
 	bool IsWeaponReloading() const;
 	bool BuildFirstPersonHands(const void *studioHeader, const void *customBones, void *outBones);
 	void ClearModelCaches();
+	void UpdateWristHud();
+	void HideWristHud();
 	void UpdateFlashlightAttachment();
 	void PatchLaserSight();
 	void CreateScopeOverlays();
