@@ -146,6 +146,20 @@ public:
 	SharedTextureHolder m_VKBlankTexture;
 	SharedTextureHolder m_VKScope;
 
+	enum GameButton { GameButton_Forward, GameButton_Back, GameButton_MoveLeft, GameButton_MoveRight, GameButton_Attack, GameButton_Jump, GameButton_Use, GameButton_Reload, GameButton_Attack2, GameButton_Duck, GameButton_ShowScores, GameButton_Count };
+	signed char m_GameButtonState[GameButton_Count] = { -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };
+	bool m_ResendGameButtons = false;
+	unsigned long long m_GameButtonsResent = 0;
+	void SetGameButton(GameButton button, bool down);
+
+	bool m_HudOverlayVisible = false;
+	bool m_MainMenuOverlayVisible = false;
+	bool m_HudOverlayInteractive = false;
+	bool m_ScopeOverlaysVisible = false;
+	void SetHudOverlayVisible(bool visible);
+	void SetMainMenuOverlayVisible(bool visible);
+	void SetHudOverlayInteractive(bool interactive);
+
 	bool m_IsVREnabled = false;
 	bool m_IsInitialized = false;
 	bool m_CrashHandlerReinstalled = false;

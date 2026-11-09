@@ -278,8 +278,8 @@ void VR::SubmitVRTextures()
             RepositionOverlays();
 
         vr::VROverlay()->SetOverlayTexture(m_MainMenuHandle, &m_VKBackBuffer.m_VRTexture);
-        vr::VROverlay()->ShowOverlay(m_MainMenuHandle);
-        vr::VROverlay()->HideOverlay(m_HUDHandle);
+        SetMainMenuOverlayVisible(true);
+        SetHudOverlayVisible(false);
         HideScopeOverlays();
 
         if (!m_Game->m_EngineClient->IsInGame())
@@ -290,15 +290,17 @@ void VR::SubmitVRTextures()
 
         return;
     }
-    vr::VROverlay()->HideOverlay(m_MainMenuHandle);
-
-    vr::VROverlay()->SetOverlayTexture(m_HUDHandle, &m_VKHUD.m_VRTexture);
+    SetMainMenuOverlayVisible(false);
 
     if (m_Game->m_VguiSurface->IsCursorVisible())
     {
         // We're in the pause menu
-        vr::VROverlay()->ShowOverlay(m_HUDHandle);
+        SetHudOverlayVisible(true);
     }
+
+    // Nobody sees the HUD when it's hidden
+    if (m_HudOverlayVisible)
+        vr::VROverlay()->SetOverlayTexture(m_HUDHandle, &m_VKHUD.m_VRTexture);
 
     SubmitScopeOverlays();
 
@@ -489,6 +491,8 @@ void VR::ProcessMenuInput()
     if (isHoveringOverlay)
     {
         vr::VROverlay()->SetOverlayFlag(currentOverlay, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, true);
+        if (currentOverlay == m_HUDHandle)
+            m_HudOverlayInteractive = true;
 
         int windowWidth, windowHeight;
         m_Game->m_MaterialSystem->GetRenderContext()->GetWindowSize(windowWidth, windowHeight);
@@ -539,7 +543,9 @@ void VR::ProcessMenuInput()
     else
     {
         vr::VROverlay()->SetOverlayFlag(currentOverlay, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, false);
-        
+        if (currentOverlay == m_HUDHandle)
+            m_HudOverlayInteractive = false;
+
         if (PressedDigitalAction(m_MenuSelect, true))
         {
             m_Game->m_VguiInput->InternalKeyCodeTyped(ButtonCode_t::KEY_SPACE);
@@ -584,7 +590,7 @@ void VR::ProcessInput()
     if (!m_IsVREnabled)
         return;
 
-    vr::VROverlay()->SetOverlayFlag(m_HUDHandle, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, false);
+    SetHudOverlayInteractive(false);
 
     typedef std::chrono::duration<float, std::milli> duration;
     auto currentTime = std::chrono::steady_clock::now();
@@ -631,106 +637,41 @@ void VR::ProcessInput()
         m_RotationOffset -= 360 * std::floor(m_RotationOffset / 360);
     }
 
-    // TODO: Instead of ClientCmding, override Usercmd in CreateMove
-    if (GetAnalogActionData(m_ActionWalk, analogActionData))		
+    // Commands to the game only go out when a button changes (see SetGameButton)
+    m_ResendGameButtons = GetTickCount64() - m_GameButtonsResent >= 1000;
+    if (m_ResendGameButtons)
+        m_GameButtonsResent = GetTickCount64();
+
+    if (GetAnalogActionData(m_ActionWalk, analogActionData))
     {
-        bool pushingStickX = true;
-        bool pushingStickY = true;
+        SetGameButton(GameButton_Forward, analogActionData.y > 0.5);
+        SetGameButton(GameButton_Back, analogActionData.y < -0.5);
+        SetGameButton(GameButton_MoveRight, analogActionData.x > 0.5);
+        SetGameButton(GameButton_MoveLeft, analogActionData.x < -0.5);
 
-        if (analogActionData.y > 0.5)
-        {
-            m_Game->ClientCmd_Unrestricted("-back");
-            m_Game->ClientCmd_Unrestricted("+forward");
-        }
-        else if (analogActionData.y < -0.5)
-        {
-            m_Game->ClientCmd_Unrestricted("-forward");
-            m_Game->ClientCmd_Unrestricted("+back");
-        }
-        else
-        {
-            m_Game->ClientCmd_Unrestricted("-back");
-            m_Game->ClientCmd_Unrestricted("-forward");
-            pushingStickY = false;
-        }
-
-        if (analogActionData.x > 0.5)
-        {
-            m_Game->ClientCmd_Unrestricted("-moveleft");
-            m_Game->ClientCmd_Unrestricted("+moveright");
-        }
-        else if (analogActionData.x < -0.5)
-        {
-            m_Game->ClientCmd_Unrestricted("-moveright");
-            m_Game->ClientCmd_Unrestricted("+moveleft");
-        }
-        else
-        {
-            m_Game->ClientCmd_Unrestricted("-moveright");
-            m_Game->ClientCmd_Unrestricted("-moveleft");
-            pushingStickX = false;
-        }
-
-        m_PushingThumbstick = pushingStickX || pushingStickY;
+        m_PushingThumbstick = fabsf(analogActionData.y) > 0.5 || fabsf(analogActionData.x) > 0.5;
     }
     else
     {
-        m_Game->ClientCmd_Unrestricted("-forward");
-        m_Game->ClientCmd_Unrestricted("-back");
-        m_Game->ClientCmd_Unrestricted("-moveleft");
-        m_Game->ClientCmd_Unrestricted("-moveright");
+        SetGameButton(GameButton_Forward, false);
+        SetGameButton(GameButton_Back, false);
+        SetGameButton(GameButton_MoveRight, false);
+        SetGameButton(GameButton_MoveLeft, false);
     }
 
     UpdateGrenadeThrow();
 
-    if (GetAttackButton(PressedDigitalAction(m_ActionPrimaryAttack)))
-    {
-        m_Game->ClientCmd_Unrestricted("+attack");
-    }
-    else
-    {
-        m_Game->ClientCmd_Unrestricted("-attack");
-    }
+    SetGameButton(GameButton_Attack, GetAttackButton(PressedDigitalAction(m_ActionPrimaryAttack)));
+    SetGameButton(GameButton_Jump, PressedDigitalAction(m_ActionJump));
+    SetGameButton(GameButton_Use, PressedDigitalAction(m_ActionUse));
 
-    if (PressedDigitalAction(m_ActionJump))
-    {
-        m_Game->ClientCmd_Unrestricted("+jump");
-    }
-    else
-    {
-        m_Game->ClientCmd_Unrestricted("-jump");
-    }
-
-    if (PressedDigitalAction(m_ActionUse))
-    {
-        m_Game->ClientCmd_Unrestricted("+use");
-    }
-    else
-    {
-        m_Game->ClientCmd_Unrestricted("-use");
-    }
-
-    if ((PressedDigitalAction(m_ActionReload) && !ManualReloadBlocksNativeReload()) || isReloading)
-    {
-        m_Game->ClientCmd_Unrestricted("+reload");
-        isReloading = false;
-    }
-    else
-    {
-        m_Game->ClientCmd_Unrestricted("-reload");
-    }
+    SetGameButton(GameButton_Reload, (PressedDigitalAction(m_ActionReload) && !ManualReloadBlocksNativeReload()) || isReloading);
+    isReloading = false;
 
     //if (PressedDigitalAction(m_ActionSecondaryAttack) || (m_IsTrackingManualPush && VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 5.0))
     // The swing gestures don't shove while throwing a grenade with the arm (both arms move fast, and holding the shove
     // button stops the game from throwing). Neither does the shove button press that cancelled a throw.
-    if ((PressedDigitalAction(m_ActionSecondaryAttack) && !m_ShoveButtonUsedForCancel) || (m_IsTrackingManualPush && !IsGrenadeThrowInProgress() && (VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 4.0 || ( !m_Game->m_IsMeleeWeaponActive && VectorLength(m_RightControllerPose.TrackedDeviceVel) > 4.0))))
-    {
-        m_Game->ClientCmd_Unrestricted("+attack2");       
-    }
-    else
-    {
-        m_Game->ClientCmd_Unrestricted("-attack2");
-    }
+    SetGameButton(GameButton_Attack2, (PressedDigitalAction(m_ActionSecondaryAttack) && !m_ShoveButtonUsedForCancel) || (m_IsTrackingManualPush && !IsGrenadeThrowInProgress() && (VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 4.0 || ( !m_Game->m_IsMeleeWeaponActive && VectorLength(m_RightControllerPose.TrackedDeviceVel) > 4.0))));
 
     if (PressedDigitalAction(m_ActionPrevItem, true))
     {
@@ -793,14 +734,7 @@ void VR::ProcessInput()
         }
     }
 
-    if (isSendingCrouchCommand || m_IsPlayerCrouched)
-    {
-        m_Game->ClientCmd_Unrestricted("+duck");
-    }
-    else 
-    {
-        m_Game->ClientCmd_Unrestricted("-duck");
-    }
+    SetGameButton(GameButton_Duck, isSendingCrouchCommand || m_IsPlayerCrouched);
 
     if (PressedDigitalAction(m_ActionFlashlight, true))
     {
@@ -837,19 +771,15 @@ void VR::ProcessInput()
     if ((PressedDigitalAction(m_ShowHUD) || PressedDigitalAction(m_Scoreboard) || isControllerVertical || m_HudAlwaysVisible)
         && m_RenderedHud)
     {
-        if (!vr::VROverlay()->IsOverlayVisible(m_HUDHandle) || m_HudAlwaysVisible)
+        if (!m_HudOverlayVisible || m_HudAlwaysVisible)
             RepositionOverlays();
 
-        if (PressedDigitalAction(m_Scoreboard))
-            m_Game->ClientCmd_Unrestricted("+showscores");
-        else
-            m_Game->ClientCmd_Unrestricted("-showscores");
-
-        vr::VROverlay()->ShowOverlay(m_HUDHandle);
+        SetGameButton(GameButton_ShowScores, PressedDigitalAction(m_Scoreboard));
+        SetHudOverlayVisible(true);
     }
     else
     {
-        vr::VROverlay()->HideOverlay(m_HUDHandle);
+        SetHudOverlayVisible(false);
     }
     m_RenderedHud = false;
 
@@ -1474,6 +1404,7 @@ void VR::SubmitScopeOverlays()
     m_Overlay->SetOverlayAlpha(m_ScopeMaskHandle, m_ScopeAlpha);
     vr::EVROverlayError showError = m_Overlay->ShowOverlay(m_ScopeHandle);
     m_Overlay->ShowOverlay(m_ScopeMaskHandle);
+    m_ScopeOverlaysVisible = true;
 
     if (m_ScopeDebug)
         WriteScopeDebug(g_ScopeSubmitDebugTime, "submit: shown, alpha %.2f, errors: texture %d, transform %d, show %d, visible %d, controller device %u",
@@ -1482,10 +1413,62 @@ void VR::SubmitScopeOverlays()
 
 void VR::HideScopeOverlays()
 {
+    if (!m_ScopeOverlaysVisible)
+        return;
+    m_ScopeOverlaysVisible = false;
+
     if (m_ScopeHandle != vr::k_ulOverlayHandleInvalid)
         m_Overlay->HideOverlay(m_ScopeHandle);
     if (m_ScopeMaskHandle != vr::k_ulOverlayHandleInvalid)
         m_Overlay->HideOverlay(m_ScopeMaskHandle);
+}
+
+// Each of these is a call to the SteamVR process, so they're only made when something changes
+void VR::SetHudOverlayVisible(bool visible)
+{
+    if (m_HudOverlayVisible == visible)
+        return;
+    m_HudOverlayVisible = visible;
+
+    if (visible)
+        vr::VROverlay()->ShowOverlay(m_HUDHandle);
+    else
+        vr::VROverlay()->HideOverlay(m_HUDHandle);
+}
+
+void VR::SetMainMenuOverlayVisible(bool visible)
+{
+    if (m_MainMenuOverlayVisible == visible)
+        return;
+    m_MainMenuOverlayVisible = visible;
+
+    if (visible)
+        vr::VROverlay()->ShowOverlay(m_MainMenuHandle);
+    else
+        vr::VROverlay()->HideOverlay(m_MainMenuHandle);
+}
+
+void VR::SetHudOverlayInteractive(bool interactive)
+{
+    if (m_HudOverlayInteractive == interactive)
+        return;
+    m_HudOverlayInteractive = interactive;
+    vr::VROverlay()->SetOverlayFlag(m_HUDHandle, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, interactive);
+}
+
+// Sent again once per second anyway, in case the game released the button by itself (a map change, for example)
+void VR::SetGameButton(GameButton button, bool down)
+{
+    static const char *const kNames[GameButton_Count] = { "forward", "back", "moveleft", "moveright", "attack", "jump", "use", "reload", "attack2", "duck", "showscores" };
+
+    const signed char state = down ? 1 : 0;
+    if (m_GameButtonState[button] == state && !m_ResendGameButtons)
+        return;
+    m_GameButtonState[button] = state;
+
+    char command[32];
+    snprintf(command, sizeof(command), "%c%s", down ? '+' : '-', kNames[button]);
+    m_Game->ClientCmd_Unrestricted(command);
 }
 
 // ---------------------------------------------------------------------------------------------------------------
