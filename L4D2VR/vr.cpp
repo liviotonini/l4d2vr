@@ -1509,28 +1509,39 @@ namespace
     }
 }
 
-// Writes a line to VR\grenade_throw_log.txt (recreated each time the game starts), a line or two per throw.
-// Called from VR::Update and from the server hooks.
+namespace
+{
+    // Appends a line with the time to a log file. Each file is recreated the first time it's written after the game starts.
+    void WriteLogLine(const char *path, const char *format, va_list args)
+    {
+        static std::mutex s_Mutex;
+        static std::vector<std::string> s_RecreatedFiles;
+
+        char line[512];
+        vsnprintf(line, sizeof(line), format, args);
+
+        SYSTEMTIME time;
+        GetLocalTime(&time);
+        char stamp[32];
+        snprintf(stamp, sizeof(stamp), "%02d:%02d:%02d.%03d ", time.wHour, time.wMinute, time.wSecond, time.wMilliseconds);
+
+        std::lock_guard<std::mutex> lock(s_Mutex);
+        const bool recreated = std::find(s_RecreatedFiles.begin(), s_RecreatedFiles.end(), path) != s_RecreatedFiles.end();
+        if (!recreated)
+            s_RecreatedFiles.push_back(path);
+
+        std::ofstream file(path, recreated ? std::ios::app : std::ios::trunc);
+        file << stamp << line << "\n";
+    }
+}
+
+// Writes to VR\grenade_throw_log.txt, a line or two per throw. Called from VR::Update and from the server hooks.
 void VR::WriteGrenadeThrowLog(const char *format, ...)
 {
-    static std::mutex s_Mutex;
-    static bool s_Truncated = false;
-
-    char line[512];
     va_list args;
     va_start(args, format);
-    vsnprintf(line, sizeof(line), format, args);
+    WriteLogLine("VR\\grenade_throw_log.txt", format, args);
     va_end(args);
-
-    SYSTEMTIME time;
-    GetLocalTime(&time);
-    char stamp[32];
-    snprintf(stamp, sizeof(stamp), "%02d:%02d:%02d.%03d ", time.wHour, time.wMinute, time.wSecond, time.wMilliseconds);
-
-    std::lock_guard<std::mutex> lock(s_Mutex);
-    std::ofstream file("VR\\grenade_throw_log.txt", s_Truncated ? std::ios::app : std::ios::trunc);
-    s_Truncated = true;
-    file << stamp << line << "\n";
 }
 
 bool VR::IsThrowableWeapon(int weaponId)
@@ -1821,6 +1832,157 @@ bool VR::DecodeGrenadeThrow(short mousedx, short mousedy, bool &gesture, int &se
     return sequence != 0;
 }
 
+// ---------------------------------------------------------------------------------------------------------------
+// Taking items from the body
+//
+// Pressing a grab button with the hand at one of the places below takes an item (slot1 to slot5), or the other item
+// of the pair when that one is already in hand (primary <-> secondary weapon, grenade <-> pills).
+//
+// The game doesn't track the body, so the places are relative to the head, but not to its pitch and roll:
+// - they're measured from where the eyes would be with the head looking straight ahead. The HMD turns around the
+//   neck, so looking down moves it forward and down; a simple head model (kEyeToNeck*) finds the neck pivot and puts
+//   the reference point back in front of it,
+// - their directions use the horizontal direction the head faces.
+// Turning the head left or right still turns them.
+// The places of the weapon hand are on its side of the body (mirrored with LeftHanded).
+// ---------------------------------------------------------------------------------------------------------------
+
+namespace
+{
+    // From the eyes to the neck pivot, meters (the usual head model of the VR runtimes)
+    constexpr float kEyeToNeckForward = 0.08f;
+    constexpr float kEyeToNeckDown = 0.075f;
+
+    // The places were tuned in game units at the default VRScale of 43.2 units per meter
+    constexpr float Tuned(float units)
+    {
+        return units / 43.2f;
+    }
+
+    // The hand relative to the reference point at the eyes, meters
+    struct HandOnBody
+    {
+        float distance; // straight line
+        float side;     // horizontal direction: 1 = towards the weapon hand's side, -1 = the other side
+        float forward;  // horizontal direction: 1 = in front, -1 = behind
+        float drop;     // how far below
+    };
+
+    bool InRange(float value, float center, float tolerance)
+    {
+        return value >= center - tolerance && value <= center + tolerance;
+    }
+
+    struct BodyGrabPlace
+    {
+        const char *name;
+        bool weaponHand; // grabbed with the weapon hand, or with the other one
+        int slot;
+        int otherSlot;   // taken instead when the item of `slot` is already in hand
+        bool (*isAt)(const HandOnBody &hand, float playerHeight);
+    };
+
+    // The first place the hand is at is used
+    const BodyGrabPlace kBodyGrabPlaces[] =
+    {
+        { "primary weapon (behind the shoulder)", true, 1, 2, [](const HandOnBody &hand, float)
+            { return InRange(hand.distance, Tuned(12.0f), Tuned(2.0f)) && hand.side >= 0.1f && hand.forward <= -0.7f; } },
+        { "secondary weapon (leg)", true, 2, 1, [](const HandOnBody &hand, float height)
+            { return InRange(hand.distance, Tuned(22.5f) * height, Tuned(5.0f)) && hand.side >= 0.8f && InRange(hand.drop, Tuned(21.5f) * height, Tuned(5.0f)); } },
+        { "medkit (back)", true, 4, 4, [](const HandOnBody &hand, float height)
+            { return hand.forward < -0.9f && InRange(hand.drop, Tuned(11.9f) * height, Tuned(5.0f)); } },
+
+        { "grenade (behind the shoulder)", false, 3, 5, [](const HandOnBody &hand, float)
+            { return InRange(hand.distance, Tuned(14.0f), Tuned(2.0f)) && hand.side <= -0.4f && hand.drop <= Tuned(8.0f); } },
+        { "pills or adrenaline (leg)", false, 5, 3, [](const HandOnBody &hand, float height)
+            { return InRange(hand.distance, Tuned(22.5f) * height, Tuned(5.0f)) && hand.side <= -0.8f && InRange(hand.drop, Tuned(21.5f) * height, Tuned(5.0f)); } },
+        { "medkit (back)", false, 4, 4, [](const HandOnBody &hand, float height)
+            { return hand.forward < -0.9f && InRange(hand.drop, Tuned(11.9f) * height, Tuned(5.0f)); } },
+    };
+
+    // VR\body_grab_log.txt, a line per grab button press
+    void WriteBodyGrabLog(const char *format, ...)
+    {
+        va_list args;
+        va_start(args, format);
+        WriteLogLine("VR\\body_grab_log.txt", format, args);
+        va_end(args);
+    }
+}
+
+// The inventory slot of a weapon, as selected by the slot1 to slot5 commands (0 if none)
+int VR::GetWeaponSlot(int weaponId)
+{
+    switch (weaponId)
+    {
+    case C_WeaponCSBase::AK47: case C_WeaponCSBase::AUTOSHOTGUN: case C_WeaponCSBase::AWP: case C_WeaponCSBase::GRENADE_LAUNCHER:
+    case C_WeaponCSBase::HUNTING_RIFLE: case C_WeaponCSBase::M16A1: case C_WeaponCSBase::M60: case C_WeaponCSBase::MAC10:
+    case C_WeaponCSBase::MACHINEGUN: case C_WeaponCSBase::MP5: case C_WeaponCSBase::PUMPSHOTGUN: case C_WeaponCSBase::SHOTGUN_CHROME:
+    case C_WeaponCSBase::SNIPER_MILITARY: case C_WeaponCSBase::UZI: case C_WeaponCSBase::SCAR: case C_WeaponCSBase::SPAS:
+    case C_WeaponCSBase::SG552: case C_WeaponCSBase::SCOUT:
+        return 1;
+    case C_WeaponCSBase::MELEE: case C_WeaponCSBase::PISTOL: case C_WeaponCSBase::MAGNUM: case C_WeaponCSBase::CHAINSAW:
+        return 2;
+    case C_WeaponCSBase::MOLOTOV: case C_WeaponCSBase::PIPE_BOMB: case C_WeaponCSBase::VOMITJAR:
+        return 3;
+    case C_WeaponCSBase::FIRST_AID_KIT: case C_WeaponCSBase::DEFIBRILLATOR: case C_WeaponCSBase::INCENDIARY_AMMO: case C_WeaponCSBase::FRAG_AMMO:
+        return 4;
+    case C_WeaponCSBase::PAIN_PILLS: case C_WeaponCSBase::ADRENALINE:
+        return 5;
+    default:
+        return 0;
+    }
+}
+
+// Called by UpdateTracking when a grab button is pressed (and the weapon isn't being grabbed with both hands)
+void VR::UpdateBodyGrab(bool weaponHand, const Vector &handPosLocalInWorld, int weaponId)
+{
+    // Horizontal direction the head faces: the forward vector without its height (tilting the head sideways doesn't
+    // change it). When looking almost straight up or down that's too short, so the up vector is used as well: for a head
+    // pitched by p, forward * cos(p) + up * sin(p) is level, with cos(p) = up.z and sin(p) = -forward.z.
+    Vector facing(m_HmdForward.x, m_HmdForward.y, 0.0f);
+    if (VectorLength(facing) < 0.2f)
+        facing = Vector(m_HmdForward.x * m_HmdUp.z - m_HmdUp.x * m_HmdForward.z, m_HmdForward.y * m_HmdUp.z - m_HmdUp.y * m_HmdForward.z, 0.0f);
+    VectorNormalize(facing);
+    const Vector right(facing.y, -facing.x, 0.0f);
+
+    // Where the eyes would be with the head looking straight ahead, from the neck pivot
+    const Vector neck = m_HmdPosLocalInWorld - m_HmdForward * (kEyeToNeckForward * m_VRScale) - m_HmdUp * (kEyeToNeckDown * m_VRScale);
+    const Vector reference = neck + facing * (kEyeToNeckForward * m_VRScale) + Vector(0.0f, 0.0f, kEyeToNeckDown * m_VRScale);
+
+    const Vector toHand = (handPosLocalInWorld - reference) * (1.0f / m_VRScale);
+    const float horizontalLength = sqrtf(toHand.x * toHand.x + toHand.y * toHand.y);
+    const float weaponSide = m_LeftHanded ? -1.0f : 1.0f;
+
+    HandOnBody hand;
+    hand.distance = VectorLength(toHand);
+    hand.side = horizontalLength > 0.001f ? weaponSide * (toHand.x * right.x + toHand.y * right.y) / horizontalLength : 0.0f;
+    hand.forward = horizontalLength > 0.001f ? (toHand.x * facing.x + toHand.y * facing.y) / horizontalLength : 0.0f;
+    hand.drop = -toHand.z;
+
+    const float headPitchDown = RAD2DEG(asinf(std::clamp(-m_HmdForward.z, -1.0f, 1.0f)));
+    const char *handName = weaponHand ? "weapon hand" : "other hand";
+
+    for (const BodyGrabPlace &place : kBodyGrabPlaces)
+    {
+        if (place.weaponHand != weaponHand || !place.isAt(hand, m_PlayerHeightInMeters))
+            continue;
+
+        const int slot = GetWeaponSlot(weaponId) == place.slot ? place.otherSlot : place.slot;
+        char command[16];
+        snprintf(command, sizeof(command), "slot%d", slot);
+        m_Game->ClientCmd_Unrestricted(command);
+        m_Haptics.Play(weaponHand ? Haptics::Hand::WeaponHand : Haptics::Hand::OtherHand, HapticEffects::Confirm);
+
+        WriteBodyGrabLog("%s: %.2f m away, side %.2f, forward %.2f, %.2f m below, head pitched %.0f deg down: %s, %s",
+            handName, hand.distance, hand.side, hand.forward, hand.drop, headPitchDown, place.name, command);
+        return;
+    }
+
+    WriteBodyGrabLog("%s: %.2f m away, side %.2f, forward %.2f, %.2f m below, head pitched %.0f deg down: no place",
+        handName, hand.distance, hand.side, hand.forward, hand.drop, headPitchDown);
+}
+
 // L4D2 attaches the first person flashlight to the "flashlight" attachment of the viewmodel when
 // r_flashlight_attach_to_viewmodel is 1 (default). Since the viewmodel follows the controller, swinging
 // a melee weapon swings the light around too. When the ConVar is 0 (or while on a ladder) the game
@@ -2052,127 +2214,11 @@ void VR::UpdateTracking()
         float rightControllerForward_HandsDistLocalWorld_Angle = RAD2DEG(acosf(dotProduct_RightControllerForward_HandsDistLocalWorld));
         float dotProduct_RightControllerUp_HandsDistLocalWorld = DotProduct(m_RightControllerUp, handsDistanceLocalInWorldNormalized);
 
-        Vector hmdToControllerWorld = rightControllerPosLocalInWorld - m_HmdPosLocalInWorld;
-        
-        Vector hmdToControllerWorld2DNormalized;
-        VectorCopy(hmdToControllerWorld, hmdToControllerWorld2DNormalized);
-        hmdToControllerWorld2DNormalized.z = 0;
-        VectorNormalize(hmdToControllerWorld2DNormalized);
-
-        float dotProduct_hmdToControllerWorld2DNorm_HmdRight = DotProduct2D(hmdToControllerWorld2DNormalized, m_HmdRight);
-        float dotProduct_hmdToControllerWorld2DNorm_HmdForward = DotProduct2D(hmdToControllerWorld2DNormalized, m_HmdForward);
-
-        float hmdToControllerWorldLength = VectorLength(hmdToControllerWorld);
-        float hmdToControllerWorldZDist = m_HmdPosLocalInWorld.z - rightControllerPosLocalInWorld.z;
-
-        Vector hmdToControllerWorldLeft = leftControllerPosLocalInWorld - m_HmdPosLocalInWorld;
-
-        Vector hmdToControllerWorldLeft2DNormalized;
-        VectorCopy(hmdToControllerWorldLeft, hmdToControllerWorldLeft2DNormalized);
-        hmdToControllerWorldLeft2DNormalized.z = 0;
-        VectorNormalize(hmdToControllerWorldLeft2DNormalized);
-
-        float dotProduct_hmdToControllerWorldLeft2DNorm_HmdRight = DotProduct2D(hmdToControllerWorldLeft2DNormalized, m_HmdRight);
-        float dotProduct_hmdToControllerWorldLeft2DNorm_HmdForward = DotProduct2D(hmdToControllerWorldLeft2DNormalized, m_HmdForward);
-
-        float hmdToControllerWorldLeftLength = VectorLength(hmdToControllerWorldLeft);
-        float hmdToControllerWorldLeftZDist = m_HmdPosLocalInWorld.z - leftControllerPosLocalInWorld.z;
-
-         //if (temp == false)
-         //{
-            //writeToFile("");
-            //writeToFile("######");
-            //writeToFile("######");
-
-             //writeToFile("WeaponId", weaponId);
-            //writeToFile("hmdPosLocal", hmdPosLocal);
-            //writeToFile("hmdAngLocal", hmdAngLocal);
-            //writeToFile("m_RotationOffset", m_RotationOffset);
-            //writeToFile("m_HmdPosLocalInWorld", m_HmdPosLocalInWorld);
-
-            //writeToFile("hmdToControllerWorldLength", hmdToControllerWorldLength);
-            //writeToFile("dotProduct_hmdToControllerWorld2DNorm_HmdRight", dotProduct_hmdToControllerWorld2DNorm_HmdRight);
-            //writeToFile("dotProduct_hmdToControllerWorld2DNorm_HmdForward", dotProduct_hmdToControllerWorld2DNorm_HmdForward);
-            //writeToFile("hmdToControllerWorldZDist", hmdToControllerWorldZDist);
-            //
-            //writeToFile("hmdToControllerWorldLeftLength", hmdToControllerWorldLeftLength);
-            //writeToFile("dotProduct_hmdToControllerWorldLeft2DNorm_HmdRight", dotProduct_hmdToControllerWorldLeft2DNorm_HmdRight);
-            //writeToFile("dotProduct_hmdToControllerWorldLeft2DNorm_HmdForward", dotProduct_hmdToControllerWorldLeft2DNorm_HmdForward);
-            //writeToFile("hmdToControllerWorldLeftZDist", hmdToControllerWorldLeftZDist);
-
-
-            //writeToFile("deltaTime", deltaTime);
-            //writeToFile("m_HeightOffset", m_HeightOffset);
-            //writeToFile("m_SetupOrigin.z", m_SetupOrigin.z);
-
-            //temp = true;
-        //}
-
         if (PressedDigitalAction(m_RightHandGrab))
         {
             if (isPressingRightGrab == false)
             {
-                // Check if grabbing primary weapon
-                float hmdToControllerShoulderMaxZDist = 8.0f;
-                float hmdToControllerShoulderDist = 12.0f;
-                float hmdToControllerShoulderDistOffset = 2.0f;
-
-                if (hmdToControllerWorldLength >= (hmdToControllerShoulderDist - hmdToControllerShoulderDistOffset)
-                    && hmdToControllerWorldLength <= (hmdToControllerShoulderDist + hmdToControllerShoulderDistOffset)
-                    && dotProduct_hmdToControllerWorld2DNorm_HmdRight >= 0.1f
-                    && dotProduct_hmdToControllerWorld2DNorm_HmdForward <= -0.7f
-                    )
-                {
-                    if (weaponId == (int)weapon->AK47 || weaponId == (int)weapon->AUTOSHOTGUN || weaponId == (int)weapon->AWP
-                        || weaponId == (int)weapon->GRENADE_LAUNCHER || weaponId == (int)weapon->HUNTING_RIFLE
-                        || weaponId == (int)weapon->M16A1 || weaponId == (int)weapon->M60
-                        || weaponId == (int)weapon->MAC10 || weaponId == (int)weapon->MACHINEGUN || weaponId == (int)weapon->MP5
-                        || weaponId == (int)weapon->PUMPSHOTGUN || weaponId == (int)weapon->SHOTGUN_CHROME || weaponId == (int)weapon->SNIPER_MILITARY
-                        || weaponId == (int)weapon->UZI || weaponId == (int)weapon->AUTOSHOTGUN || weaponId == (int)weapon->SCAR || weaponId == (int)weapon->SPAS
-                        || weaponId == (int)weapon->SG552 || weaponId == (int)weapon->SCOUT
-                        )
-                    {
-                        m_Game->ClientCmd_Unrestricted("slot2");
-                    }
-                    else
-                    {
-                        m_Game->ClientCmd_Unrestricted("slot1");
-                    }
-                }
-
-                // Check in grabbing secondary weapon
-                float hmdToControllerLegHolsterDist = m_PlayerHeightInMeters * 22.5f;
-                float hmdToControllerLegHolsterDistOffset = 5.0f;
-                float hmdToControllerLegMaxZDist = m_PlayerHeightInMeters * 21.5f;
-                float hmdToControllerLegMaxZDistOffset = 5.0f;
-
-                if (hmdToControllerWorldLength >= (hmdToControllerLegHolsterDist - hmdToControllerLegHolsterDistOffset)
-                    && hmdToControllerWorldLength <= (hmdToControllerLegHolsterDist + hmdToControllerLegHolsterDistOffset)
-                    && dotProduct_hmdToControllerWorld2DNorm_HmdRight >= 0.8f
-                    && hmdToControllerWorldZDist >= (hmdToControllerLegMaxZDist - hmdToControllerLegMaxZDistOffset)
-                    && hmdToControllerWorldZDist <= (hmdToControllerLegMaxZDist + hmdToControllerLegMaxZDistOffset))
-                {
-                    if (weaponId == (int)weapon->MELEE || weaponId == (int)weapon->PISTOL
-                        || weaponId == (int)weapon->MAGNUM || weaponId == (int)weapon->CHAINSAW)
-                    {
-                        m_Game->ClientCmd_Unrestricted("slot1");
-                    }
-                    else
-                    {
-                        m_Game->ClientCmd_Unrestricted("slot2");
-                    }
-                }
-
-                // Check if grabbing Medkit
-                float hmdToControllerBackDist = m_PlayerHeightInMeters * 11.9f;
-                float hmdToControllerBackDistOffset = 5.0f;
-
-                if (dotProduct_hmdToControllerWorld2DNorm_HmdForward < -0.9f
-                    && hmdToControllerWorldZDist >= (hmdToControllerBackDist - hmdToControllerBackDistOffset)
-                    && hmdToControllerWorldZDist <= (hmdToControllerBackDist + hmdToControllerBackDistOffset))
-                {
-                    m_Game->ClientCmd_Unrestricted("slot4");
-                }
+                UpdateBodyGrab(true, rightControllerPosLocalInWorld, weaponId);
 
                 isPressingRightGrab = true;
             }
@@ -2238,62 +2284,7 @@ void VR::UpdateTracking()
 
             if (isHoldingWeapon2Handed == false && isPressingLeftGrab == false)
             {
-                // Check if grabbing Bomb
-                float hmdToControllerLeftShoulderMaxZDist = 8.0f;
-                float hmdToControllerLeftShoulderDist = 14.0f;
-                float hmdToControllerLeftShoulderDistOffset = 2.0f;
-
-                if (isHoldingWeapon2Handed == false
-                    && hmdToControllerWorldLeftLength >= (hmdToControllerLeftShoulderDist - hmdToControllerLeftShoulderDistOffset)
-                    && hmdToControllerWorldLeftLength <= (hmdToControllerLeftShoulderDist + hmdToControllerLeftShoulderDistOffset)
-                    && dotProduct_hmdToControllerWorldLeft2DNorm_HmdRight <= -0.4f
-                    //&& dotProduct_hmdToControllerWorldLeft2DNorm_HmdForward <= -0.7f
-                    && hmdToControllerWorldLeftZDist <= hmdToControllerLeftShoulderMaxZDist)
-                {
-                    if (weaponId == (int)weapon->PIPE_BOMB || weaponId == (int)weapon->VOMITJAR || weaponId == (int)weapon->MOLOTOV)
-                    {
-                        m_Game->ClientCmd_Unrestricted("slot5");
-                    }
-                    else
-                    {
-                        m_Game->ClientCmd_Unrestricted("slot3");
-                    }
-                }
-
-                // Check if grabbing Pills / Adrenaline
-                float hmdToControllerLeftLegHolsterDist = m_PlayerHeightInMeters * 22.5f;
-                float hmdToControllerLeftLegHolsterDistOffset = 5.0f;
-                float hmdToControllerLeftLegMaxZDist = m_PlayerHeightInMeters * 21.5f;
-                float hmdToControllerLeftLegMaxZDistOffset = 5.0f;
-
-                if (isHoldingWeapon2Handed == false
-                    && hmdToControllerWorldLeftLength >= (hmdToControllerLeftLegHolsterDist - hmdToControllerLeftLegHolsterDistOffset)
-                    && hmdToControllerWorldLeftLength <= (hmdToControllerLeftLegHolsterDist + hmdToControllerLeftLegHolsterDistOffset)
-                    && dotProduct_hmdToControllerWorldLeft2DNorm_HmdRight <= -0.8f
-                    && hmdToControllerWorldLeftZDist >= (hmdToControllerLeftLegMaxZDist - hmdToControllerLeftLegMaxZDistOffset)
-                    && hmdToControllerWorldLeftZDist <= (hmdToControllerLeftLegMaxZDist + hmdToControllerLeftLegMaxZDistOffset))
-                {
-                    if (weaponId == (int)weapon->PAIN_PILLS || weaponId == (int)weapon->ADRENALINE)
-                    {
-                        m_Game->ClientCmd_Unrestricted("slot3");
-                    }
-                    else
-                    {
-                        m_Game->ClientCmd_Unrestricted("slot5");
-                    }
-                }
-
-                // Check if grabbing Medkit
-                float hmdToControllerLeftBackDist = m_PlayerHeightInMeters * 11.9f; // 0.5f
-                float hmdToControllerLeftBackDistOffset = 5.0f;
-
-                if (isHoldingWeapon2Handed == false
-                    && dotProduct_hmdToControllerWorldLeft2DNorm_HmdForward < -0.9f
-                    && hmdToControllerWorldLeftZDist >= (hmdToControllerLeftBackDist - hmdToControllerLeftBackDistOffset)
-                    && hmdToControllerWorldLeftZDist <= (hmdToControllerLeftBackDist + hmdToControllerLeftBackDistOffset))
-                {
-                    m_Game->ClientCmd_Unrestricted("slot4");
-                }
+                UpdateBodyGrab(false, leftControllerPosLocalInWorld, weaponId);
 
                 isPressingLeftGrab = true;
             }

@@ -352,6 +352,8 @@ public:
 	static void EncodeGrenadeThrow(bool gesture, int sequence, const Vector &armVelocity, short &mousedx, short &mousedy);
 	static bool DecodeGrenadeThrow(short mousedx, short mousedy, bool &gesture, int &sequence, Vector &armVelocity);
 	static void WriteGrenadeThrowLog(const char *format, ...);
+	static int GetWeaponSlot(int weaponId);
+	void UpdateBodyGrab(bool weaponHand, const Vector &handPosLocalInWorld, int weaponId);
 	Vector GetViewAngle();
 	Vector GetViewOriginLeft();
 	Vector GetViewOriginRight();
