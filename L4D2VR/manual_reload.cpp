@@ -81,8 +81,25 @@ namespace
 	bool g_HaveBolt = false;
 	ULONGLONG g_LastViewmodelDraw = 0;
 	int g_LastWeaponId = 0;
-	// The magazine relative to the hand when it was grabbed
-	Mat34 g_MagazineFromHand;
+	// What the hand holds relative to it: where it was when grabbed, moving to where it settles
+	Mat34 g_HeldAtGrab;
+	Mat34 g_HeldInHand;
+	ULONGLONG g_GrabTime = 0;
+	const float kHeldSettleMs = 150.0f;
+
+	// Center of what's held from the palm, game units: towards the fingers, to the side of the thumb's edge of the hand
+	// (y is left, and the palm of the left hand faces right) and up. Against the palm and sticking out of it, not inside it.
+	const Vec3 kMagazineInPalm(0.4f, -1.9f, 0.7f);
+	const Vec3 kShellInFingers(1.6f, -1.3f, 0.2f);
+
+	// What the hand holds, at the same angle it has in the weapon
+	Mat34 HeldRelativeToHand(const Profile &profile, const Mat34 &magazineWorld, const Mat34 &weaponFrame)
+	{
+		Mat34 relative = Multiply(TransposeRotation(weaponFrame), magazineWorld);
+		const Vec3 place = profile.shells ? kShellInFingers : kMagazineInPalm;
+		SetAxis(relative, 3, place - RotateVector(relative, Vec3(profile.magazineCenter[0], profile.magazineCenter[1], profile.magazineCenter[2])));
+		return relative;
+	}
 
 	Vec3 ToVec3(const Vector &v) { return Vec3(v.x, v.y, v.z); }
 	Vec3 ArrayToVec3(const float v[3]) { return Vec3(v[0], v[1], v[2]); }
@@ -95,6 +112,17 @@ namespace
 	{
 		return *(const T *)((const uint8_t *)entity + offset);
 	}
+}
+
+bool VR::ReloadHasUnlimitedReserve(int weaponId)
+{
+	return weaponId == C_WeaponCSBase::PISTOL || weaponId == C_WeaponCSBase::MAGNUM;
+}
+
+bool VR::ManualReloadIsHolding() const
+{
+	const Reload::State state = g_Machine.GetState();
+	return m_ManualReloadEnabled && (state == Reload::State::HoldingOld || state == Reload::State::HoldingFresh);
 }
 
 // How many rounds a weapon holds, 0 for weapons reloaded the game's way
@@ -178,7 +206,8 @@ void VR::UpdateManualReload()
 	inputs.ejectPressed = serverCommits && PressedDigitalAction(m_ActionReload, true);
 	inputs.clip = Read<int>(weapon, kClientClipOffset);
 	inputs.capacity = std::max(profile->capacity, inputs.clip);
-	inputs.reserve = Read<int>(local, kClientAmmoArrayOffset + ammoType * 4);
+	// Pistols never run out of magazines, and the game reports their reserve as 0
+	inputs.reserve = ReloadHasUnlimitedReserve(m_ActiveWeaponId) ? 999 : Read<int>(local, kClientAmmoArrayOffset + ammoType * 4);
 	inputs.shells = profile->shells;
 	inputs.hasBolt = g_HaveBolt && serverCommits;
 
@@ -189,16 +218,12 @@ void VR::UpdateManualReload()
 	m_ReloadUsesShells = profile->shells;
 	m_ReloadActive = true;
 
-	if (events & Reload::Event_GrabbedOld)
-		g_MagazineFromHand = Multiply(InvertRigid(handFrame), g_MagazineWorld);
-
-	if (events & Reload::Event_GrabbedFresh)
+	if (events & (Reload::Event_GrabbedOld | Reload::Event_GrabbedFresh))
 	{
-		// A new magazine is held the way it would sit in the weapon, relative to the hand
 		const Mat34 weaponFrame = FromAxes(ToVec3(m_ViewmodelForward), ToVec3(m_ViewmodelRight) * -1.0f, ToVec3(m_ViewmodelUp));
-		Mat34 relative = Multiply(TransposeRotation(weaponFrame), g_MagazineWorld);
-		SetAxis(relative, 3, RotateVector(relative, ArrayToVec3(profile->magazineCenter)) * -1.0f);
-		g_MagazineFromHand = relative;
+		g_HeldInHand = HeldRelativeToHand(*profile, g_MagazineWorld, weaponFrame);
+		g_HeldAtGrab = (events & Reload::Event_GrabbedOld) ? Multiply(InvertRigid(handFrame), g_MagazineWorld) : g_HeldInHand;
+		g_GrabTime = GetTickCount64();
 	}
 
 	if (events & (Reload::Event_Inserted | Reload::Event_ShellInserted))
@@ -312,7 +337,8 @@ bool VR::BuildReloadViewmodel(const void *studioHeader, const void *customBones,
 		Mat34 held;
 		if (showHeld)
 		{
-			held = Multiply(GetLeftHandGrabFrame(), g_MagazineFromHand);
+			const float settled = std::min((GetTickCount64() - g_GrabTime) / kHeldSettleMs, 1.0f);
+			held = Multiply(GetLeftHandGrabFrame(), Blend(g_HeldAtGrab, g_HeldInHand, settled));
 		}
 		else
 		{

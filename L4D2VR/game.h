@@ -38,6 +38,9 @@ struct Player
     bool isNewSwing;
     QAngle prevControllerAngle;
 
+    bool manualReload = false;  // reloads with the hands: the game doesn't reload this player's weapon by itself
+    bool reloadButton = false;  // has the reload button pressed in the last usercmd
+
     // Last grenade throw received from the player (VR::EncodeGrenadeThrow, decoded in Hooks::dReadUsercmd)
     int throwSequence = 0;
     bool throwPending = false;  // not thrown yet

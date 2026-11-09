@@ -311,8 +311,11 @@ void PoseRelay::Reset()
 	m_ServerCapable = false;
 	m_HelloAttempts = 0;
 	m_LastHelloMs = 0;
+	m_SentManualReload = -1;
 	for (ServerClient &client : m_Clients)
 		client = ServerClient();
+	for (Player &player : m_Game->m_PlayersVRInfo)
+		player.manualReload = false;
 	for (Remote &remote : m_Remotes)
 		remote.valid = false;
 	m_RemoteCount = 0;
@@ -343,6 +346,16 @@ void PoseRelay::Update(VR *vr, C_BasePlayer *localPlayer)
 			m_Game->m_EngineClient->ServerCmd(hello, true);
 		}
 		return;
+	}
+
+	// The server has to know this player reloads by hand, to not reload the weapon by itself
+	const int manualReload = vr->m_ManualReloadEnabled ? 1 : 0;
+	if (manualReload != m_SentManualReload)
+	{
+		m_SentManualReload = manualReload;
+		char command[40];
+		snprintf(command, sizeof(command), "l4d2vr_manual_reload %d", manualReload);
+		m_Game->m_EngineClient->ServerCmd(command, true);
 	}
 
 	if (!vr->m_ShareBodyMovement && !vr->m_ShowOtherPlayersMovement)
@@ -446,6 +459,14 @@ bool PoseRelay::HandleServerCommand(edict_t *player, const void *commandObject)
 		return true;
 	}
 
+	if (strcmp(name, "l4d2vr_manual_reload") == 0)
+	{
+		const int index = ServerPlayerIndex(m_Game, player);
+		if (m_Game->IsValidPlayerIndex(index) && args.Count() == 2)
+			m_Game->m_PlayersVRInfo[index].manualReload = atoi(args.Arg(1)) != 0;
+		return true;
+	}
+
 	const bool isHello = strcmp(name, "l4d2vr_pose_hello") == 0;
 	const bool isUpload = strcmp(name, "l4d2vr_pose_upload") == 0;
 	if (!isHello && !isUpload)
@@ -536,7 +557,7 @@ void PoseRelay::ApplyReload(edict_t *player, int shell, int ammoType, int expect
 	const int kAmmoArrayOffset = 0x1874;
 	const int kMaxReserveDifference = 80; // the client's number can be a little behind
 
-	if (!player || !player->m_pUnk || ammoType < 0 || ammoType >= 32)
+	if (!player || !player->m_pUnk)
 		return;
 
 	void *serverPlayer = player->m_pUnk->GetBaseEntity();
@@ -549,11 +570,24 @@ void PoseRelay::ApplyReload(edict_t *player, int shell, int ammoType, int expect
 	if (!weapon)
 		return;
 
-	const int capacity = VR::GetReloadCapacity(weapon->GetWeaponID());
+	const int weaponId = weapon->GetWeaponID();
+	const int capacity = VR::GetReloadCapacity(weaponId);
 	if (capacity <= 0)
 		return;
 
 	int &clip = *(int *)((uint8_t *)weapon + kClipOffset);
+
+	if (VR::ReloadHasUnlimitedReserve(weaponId))
+	{
+		if (clip >= 0 && clip <= 1000)
+			clip = std::max(capacity, clip);
+		*((uint8_t *)weapon + kInReloadOffset) = 0;
+		return;
+	}
+
+	if (ammoType < 0 || ammoType >= 32)
+		return;
+
 	int &reserve = *(int *)((uint8_t *)serverPlayer + kAmmoArrayOffset + ammoType * 4);
 
 	// If this isn't the number the client has, these offsets are wrong for this version of the game: nothing is written

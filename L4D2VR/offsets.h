@@ -71,6 +71,15 @@ public:
     Offset FindUseEntity =               { "server.dll", 0x34E790, "55 8B EC B8 80 13 00 00 E8 ? ? ? ? A1 ? ? ? ? 33 C5 89 45 FC 0F 57 C9 F3 0F 10 45 0C 0F 2F C8 F3 0F 10 55 08", 0, true };
     Offset PlayerUse =                   { "server.dll", 0x312BB0, "55 8B EC 81 EC 94 00 00 00 A1 ? ? ? ? 33 C5 89 45 FC 53 56 8B F1 8B 9E B8 1C 00 00 8B 06 8B 90 28 01 00 00", 0, true };
 
+    // Where a reload starts (DefaultReload for weapons with a magazine, Reload for the shotguns), and the state of the
+    // "helping hand" animation that reaches towards things to use
+    Offset ClientDefaultReload =         { "client.dll", 0x17F10, "55 8B EC 51 56 8B F1 8B 86 ? ? ? ? 57 83 F8 FF 74 36 8B 15", 0, true };
+    Offset ClientShotgunReload =         { "client.dll", 0x2F1CF0, "55 8B EC 51 56 57 8B F1 E8 ? ? ? ? 8B F8 85 FF 0F 84 ? ? ? ? 8B 87 ? ? ? ? A8 01 0F 85 ? ? ? ? A9 00 08 00 00", 0, true };
+    Offset ClientSetHelpingHandState =   { "client.dll", 0x2FC5E0, "55 8B EC 51 53 56 8B F1 8D 9E ? ? ? ? 57 8B 7D 08 89 5D FC 39 BE ? ? ? ? 74 06 89 BE", 0, true };
+    Offset ServerDefaultReload =         { "server.dll", 0x4DD90, "55 8B EC 51 53 56 8B F1 8B 86 ? ? ? ? 83 F8 FF 74 36 8B 15", 0, true };
+    Offset ServerShotgunReload =         { "server.dll", 0x3C2F80, "55 8B EC 83 EC 08 56 57 8B F1 E8 ? ? ? ? 8B F8 85 FF 0F 84 ? ? ? ? 8B 87 ? ? ? ? A8 01 0F 85 ? ? ? ? A9 00 08 00 00", 0, true };
+    Offset ServerSetHelpingHandState =   { "server.dll", 0x3D0A30, "55 8B EC 51 53 8B 5D 08 56 8B F1 57 8D BE ? ? ? ? 89 7D FC 39 9E ? ? ? ? 74 2A", 0, true };
+
     Offset ServerFireTerrorBullets =     { "server.dll", 0x3C78B0, "55 8B EC 81 EC ? ? ? ? A1 ? ? ? ? 33 C5 89 45 FC 8B 45 08 8B 4D 10" };
     Offset ReadUserCmd =                 { "server.dll", 0x205710, "55 8B EC 53 8B 5D 10 56 57 8B 7D 0C 53" };
     // CBaseCSGrenade::StartGrenadeThrow, called when the trigger is let go: m_fThrowTime = curtime + 0.2

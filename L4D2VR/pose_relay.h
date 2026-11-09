@@ -96,6 +96,7 @@ private:
 	unsigned long long m_LastHelloMs = 0;
 	unsigned long long m_LastSendMs = 0;
 	uint16_t m_Sequence = 0;
+	int m_SentManualReload = -1;
 
 	ServerClient m_Clients[kMaxPlayers];
 	Remote m_Remotes[kMaxPlayers];

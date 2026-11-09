@@ -1,6 +1,9 @@
 #include "vr.h"
 #include <Windows.h>
 #include <algorithm>
+#include <chrono>
+#include <unordered_map>
+#include <vector>
 #include "sdk.h"
 #include "game.h"
 #include "hooks.h"
@@ -14,6 +17,14 @@ namespace
 	// How fast the left hand goes between the weapon and the controller, per second
 	const float kFollowSpeed = 8.0f;
 	const float kFingerSmoothing = 18.0f;
+	// Fingers around what the hand is holding
+	const float kMeleeGrip[HandRig::FingerCount] = { 0.75f, 0.9f, 0.9f, 0.9f, 0.9f };
+	const float kHoldingMagazineCurl = 0.55f;
+
+	// The pose of the weapon and the hand before the throw started, relative to the weapon's frame, per model
+	std::unordered_map<const void *, std::vector<Mat34>> g_ThrowPoses;
+	// After the throw the hand stays as it was until the game changes weapon
+	const auto kThrownGrenadeTime = std::chrono::milliseconds(1500);
 
 	// DT_BaseCombatWeapon::m_bInReload on the client
 	const int kClientWeaponInReloadOffset = 0x9BD;
@@ -46,6 +57,7 @@ namespace
 void VR::ClearModelCaches()
 {
 	m_HandModels.clear();
+	g_ThrowPoses.clear();
 	Hooks::m_ModelKinds.clear();
 }
 
@@ -68,6 +80,45 @@ bool VR::WantsLeftHandOnController() const
 		return false;
 
 	return !IsWeaponReloading();
+}
+
+bool VR::ThrownGrenadeHasLeftTheHand() const
+{
+	return m_GrenadeThrowGesture && IsThrowableWeapon(m_ActiveWeaponId) && !m_GrenadeTriggerHeld
+		&& std::chrono::steady_clock::now() - m_GrenadeReleaseTime < kThrownGrenadeTime;
+}
+
+// While throwing with the arm the game plays its wind-up animation, which pulls the hand back. Holding the last pose from
+// before the trigger was pressed keeps the grenade where the real hand is. Returns the bones to draw with.
+const void *VR::ApplyThrowPose(const void *studioHeader, const void *customBones, void *storage)
+{
+	if (!m_GrenadeThrowGesture || !IsThrowableWeapon(m_ActiveWeaponId) || !Studio::IsValid(studioHeader))
+		return customBones;
+
+	const int boneCount = Studio::BoneCount(studioHeader);
+	if (boneCount <= 0 || boneCount > Studio::kMaxBones)
+		return customBones;
+
+	const Mat34 frame = FromAxes(ToVec3(m_ViewmodelForward), ToVec3(m_ViewmodelRight) * -1.0f, ToVec3(m_ViewmodelUp), ToVec3(GetRecommendedViewmodelAbsPos()));
+	std::vector<Mat34> &pose = g_ThrowPoses[studioHeader];
+
+	if (!m_GrenadeTriggerHeld && !ThrownGrenadeHasLeftTheHand())
+	{
+		pose.resize(boneCount);
+		const Mat34 inverse = InvertRigid(frame);
+		const Mat34 *source = (const Mat34 *)customBones;
+		for (int i = 0; i < boneCount; ++i)
+			pose[i] = Multiply(inverse, source[i]);
+		return customBones;
+	}
+
+	if ((int)pose.size() != boneCount)
+		return customBones;
+
+	Mat34 *bones = (Mat34 *)storage;
+	for (int i = 0; i < boneCount; ++i)
+		bones[i] = Multiply(frame, pose[i]);
+	return bones;
 }
 
 void VR::UpdateHands(float deltaSeconds)
@@ -128,8 +179,30 @@ bool VR::BuildFirstPersonHands(const void *studioHeader, const void *customBones
 	Mat34 *bones = (Mat34 *)outBones;
 	memcpy(bones, customBones, boneCount * sizeof(Mat34));
 
+	// Melee weapons are placed on the controller (see meleeViewmodelOffsets), so the hand has to be there too. The
+	// animation has the hand somewhere else on the handle for each weapon.
+	if (m_Game->m_IsMeleeWeaponActive && m_RightControllerDeviceIndex != vr::k_unTrackedDeviceIndexInvalid && m_Poses[m_RightControllerDeviceIndex].bPoseIsValid)
+	{
+		const Vector forward = VectorRotate(m_RightControllerForwardRaw, m_RightControllerRightRaw, kHandGripTilt);
+		const Vector up = VectorRotate(m_RightControllerUpRaw, m_RightControllerRightRaw, kHandGripTilt);
+		const Vector wrist = m_RightControllerPosAbs + (forward * m_HandOffsetMeters.x + up * m_HandOffsetMeters.z) * m_VRScale;
+
+		const Mat34 hand = rig.HandFromFrame(HandRig::Right, ToVec3(forward), ToVec3(up), ToVec3(wrist));
+		if (IsFinite(hand))
+			rig.PoseHand(HandRig::Right, hand, kMeleeGrip, bones);
+	}
+
 	if (m_LeftHandFollow > 0.0f)
 	{
+		float curls[HandRig::FingerCount];
+		memcpy(curls, m_LeftFingerCurls, sizeof(curls));
+		if (ManualReloadIsHolding())
+		{
+			// Closing the hand completely would put the fingers through what it holds
+			for (float &curl : curls)
+				curl = std::min(curl, kHoldingMagazineCurl);
+		}
+
 		// Hand turned by the optional fine tuning, around its own axes
 		Vec3 forward = m_LeftHandForward;
 		Vec3 up = m_LeftHandUp;
@@ -148,14 +221,14 @@ bool VR::BuildFirstPersonHands(const void *studioHeader, const void *customBones
 
 		if (m_LeftHandFollow >= 1.0f)
 		{
-			rig.PoseHand(HandRig::Left, hand, m_LeftFingerCurls, bones);
+			rig.PoseHand(HandRig::Left, hand, curls, bones);
 		}
 		else
 		{
 			alignas(16) unsigned char storage[sizeof(Mat34) * Studio::kMaxBones];
 			Mat34 *posed = (Mat34 *)storage;
 			memcpy(posed, bones, boneCount * sizeof(Mat34));
-			rig.PoseHand(HandRig::Left, hand, m_LeftFingerCurls, posed);
+			rig.PoseHand(HandRig::Left, hand, curls, posed);
 			rig.BlendHand(HandRig::Left, (const Mat34 *)customBones, posed, m_LeftHandFollow, bones);
 		}
 	}

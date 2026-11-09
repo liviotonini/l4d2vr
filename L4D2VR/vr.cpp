@@ -671,7 +671,7 @@ void VR::ProcessInput()
     //if (PressedDigitalAction(m_ActionSecondaryAttack) || (m_IsTrackingManualPush && VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 5.0))
     // The swing gestures don't shove while throwing a grenade with the arm (both arms move fast, and holding the shove
     // button stops the game from throwing). Neither does the shove button press that cancelled a throw.
-    SetGameButton(GameButton_Attack2, (PressedDigitalAction(m_ActionSecondaryAttack) && !m_ShoveButtonUsedForCancel) || (m_IsTrackingManualPush && !IsGrenadeThrowInProgress() && (VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 4.0 || ( !m_Game->m_IsMeleeWeaponActive && VectorLength(m_RightControllerPose.TrackedDeviceVel) > 4.0))));
+    SetGameButton(GameButton_Attack2, m_IsTrackingManualPush && !IsGrenadeThrowInProgress() && (VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 4.0 || (!m_Game->m_IsMeleeWeaponActive && VectorLength(m_RightControllerPose.TrackedDeviceVel) > 4.0)));
 
     if (PressedDigitalAction(m_ActionPrevItem, true))
     {

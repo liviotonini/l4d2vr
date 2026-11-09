@@ -359,7 +359,10 @@ public:
 	unsigned long long m_WristHudLastRefresh = 0;
 	int m_WristHudUploadFailures = 0;
 	std::vector<uint8_t> m_WristHudPixels;
-	unsigned char m_WristHudLastState[128] = {}; // WristHud::State, kept here so vr.h doesn't need its header
+	unsigned char m_WristHudLastState[300] = {}; // WristHud::State, kept here so vr.h doesn't need its header
+	int m_WristHudWeaponId = -1;
+	int m_WristHudMaxClip = 0;
+	int m_WristHudMaxReserve = 0;
 
 	// Weapon orientation stored relative to the "two hands" frame at the moment the left hand grabs the weapon
 	Vector m_TwoHandForwardLocal = { 1,0,0 };
@@ -409,6 +412,11 @@ public:
 	void ClearModelCaches();
 	void UpdateWristHud();
 	void UpdateManualReload();
+	bool IsGameReloadButtonDown() const { return m_GameButtonState[GameButton_Reload] == 1; }
+	bool ThrownGrenadeHasLeftTheHand() const;
+	const void *ApplyThrowPose(const void *studioHeader, const void *customBones, void *storage);
+	bool ManualReloadIsHolding() const;
+	static bool ReloadHasUnlimitedReserve(int weaponId);
 	static int GetReloadCapacity(int weaponId);
 	bool ManualReloadBlocksFire() const;
 	bool ManualReloadBlocksNativeReload() const;

@@ -87,6 +87,9 @@ typedef DWORD *(__thiscall *tPrePushRenderTarget)(void *thisptr, int a2);
 typedef void(__cdecl *tFormatViewModelAttachment)(void *player, Vector &origin, bool inverse);
 typedef void *(__thiscall *tFindUseEntity)(void *thisptr, float radius, float dotLimit, float defaultDotLimit, void *traceResult, void *extra);
 typedef void(__thiscall *tPlayerUse)(void *thisptr, void *useEntity);
+typedef bool(__thiscall *tDefaultReload)(void *thisptr, int clipSize1, int clipSize2, int activity);
+typedef bool(__thiscall *tShotgunReload)(void *thisptr);
+typedef void(__thiscall *tSetHelpingHandState)(void *thisptr, int state);
 typedef void(__thiscall *tServerClientCommand)(void *thisptr, edict_t *player, const void *command);
 typedef const QAngle *(__thiscall *tServerEyeAngles)(void *thisptr);
 typedef void(__thiscall *tEyeVectors)(void *thisptr, Vector *forward, Vector *right, Vector *up);
@@ -138,6 +141,12 @@ public:
 	static inline Hook<tFindUseEntity> hkFindUseEntity;
 	static inline Hook<tFindUseEntity> hkClientFindUseEntity;
 	static inline Hook<tPlayerUse> hkPlayerUse;
+	static inline Hook<tDefaultReload> hkServerDefaultReload;
+	static inline Hook<tDefaultReload> hkClientDefaultReload;
+	static inline Hook<tShotgunReload> hkServerShotgunReload;
+	static inline Hook<tShotgunReload> hkClientShotgunReload;
+	static inline Hook<tSetHelpingHandState> hkServerSetHelpingHandState;
+	static inline Hook<tSetHelpingHandState> hkClientSetHelpingHandState;
 	static inline Hook<tServerClientCommand> hkServerClientCommand;
 	static inline Hook<tEyePosition> hkServerPlayerEyePosition;
 	static inline Hook<tEyePosition> hkClientPlayerEyePosition;
@@ -164,6 +173,7 @@ public:
 	void initGrenadeThrowHooks();
 	void initUseHooks();
 	void initRelayHook();
+	void initWeaponStateHooks();
 
 	// Detour functions
 	static ITexture *__fastcall dGetRenderTarget(void *ecx, void *edx);
@@ -201,6 +211,15 @@ public:
 	static void *__fastcall dFindUseEntity(void *ecx, void *edx, float radius, float dotLimit, float defaultDotLimit, void *traceResult, void *extra);
 	static void *__fastcall dClientFindUseEntity(void *ecx, void *edx, float radius, float dotLimit, float defaultDotLimit, void *traceResult, void *extra);
 	static void __fastcall dPlayerUse(void *ecx, void *edx, void *useEntity);
+	static bool __fastcall dServerDefaultReload(void *ecx, void *edx, int clipSize1, int clipSize2, int activity);
+	static bool __fastcall dClientDefaultReload(void *ecx, void *edx, int clipSize1, int clipSize2, int activity);
+	static bool __fastcall dServerShotgunReload(void *ecx, void *edx);
+	static bool __fastcall dClientShotgunReload(void *ecx, void *edx);
+	static void __fastcall dServerSetHelpingHandState(void *ecx, void *edx, int state);
+	static void __fastcall dClientSetHelpingHandState(void *ecx, void *edx, int state);
+	static bool ShouldBlockServerReload(void *weapon);
+	static bool ShouldBlockClientReload(void *weapon);
+	static bool IsLocalPlayerWeapon(void *weapon);
 	static void __fastcall dServerClientCommand(void *ecx, void *edx, edict_t *player, const void *command);
 	static Vector *__fastcall dServerPlayerEyePosition(void *ecx, void *edx, Vector *eyePos);
 	static Vector *__fastcall dClientPlayerEyePosition(void *ecx, void *edx, Vector *eyePos);

@@ -89,6 +89,18 @@ Hooks::Hooks(Game *game)
 	}
 	if (hkServerClientCommand.pTarget)
 		hkServerClientCommand.enableHook();
+	if (hkServerDefaultReload.pTarget)
+		hkServerDefaultReload.enableHook();
+	if (hkClientDefaultReload.pTarget)
+		hkClientDefaultReload.enableHook();
+	if (hkServerShotgunReload.pTarget)
+		hkServerShotgunReload.enableHook();
+	if (hkClientShotgunReload.pTarget)
+		hkClientShotgunReload.enableHook();
+	if (hkServerSetHelpingHandState.pTarget)
+		hkServerSetHelpingHandState.enableHook();
+	if (hkClientSetHelpingHandState.pTarget)
+		hkClientSetHelpingHandState.enableHook();
 }
 
 Hooks::~Hooks()
@@ -186,6 +198,7 @@ int Hooks::initSourceHooks()
 	initGrenadeThrowHooks();
 	initUseHooks();
 	initRelayHook();
+	initWeaponStateHooks();
 
 	void *clientMode = nullptr;
 	while (!clientMode)
@@ -493,6 +506,9 @@ int Hooks::dReadUsercmd(void *buf, CUserCmd *move, CUserCmd *from)
 	if (!m_Game->IsValidPlayerIndex(i))
 		return 1;
 
+	const int kInReload = 1 << 13;
+	m_Game->m_PlayersVRInfo[i].reloadButton = (move->buttons & kInReload) != 0;
+
 	if (move->tick_count < 0) // Signal for VR CUserCmd
 	{
 		move->tick_count *= -1;
@@ -703,10 +719,15 @@ Hooks::ModelKind Hooks::GetModelKind(const void *model)
 	if (found != m_ModelKinds.end())
 		return found->second;
 
-	const char *name = m_Game->m_ModelInfo->GetModelName((void *)model);
+	const char *modelName = m_Game->m_ModelInfo->GetModelName((void *)model);
 	ModelKind kind = ModelKind::Other;
-	if (name)
+	if (modelName)
 	{
+		// The game's scripts mix upper and lower case (v_dual_pistolA.mdl)
+		char name[260];
+		strncpy_s(name, modelName, _TRUNCATE);
+		_strlwr_s(name);
+
 		if (strstr(name, "/arms/v_arms"))
 			kind = ModelKind::FirstPersonArms;
 		else if (strstr(name, "models/v_models/v_"))
@@ -736,6 +757,15 @@ void Hooks::dDrawModelExecute(void *ecx, void *edx, void *state, const ModelRend
 
 	if (kind == ModelKind::Viewmodel || kind == ModelKind::DualPistolsViewmodel)
 		m_VR->m_ViewmodelHasTwoWeapons = kind == ModelKind::DualPistolsViewmodel;
+
+	// The grenade has left the hand: the game is still playing the throw until it changes weapon
+	if (kind == ModelKind::Viewmodel && m_VR->ThrownGrenadeHasLeftTheHand())
+		return;
+
+	// The weapon and the hand keep their pose while throwing with the arm, instead of the game's wind-up animation
+	alignas(16) unsigned char throwPose[sizeof(HandMath::Mat34) * Studio::kMaxBones];
+	if (pCustomBoneToWorld && (kind == ModelKind::Viewmodel || kind == ModelKind::FirstPersonArms))
+		pCustomBoneToWorld = (void *)m_VR->ApplyThrowPose(*(const void **)state, pCustomBoneToWorld, throwPose);
 
 	if (kind == ModelKind::Viewmodel && pCustomBoneToWorld)
 	{
@@ -929,6 +959,93 @@ void __fastcall Hooks::dServerClientCommand(void *ecx, void *edx, edict_t *playe
 		return;
 
 	hkServerClientCommand.fOriginal(ecx, player, command);
+}
+
+// The game reloads an empty weapon by itself, and when the reload button is pressed. With manual reload only the button
+// can start one. The client predicts weapons too, so both sides are stopped or the animation would start anyway.
+void Hooks::initWeaponStateHooks()
+{
+	const Offsets *offsets = m_Game->m_Offsets;
+
+	if (offsets->ServerDefaultReload.address)
+		hkServerDefaultReload.createHook((LPVOID)offsets->ServerDefaultReload.address, &dServerDefaultReload);
+	if (offsets->ClientDefaultReload.address)
+		hkClientDefaultReload.createHook((LPVOID)offsets->ClientDefaultReload.address, &dClientDefaultReload);
+	if (offsets->ServerShotgunReload.address)
+		hkServerShotgunReload.createHook((LPVOID)offsets->ServerShotgunReload.address, &dServerShotgunReload);
+	if (offsets->ClientShotgunReload.address)
+		hkClientShotgunReload.createHook((LPVOID)offsets->ClientShotgunReload.address, &dClientShotgunReload);
+	if (offsets->ServerSetHelpingHandState.address)
+		hkServerSetHelpingHandState.createHook((LPVOID)offsets->ServerSetHelpingHandState.address, &dServerSetHelpingHandState);
+	if (offsets->ClientSetHelpingHandState.address)
+		hkClientSetHelpingHandState.createHook((LPVOID)offsets->ClientSetHelpingHandState.address, &dClientSetHelpingHandState);
+}
+
+bool Hooks::IsLocalPlayerWeapon(void *weapon)
+{
+	C_BasePlayer *local = (C_BasePlayer *)m_Game->GetClientEntity(m_Game->m_EngineClient->GetLocalPlayer());
+	return local && (void *)local->GetActiveWeapon() == weapon;
+}
+
+bool Hooks::ShouldBlockServerReload(void *weapon)
+{
+	if (!m_GetGrenadeOwner)
+		return false;
+
+	const int index = GetServerEntityIndex(m_GetGrenadeOwner(weapon));
+	if (!m_Game->IsValidPlayerIndex(index))
+		return false;
+
+	const Player &player = m_Game->m_PlayersVRInfo[index];
+	return player.isUsingVR && player.manualReload && !player.reloadButton;
+}
+
+bool Hooks::ShouldBlockClientReload(void *weapon)
+{
+	return m_VR->m_IsVREnabled && m_VR->m_ManualReloadEnabled && m_Game->m_PoseRelay->IsServerCapable()
+		&& !m_VR->IsGameReloadButtonDown() && IsLocalPlayerWeapon(weapon);
+}
+
+bool __fastcall Hooks::dServerDefaultReload(void *ecx, void *edx, int clipSize1, int clipSize2, int activity)
+{
+	return !ShouldBlockServerReload(ecx) && hkServerDefaultReload.fOriginal(ecx, clipSize1, clipSize2, activity);
+}
+
+bool __fastcall Hooks::dClientDefaultReload(void *ecx, void *edx, int clipSize1, int clipSize2, int activity)
+{
+	return !ShouldBlockClientReload(ecx) && hkClientDefaultReload.fOriginal(ecx, clipSize1, clipSize2, activity);
+}
+
+bool __fastcall Hooks::dServerShotgunReload(void *ecx, void *edx)
+{
+	return !ShouldBlockServerReload(ecx) && hkServerShotgunReload.fOriginal(ecx);
+}
+
+bool __fastcall Hooks::dClientShotgunReload(void *ecx, void *edx)
+{
+	return !ShouldBlockClientReload(ecx) && hkClientShotgunReload.fOriginal(ecx);
+}
+
+// The "helping hand": near something to use, the game moves the weapon and reaches with the other hand. Anything other
+// than state 0 (not reaching) is ignored for VR players, whose hands are their own.
+void __fastcall Hooks::dServerSetHelpingHandState(void *ecx, void *edx, int state)
+{
+	if (state != 0 && m_GetGrenadeOwner)
+	{
+		bool isLocalPlayer;
+		if (IsVRThrower(GetServerEntityIndex(m_GetGrenadeOwner(ecx)), isLocalPlayer))
+			return;
+	}
+
+	hkServerSetHelpingHandState.fOriginal(ecx, state);
+}
+
+void __fastcall Hooks::dClientSetHelpingHandState(void *ecx, void *edx, int state)
+{
+	if (state != 0 && m_VR->m_IsVREnabled && IsLocalPlayerWeapon(ecx))
+		return;
+
+	hkClientSetHelpingHandState.fOriginal(ecx, state);
 }
 
 void Hooks::initUseHooks()
