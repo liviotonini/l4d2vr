@@ -41,7 +41,7 @@
             {
                "inputs" : {
                   "click" : {
-                     "output" : "/actions/main/in/ResetPosition"
+                     "output" : "/actions/main/in/ToggleWalkSpeed"
                   },
                   "position" : {
                      "output" : "/actions/main/in/Walk"
@@ -71,7 +71,7 @@
             {
                "inputs" : {
                   "click" : {
-                     "output" : "/actions/main/in/Reload"
+                     "output" : "/actions/main/in/LeftHandGrab"
                   }
                },
                "mode" : "button",
@@ -100,7 +100,7 @@
                      "output" : "/actions/main/in/PrevItem"
                   },
                   "south" : {
-                     "output" : "/actions/main/in/NextItem"
+                     "output" : "/actions/main/in/Crouch"
                   },
                   "west" : {
                      "output" : "/actions/main/in/boolean_turnleft"
@@ -185,7 +185,16 @@
 			{
                "inputs" : {
                   "click" : {
-                     "output" : "/actions/main/in/Scoreboard"
+                     "output" : "/actions/main/in/Reload"
+                  }
+               },
+               "mode" : "button",
+               "path" : "/user/hand/left/input/a"
+            },
+			{
+               "inputs" : {
+                  "click" : {
+                     "output" : "/actions/main/in/ResetPosition"
                   }
                },
                "mode" : "button",
@@ -203,7 +212,7 @@
             {
                "inputs" : {
                   "click" : {
-                     "output" : "/actions/main/in/Crouch"
+                     "output" : "/actions/main/in/RightHandGrab"
                   }
                },
                "mode" : "button",
