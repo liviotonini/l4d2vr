@@ -15,9 +15,9 @@ class ModelRenderInfo_t;
 
 template <typename T>
 struct Hook {
-	T fOriginal;
-	LPVOID pTarget;
-	bool isEnabled;
+	T fOriginal = nullptr;
+	LPVOID pTarget = nullptr;
+	bool isEnabled = false;
 
 	int createHook(LPVOID targetFunc, LPVOID detourFunc)
 	{
@@ -29,6 +29,7 @@ struct Hook {
 			return 1;
 		}
 		pTarget = targetFunc;
+		return 0;
 	}
 
 	int enableHook()
@@ -39,6 +40,7 @@ struct Hook {
 			return 1;
 		}
 		isEnabled = true;
+		return 0;
 	}
 
 	int disableHook()
@@ -49,6 +51,7 @@ struct Hook {
 			return 1;
 		}
 		isEnabled = false;
+		return 0;
 	}
 };
 

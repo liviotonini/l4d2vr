@@ -81,8 +81,10 @@ public:
 
     bool m_Initialized = false;
 
-    std::array<Player, 24> m_PlayersVRInfo;
+    // Indexed by the entity index of the player. The game has up to 32 players, more with server mods.
+    std::array<Player, 65> m_PlayersVRInfo;
     int m_CurrentUsercmdID = -1;
+    bool IsValidPlayerIndex(int index) const { return index >= 0 && index < (int)m_PlayersVRInfo.size(); }
     bool m_PerformingMelee = false;
 
     model_t *m_ArmsModel = nullptr;

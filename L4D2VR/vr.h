@@ -144,6 +144,7 @@ public:
 
 	bool m_IsVREnabled = false;
 	bool m_IsInitialized = false;
+	bool m_CrashHandlerReinstalled = false;
 	bool m_RenderedNewFrame = false;
 	bool m_RenderedHud = false;
 	bool m_CreatedVRTextures = false;
@@ -220,6 +221,8 @@ public:
 	bool m_ScopeDebug = false;
 	// Throw the molotov, pipe bomb and bile jar with the arm: hold the trigger, swing and let go
 	bool m_GrenadeThrowGesture = true;
+	// Writes the time of each part of the frame to VR\\perf.csv once per second
+	bool m_DiagnosticsEnabled = false;
 	// Makes fast throws stronger, up to this many times the speed of the hand (the game's own throw is about 17 m/s).
 	// Gentle throws keep the real speed of the hand.
 	float m_GrenadeThrowStrength = 2.0f;

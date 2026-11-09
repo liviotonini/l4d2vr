@@ -16,6 +16,7 @@
 #include <cstdarg>
 #include <d3d9_vr.h>
 #include "settings_menu.h"
+#include "diagnostics.h"
 
 VR::VR(Game *game) 
 {
@@ -194,17 +195,38 @@ void VR::Update()
         }
     }
 
-    SubmitVRTextures();
-    UpdatePosesAndActions();
-    UpdateTracking();
+    {
+        Diagnostics::ScopedTimer timer(Diagnostics::Section_Submit);
+        SubmitVRTextures();
+    }
 
-    if (m_Game->m_VguiSurface->IsCursorVisible())
-        ProcessMenuInput();
-    else
-        ProcessInput();
+    UpdatePosesAndActions();
+
+    {
+        Diagnostics::ScopedTimer timer(Diagnostics::Section_Tracking);
+        UpdateTracking();
+    }
+
+    {
+        Diagnostics::ScopedTimer timer(Diagnostics::Section_Input);
+        if (m_Game->m_VguiSurface->IsCursorVisible())
+            ProcessMenuInput();
+        else
+            ProcessInput();
+    }
 
     if (m_SettingsMenu)
         m_SettingsMenu->Update();
+
+    // The engine replaces the crash handler while it starts, so it's installed again once the game is running
+    if (!m_CrashHandlerReinstalled && m_Game->m_EngineClient->IsInGame())
+    {
+        m_CrashHandlerReinstalled = true;
+        Diagnostics::InstallCrashHandler();
+    }
+
+    Diagnostics::g_PerfEnabled.store(m_DiagnosticsEnabled, std::memory_order_relaxed);
+    Diagnostics::EndFrame();
 }
 
 void VR::CreateVRTextures()
@@ -2410,6 +2432,7 @@ void VR::ParseConfigFile()
     m_ScopeMagnification = scopeMagnification.empty() ? 4.0f : std::clamp(std::stof(scopeMagnification), 1.0f, 20.0f);
     m_ScopeDebug = userConfig["ScopeDebug"] == "true";
 
+    m_DiagnosticsEnabled = userConfig["DiagnosticsEnabled"] == "true";
     m_GrenadeThrowGesture = userConfig["GrenadeThrowGesture"] != "false"; // enabled if missing from config
     const std::string &grenadeThrowStrength = userConfig["GrenadeThrowStrength"];
     m_GrenadeThrowStrength = grenadeThrowStrength.empty() ? 2.0f : std::clamp(std::stof(grenadeThrowStrength), 0.5f, 5.0f);
@@ -2470,6 +2493,7 @@ bool VR::SaveConfigFile()
         { "ScopeDebug", ConfigBoolString(m_ScopeDebug) },
         { "GrenadeThrowGesture", ConfigBoolString(m_GrenadeThrowGesture) },
         { "GrenadeThrowStrength", ConfigFloatString(m_GrenadeThrowStrength) },
+        { "DiagnosticsEnabled", ConfigBoolString(m_DiagnosticsEnabled) },
     };
 
     std::vector<std::string> lines;

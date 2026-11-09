@@ -1,6 +1,7 @@
 #pragma once
 #include "sigscanner.h"
 #include "game.h"
+#include "diagnostics.h"
 
 
 struct Offset
@@ -11,7 +12,8 @@ struct Offset
     std::string signature;
     int sigOffset;
 
-    Offset(std::string moduleName, int currentOffset, std::string signature, int sigOffset = 0)
+    // An optional offset only turns off its feature when the game changes: no error at startup, `address` stays 0
+    Offset(std::string moduleName, int currentOffset, std::string signature, int sigOffset = 0, bool optional = false)
     {
         this->moduleName = moduleName;
         this->offset = currentOffset;
@@ -26,7 +28,9 @@ struct Offset
             
         if (newOffset == -1)
         {
-            Game::errorMsg(("Signature not found: " + signature).c_str());
+            Diagnostics::Log("signature not found in %s: %s", moduleName.c_str(), signature.c_str());
+            if (!optional)
+                Game::errorMsg(("Signature not found: " + signature).c_str());
             return;
         }
 

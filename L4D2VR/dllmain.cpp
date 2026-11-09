@@ -5,6 +5,8 @@
 #include "hooks.h"
 #include "vr.h"
 #include "sdk.h"
+#include "diagnostics.h"
+#include "stability.h"
 
 DWORD WINAPI InitL4D2VR(HMODULE hModule)
 {
@@ -28,6 +30,10 @@ DWORD WINAPI InitL4D2VR(HMODULE hModule)
 
     if (!insecureEnabled)
         ExitProcess(0);
+
+    Diagnostics::Init();
+    Diagnostics::Log("L4D2VR starting");
+    Stability::Init();
 
     g_Game = new Game();
 

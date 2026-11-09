@@ -438,6 +438,7 @@
     <ClInclude Include="..\dxvk\src\vulkan\vulkan_presenter.h" />
     <ClInclude Include="..\dxvk\src\vulkan\vulkan_util.h" />
     <ClInclude Include="..\dxvk\tests\test_utils.h" />
+    <ClInclude Include="diagnostics.h" />
     <ClInclude Include="game.h" />
     <ClInclude Include="hooks.h" />
     <ClInclude Include="offsets.h" />
@@ -451,6 +452,7 @@
     <ClInclude Include="sdk\vector.h" />
     <ClInclude Include="haptics.h" />
     <ClInclude Include="settings_menu.h" />
+    <ClInclude Include="stability.h" />
     <ClInclude Include="sigscanner.h" />
     <ClInclude Include="vr.h" />
     <ClInclude Include="..\thirdparty\imgui\imconfig.h" />
@@ -595,12 +597,14 @@
     <ClCompile Include="..\dxvk\src\vulkan\vulkan_loader.cpp" />
     <ClCompile Include="..\dxvk\src\vulkan\vulkan_names.cpp" />
     <ClCompile Include="..\dxvk\src\vulkan\vulkan_presenter.cpp" />
+    <ClCompile Include="diagnostics.cpp" />
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="game.cpp" />
     <ClCompile Include="hooks.cpp" />
     <ClCompile Include="sdk\checksum_crc.cpp" />
     <ClCompile Include="haptics.cpp" />
     <ClCompile Include="settings_menu.cpp" />
+    <ClCompile Include="stability.cpp" />
     <ClCompile Include="vr.cpp" />
     <ClCompile Include="..\thirdparty\imgui\imgui.cpp" />
     <ClCompile Include="..\thirdparty\imgui\imgui_draw.cpp" />

@@ -5,6 +5,7 @@
 #include "sdk_server.h"
 #include "vr.h"
 #include "offsets.h"
+#include "diagnostics.h"
 #include <algorithm>
 #include <iostream>
 
@@ -215,6 +216,7 @@ void __fastcall Hooks::dRenderView(void *ecx, void *edx, CViewSetup &setup, CVie
 	// Scope view of the sniper rifles. Rendered before the eyes so the last view rendered in the frame is still an eye.
 	if (m_VR->UpdateScope())
 	{
+		Diagnostics::ScopedTimer scopeTimer(Diagnostics::Section_Scope);
 		CViewSetup scopeView = setup;
 		scopeView.x = 0;
 		scopeView.y = 0;
@@ -241,6 +243,8 @@ void __fastcall Hooks::dRenderView(void *ecx, void *edx, CViewSetup &setup, CVie
 
 		m_VR->m_ScopeRendered = true;
 	}
+
+	Diagnostics::ScopedTimer eyesTimer(Diagnostics::Section_Eyes);
 
 	CViewSetup leftEyeView = setup;
 	CViewSetup rightEyeView = setup;
@@ -338,7 +342,7 @@ int Hooks::dServerFireTerrorBullets(int playerId, const Vector &vecOrigin, const
 		vecNewAngles = m_VR->GetRightControllerAbsAngle();
 	}
 	// Clients
-	else if (m_Game->m_PlayersVRInfo[playerId].isUsingVR)
+	else if (m_Game->IsValidPlayerIndex(playerId) && m_Game->m_PlayersVRInfo[playerId].isUsingVR)
 	{
 		vecNewOrigin = m_Game->m_PlayersVRInfo[playerId].controllerPos;
 		vecNewAngles = m_Game->m_PlayersVRInfo[playerId].controllerAngle;
@@ -368,13 +372,16 @@ float __fastcall Hooks::dProcessUsercmds(void *ecx, void *edx, edict_t *player, 
 	typedef int(__thiscall *tEntindex)(void *thisptr);
 	static tEntindex oEntindex = (tEntindex)(m_Game->m_Offsets->CBaseEntity_entindex.address);
 
-	IServerUnknown * pUnknown = player->m_pUnk;
-	Server_BaseEntity *pPlayer = (Server_BaseEntity*)pUnknown->GetBaseEntity();
+	IServerUnknown * pUnknown = player ? player->m_pUnk : nullptr;
+	Server_BaseEntity *pPlayer = pUnknown ? (Server_BaseEntity*)pUnknown->GetBaseEntity() : nullptr;
 
-	int index = oEntindex(pPlayer);
+	int index = pPlayer ? oEntindex(pPlayer) : -1;
 	m_Game->m_CurrentUsercmdID = index;
 
 	float result = hkProcessUsercmds.fOriginal(ecx, player, buf, numcmds, totalcmds, dropped_packets, ignore, paused);
+
+	if (!m_Game->IsValidPlayerIndex(index))
+		return result;
 
 	// check if swinging melee wep
 	if (m_Game->m_PlayersVRInfo[index].isUsingVR && m_Game->m_PlayersVRInfo[index].isMeleeing)
@@ -446,6 +453,9 @@ int Hooks::dReadUsercmd(void *buf, CUserCmd *move, CUserCmd *from)
 	hkReadUsercmd.fOriginal(buf, move, from);
 
 	int i = m_Game->m_CurrentUsercmdID;
+	if (!m_Game->IsValidPlayerIndex(i))
+		return 1;
+
 	if (move->tick_count < 0) // Signal for VR CUserCmd
 	{
 		move->tick_count *= -1;

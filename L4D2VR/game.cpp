@@ -6,6 +6,7 @@
 #include "hooks.h"
 #include "offsets.h"
 #include "sigscanner.h"
+#include "diagnostics.h"
 
 Game::Game()
 {
@@ -50,6 +51,7 @@ void *Game::GetInterface(const char *dllname, const char *interfacename)
 
 void Game::errorMsg(const char *msg)
 {
+    Diagnostics::Log("error: %s", msg);
     MessageBox(0, msg, "L4D2VR", MB_ICONERROR | MB_OK);
 }
 

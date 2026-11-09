@@ -46,7 +46,7 @@ public:
 			return 0;
 
 		// Scan the dll for new offset
-		for (int i = 0; i < moduleInfo.SizeOfImage; ++i)
+		for (int i = 0; i + patternLen <= (int)moduleInfo.SizeOfImage; ++i)
 		{
 			bool found = true;
 			for (int j = 0; j < patternLen; ++j)
