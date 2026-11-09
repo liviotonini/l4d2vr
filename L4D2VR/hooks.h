@@ -87,6 +87,7 @@ typedef DWORD *(__thiscall *tPrePushRenderTarget)(void *thisptr, int a2);
 typedef void(__cdecl *tFormatViewModelAttachment)(void *player, Vector &origin, bool inverse);
 typedef void *(__thiscall *tFindUseEntity)(void *thisptr, float radius, float dotLimit, float defaultDotLimit, void *traceResult, void *extra);
 typedef void(__thiscall *tPlayerUse)(void *thisptr, void *useEntity);
+typedef void(__thiscall *tServerClientCommand)(void *thisptr, edict_t *player, const void *command);
 typedef const QAngle *(__thiscall *tServerEyeAngles)(void *thisptr);
 typedef void(__thiscall *tEyeVectors)(void *thisptr, Vector *forward, Vector *right, Vector *up);
 
@@ -137,6 +138,7 @@ public:
 	static inline Hook<tFindUseEntity> hkFindUseEntity;
 	static inline Hook<tFindUseEntity> hkClientFindUseEntity;
 	static inline Hook<tPlayerUse> hkPlayerUse;
+	static inline Hook<tServerClientCommand> hkServerClientCommand;
 	static inline Hook<tEyePosition> hkServerPlayerEyePosition;
 	static inline Hook<tEyePosition> hkClientPlayerEyePosition;
 	static inline Hook<tServerEyeAngles> hkServerPlayerEyeAngles;
@@ -148,7 +150,7 @@ public:
 	static inline int m_EmitGrenadeVtableOffset = 0;
 	static inline int m_AbsVelocityOffset = 0; // CBaseEntity::m_vecAbsVelocity
 
-	enum class ModelKind { Other, FirstPersonArms, Viewmodel, DualPistolsViewmodel };
+	enum class ModelKind { Other, FirstPersonArms, Viewmodel, DualPistolsViewmodel, Survivor, WorldWeapon };
 	static inline std::unordered_map<const void *, ModelKind> m_ModelKinds;
 	static ModelKind GetModelKind(const void *model);
 
@@ -160,6 +162,7 @@ public:
 	int initSourceHooks();
 	void initGrenadeThrowHooks();
 	void initUseHooks();
+	void initRelayHook();
 
 	// Detour functions
 	static ITexture *__fastcall dGetRenderTarget(void *ecx, void *edx);
@@ -197,6 +200,7 @@ public:
 	static void *__fastcall dFindUseEntity(void *ecx, void *edx, float radius, float dotLimit, float defaultDotLimit, void *traceResult, void *extra);
 	static void *__fastcall dClientFindUseEntity(void *ecx, void *edx, float radius, float dotLimit, float defaultDotLimit, void *traceResult, void *extra);
 	static void __fastcall dPlayerUse(void *ecx, void *edx, void *useEntity);
+	static void __fastcall dServerClientCommand(void *ecx, void *edx, edict_t *player, const void *command);
 	static Vector *__fastcall dServerPlayerEyePosition(void *ecx, void *edx, Vector *eyePos);
 	static Vector *__fastcall dClientPlayerEyePosition(void *ecx, void *edx, Vector *eyePos);
 	static const QAngle *__fastcall dServerPlayerEyeAngles(void *ecx, void *edx);

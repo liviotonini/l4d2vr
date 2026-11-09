@@ -1,0 +1,103 @@
+#pragma once
+#include <cstdint>
+#include "hand_math.h"
+#include "hand_rig.h"
+
+class Game;
+class VR;
+class C_BasePlayer;
+struct edict_t;
+
+// Sends the VR player's head and hands to the other players who have the mod, and receives theirs.
+//
+// Each player uploads a small packet about 30 times per second with a console command to the server. The server
+// (a listen server of a player with the mod) forwards it to the others, who use it when drawing that player's model.
+// Everyone involved needs the mod, including the host. The cost is a few KB per second and a few microseconds per
+// VR player drawn; nothing happens for players who don't send poses.
+class PoseRelay
+{
+public:
+	static constexpr int kMaxPlayers = 65;
+
+	struct TrackedPoint
+	{
+		HandMath::Vec3 position; // relative to the player's origin
+		HandMath::Vec3 forward;
+		HandMath::Vec3 up;
+	};
+
+	struct Frame
+	{
+		TrackedPoint head;
+		TrackedPoint leftWrist;
+		TrackedPoint rightWrist;
+		float leftCurls[HandRig::FingerCount] = {};
+		bool hasLeftHand = false;
+		bool hasRightHand = false;
+		bool hasLeftCurls = false;
+		bool leftOnWeapon = false;
+	};
+
+	void Init(Game *game);
+
+	// Client: says hello to the server and uploads the local player's pose
+	void Update(VR *vr, C_BasePlayer *localPlayer);
+
+	// Server: true if the command was one of ours
+	bool HandleServerCommand(edict_t *player, const void *command);
+
+	// A map change starts over, every player has to introduce itself again
+	void Reset();
+
+	// The pose of a player right now, interpolated between the last two packets. False if the player isn't sending.
+	bool GetPose(int playerIndex, Frame &out);
+
+	bool HasRemotePlayers() const { return m_RemoteCount > 0; }
+
+	// How the mod moved the right hand of a player, applied to the weapon in that hand
+	void SetWeaponDelta(int playerIndex, const HandMath::Mat34 &delta);
+	bool GetWeaponDelta(int playerIndex, HandMath::Mat34 &delta) const;
+
+	// Received from the server through console commands
+	void OnAcknowledged();
+	void OnPoseReceived(int playerIndex, uint16_t sequence, const char *payload);
+
+private:
+	struct ServerClient
+	{
+		edict_t *edict = nullptr;
+		bool introduced = false;
+		bool haveSequence = false;
+		uint16_t lastSequence = 0;
+		unsigned long long lastUploadMs = 0;
+		unsigned long long lastDecodeUs = 0;
+	};
+
+	struct Remote
+	{
+		bool valid = false;
+		bool havePrevious = false;
+		uint16_t sequence = 0;
+		Frame previous;
+		Frame latest;
+		unsigned long long receivedMs = 0;
+		float intervalMs = 33.0f;
+		HandMath::Mat34 weaponDelta;
+		unsigned long long weaponDeltaMs = 0;
+	};
+
+	Game *m_Game = nullptr;
+	void *m_ServerPluginHelpers = nullptr;
+
+	bool m_ServerCapable = false;
+	int m_HelloAttempts = 0;
+	unsigned long long m_LastHelloMs = 0;
+	unsigned long long m_LastSendMs = 0;
+	uint16_t m_Sequence = 0;
+
+	ServerClient m_Clients[kMaxPlayers];
+	Remote m_Remotes[kMaxPlayers];
+	int m_RemoteCount = 0;
+
+	bool SendToClient(edict_t *edict, const char *command);
+};

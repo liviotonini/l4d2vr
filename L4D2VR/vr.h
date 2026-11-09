@@ -326,6 +326,10 @@ public:
 
 	// HUD on the wrist of the hand that doesn't hold the weapon (wrist_hud.cpp)
 	bool m_WristHudEnabled = true;
+
+	// Other players' movements (pose_relay.cpp, world_pose.cpp)
+	bool m_ShareBodyMovement = true;       // the others see my arms
+	bool m_ShowOtherPlayersMovement = true; // I see theirs
 	vr::VROverlayHandle_t m_WristHudHandle = vr::k_ulOverlayHandleInvalid;
 	vr::TrackedDeviceIndex_t m_WristHudDevice = vr::k_unTrackedDeviceIndexInvalid;
 	bool m_WristHudVisible = false;
@@ -382,6 +386,9 @@ public:
 	bool BuildFirstPersonHands(const void *studioHeader, const void *customBones, void *outBones);
 	void ClearModelCaches();
 	void UpdateWristHud();
+	HandMath::Vec3 GetRightWristAbs() const;
+	bool BuildRemotePlayerBones(int playerIndex, const void *studioHeader, const void *customBones, void *outBones);
+	bool BuildRemoteWeaponBones(int entityIndex, const void *studioHeader, const void *customBones, void *outBones);
 	void HideWristHud();
 	void UpdateFlashlightAttachment();
 	void PatchLaserSight();

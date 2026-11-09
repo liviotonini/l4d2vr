@@ -24,6 +24,7 @@ class Game;
 class Offsets;
 class VR;
 class Hooks;
+class PoseRelay;
 
 inline Game *g_Game;
 
@@ -78,6 +79,7 @@ public:
     Offsets *m_Offsets = nullptr;
     VR *m_VR = nullptr;
     Hooks *m_Hooks = nullptr;
+    PoseRelay *m_PoseRelay = nullptr;
 
     bool m_Initialized = false;
 

@@ -7,6 +7,7 @@
 #include "offsets.h"
 #include "sigscanner.h"
 #include "diagnostics.h"
+#include "pose_relay.h"
 
 Game::Game()
 {
@@ -33,6 +34,8 @@ Game::Game()
     m_VguiSurface = (ISurface *)GetInterface("vguimatsurface.dll", "VGUI_Surface031");
 
     m_Offsets = new Offsets();
+    m_PoseRelay = new PoseRelay();
+    m_PoseRelay->Init(this);
     m_VR = new VR(this);
     m_Hooks = new Hooks(this);
 

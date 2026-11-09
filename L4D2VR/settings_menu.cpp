@@ -507,6 +507,8 @@ void SettingsMenu::DrawMenu()
 		if (ImGui::BeginTabItem("Player"))
 		{
 			ImGui::BeginChild("Page", ImVec2(0.0f, -footerHeight));
+			DrawCheckbox("Show my movements to others", "Other players with this version of the mod see your arms and hands move. The host needs the mod too.", settings.m_ShareBodyMovement);
+			DrawCheckbox("See others' movements", "Shows the arms and hands of other VR players as they really move them.", settings.m_ShowOtherPlayersMovement);
 			DrawCheckbox("Left handed", "Hold the weapon with the left controller.", settings.m_LeftHanded);
 			DrawSlider("Player height", "Your real height. Used for physical crouching and for the item positions on your body (legs and back).", settings.m_PlayerHeightInMeters, 1.2f, 2.2f, 0.01f, "%.2f m");
 			DrawCheckbox("Crouch physically", "Crouch in the game when you crouch in real life.", settings.m_ActivateCrouchPhisically);

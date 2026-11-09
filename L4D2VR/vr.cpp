@@ -17,6 +17,7 @@
 #include <d3d9_vr.h>
 #include "settings_menu.h"
 #include "diagnostics.h"
+#include "pose_relay.h"
 
 VR::VR(Game *game) 
 {
@@ -193,6 +194,7 @@ void VR::Update()
             IMatRenderContext *rndrContext = m_Game->m_MaterialSystem->GetRenderContext();
             rndrContext->SetRenderTarget(NULL);
             ClearModelCaches();
+            m_Game->m_PoseRelay->Reset();
             m_CreatedVRTextures = false; // Have to recreate textures otherwise some workshop maps won't render
         }
     }
@@ -2366,6 +2368,7 @@ void VR::UpdateTracking()
     m_ViewmodelUp = VectorRotate(m_ViewmodelUp, m_ViewmodelForward, m_ViewmodelAngOffset.z);
 
     UpdateHands(deltaTime * 0.001f);
+    m_Game->m_PoseRelay->Update(this, localPlayer);
 }
 
 
@@ -2449,6 +2452,8 @@ void VR::ParseConfigFile()
     m_DiagnosticsEnabled = userConfig["DiagnosticsEnabled"] == "true";
     m_InteractWithHand = userConfig["InteractWithHand"] != "false"; // enabled if missing from config
     m_WristHudEnabled = userConfig["WristHudEnabled"] != "false"; // enabled if missing from config
+    m_ShareBodyMovement = userConfig["ShareBodyMovement"] != "false"; // enabled if missing from config
+    m_ShowOtherPlayersMovement = userConfig["ShowOtherPlayersMovement"] != "false"; // enabled if missing from config
 
     // Fine tuning of the hand, only by editing config.txt
     Vector handOffset = m_HandOffsetMeters;
@@ -2520,6 +2525,8 @@ bool VR::SaveConfigFile()
         { "DiagnosticsEnabled", ConfigBoolString(m_DiagnosticsEnabled) },
         { "InteractWithHand", ConfigBoolString(m_InteractWithHand) },
         { "WristHudEnabled", ConfigBoolString(m_WristHudEnabled) },
+        { "ShareBodyMovement", ConfigBoolString(m_ShareBodyMovement) },
+        { "ShowOtherPlayersMovement", ConfigBoolString(m_ShowOtherPlayersMovement) },
     };
 
     std::vector<std::string> lines;

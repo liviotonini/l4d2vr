@@ -454,10 +454,12 @@
     <ClInclude Include="sdk\trace.h" />
     <ClInclude Include="sdk\vector.h" />
     <ClInclude Include="haptics.h" />
+    <ClInclude Include="pose_relay.h" />
     <ClInclude Include="settings_menu.h" />
     <ClInclude Include="stability.h" />
     <ClInclude Include="sigscanner.h" />
     <ClInclude Include="vr.h" />
+    <ClInclude Include="vr_pose_protocol.h" />
     <ClInclude Include="wrist_hud_draw.h" />
     <ClInclude Include="..\thirdparty\imgui\imconfig.h" />
     <ClInclude Include="..\thirdparty\imgui\imgui.h" />
@@ -609,9 +611,11 @@
     <ClCompile Include="hooks.cpp" />
     <ClCompile Include="sdk\checksum_crc.cpp" />
     <ClCompile Include="haptics.cpp" />
+    <ClCompile Include="pose_relay.cpp" />
     <ClCompile Include="settings_menu.cpp" />
     <ClCompile Include="stability.cpp" />
     <ClCompile Include="vr.cpp" />
+    <ClCompile Include="world_pose.cpp" />
     <ClCompile Include="wrist_hud.cpp" />
     <ClCompile Include="..\thirdparty\imgui\imgui.cpp" />
     <ClCompile Include="..\thirdparty\imgui\imgui_draw.cpp" />

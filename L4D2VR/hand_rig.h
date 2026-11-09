@@ -24,6 +24,10 @@ public:
 	int HandBone(Side side) const { return m_Sides[side].hand; }
 	int UpperArmBone(Side side) const { return m_Sides[side].upperArm; }
 	int ForearmBone(Side side) const { return m_Sides[side].forearm; }
+	int HeadBone() const { return m_Head; }
+
+	// Moves the arm so the hand ends at `hand`, bending the elbow. A target out of reach leaves the arm stretched towards it.
+	void SolveArm(Side side, const HandMath::Mat34 &hand, HandMath::Mat34 *bones) const;
 
 	// The arm is folded into the wrist: vertices skinned to it collapse to one point, so only the hand is visible.
 	// Costs nothing compared to drawing the model again with clip planes, and works from any angle.
@@ -61,7 +65,10 @@ private:
 		HandMath::Mat34 restFrame;  // fingers, thumb side, palm
 		std::vector<Joint> joints;  // parents always before their children
 		std::vector<int> arm;       // bones folded into the wrist
+		std::vector<int> upperGroup;   // bones that move with the upper arm
+		std::vector<int> forearmGroup; // and with the forearm
 	};
 
 	SideData m_Sides[SideCount];
+	int m_Head = -1;
 };

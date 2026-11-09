@@ -52,6 +52,8 @@ void HandRig::Build(const std::vector<BoneData> &bones)
 		rest.push_back(InvertRigid(bone.poseToBone));
 	}
 
+	m_Head = FindBone(names, "valvebiped.bip01_head1");
+
 	const char *const sideLetters[SideCount] = { "l", "r" };
 
 	for (int s = 0; s < SideCount; ++s)
@@ -131,9 +133,91 @@ void HandRig::Build(const std::vector<BoneData> &bones)
 			else if (IsDescendant(bones, b, rootOfArm))
 			{
 				side.arm.push_back(b);
+
+				if (IsDescendant(bones, b, forearm))
+					side.forearmGroup.push_back(b);
+				else if (IsDescendant(bones, b, upperArm))
+					side.upperGroup.push_back(b);
 			}
 		}
 	}
+}
+
+namespace
+{
+	// The rotation taking one direction to another, around `pivot`
+	Mat34 RotationBetween(const Vec3 &fromIn, const Vec3 &toIn, const Vec3 &pivot)
+	{
+		const Vec3 from = Normalized(fromIn), to = Normalized(toIn);
+		Vec3 axis = Cross(from, to);
+		const float sine = Length(axis);
+		const float cosine = Dot(from, to);
+
+		if (sine < 1e-5f)
+		{
+			if (cosine > 0.0f)
+				return Mat34(); // already there
+			// Opposite directions: any perpendicular axis does
+			axis = Cross(from, fabsf(from.z) < 0.9f ? Vec3(0.0f, 0.0f, 1.0f) : Vec3(1.0f, 0.0f, 0.0f));
+		}
+
+		Mat34 rotation = AxisAngle(axis, atan2f(sine, cosine));
+		SetAxis(rotation, 3, pivot - RotateVector(rotation, pivot));
+		return rotation;
+	}
+}
+
+void HandRig::SolveArm(Side s, const Mat34 &hand, Mat34 *bones) const
+{
+	const SideData &side = m_Sides[s];
+	if (side.hand < 0 || !IsFinite(hand))
+		return;
+
+	const Vec3 shoulder = Origin(bones[side.upperArm]);
+	const Vec3 oldElbow = Origin(bones[side.forearm]);
+	const Vec3 oldWrist = Origin(bones[side.hand]);
+
+	const float upperLength = Length(oldElbow - shoulder);
+	const float lowerLength = Length(oldWrist - oldElbow);
+	if (upperLength < 0.01f || lowerLength < 0.01f)
+		return;
+
+	Vec3 toTarget = Origin(hand) - shoulder;
+	const float minReach = fabsf(upperLength - lowerLength) * 1.02f + 0.01f;
+	const float maxReach = (upperLength + lowerLength) * 0.999f;
+	const float reach = std::clamp(Length(toTarget), minReach, maxReach);
+	const Vec3 direction = Normalized(toTarget);
+	const Vec3 wrist = shoulder + direction * reach;
+
+	// Where the elbow goes: the distance along the line to the wrist and how far it sticks out of it
+	const float along = (upperLength * upperLength - lowerLength * lowerLength + reach * reach) / (2.0f * reach);
+	const float out = sqrtf(std::max(upperLength * upperLength - along * along, 0.0f));
+
+	// Elbows hang down and a bit outwards, from where the animation had it
+	const Vec3 down(0.0f, 0.0f, -1.0f);
+	Vec3 bend = (oldElbow - shoulder) * (1.0f / upperLength) + down;
+	bend = bend - direction * Dot(bend, direction);
+	bend = Normalized(bend, Normalized(down - direction * Dot(down, direction), Vec3(0.0f, 1.0f, 0.0f)));
+
+	const Vec3 elbow = shoulder + direction * along + bend * out;
+
+	const Mat34 upperTurn = RotationBetween(oldElbow - shoulder, elbow - shoulder, shoulder);
+	for (int bone : side.upperGroup)
+		bones[bone] = Multiply(upperTurn, bones[bone]);
+
+	const Vec3 turnedWrist = TransformPoint(upperTurn, oldWrist);
+	const Mat34 lowerTurn = RotationBetween(turnedWrist - elbow, wrist - elbow, elbow);
+	const Mat34 forearmMove = Multiply(lowerTurn, upperTurn);
+	for (int bone : side.forearmGroup)
+		bones[bone] = Multiply(forearmMove, bones[bone]);
+
+	// The hand and everything on it go along rigidly
+	Mat34 finalHand = hand;
+	SetAxis(finalHand, 3, wrist);
+	const Mat34 handMove = Multiply(finalHand, InvertRigid(bones[side.hand]));
+	bones[side.hand] = finalHand;
+	for (const Joint &joint : side.joints)
+		bones[joint.bone] = Multiply(handMove, bones[joint.bone]);
 }
 
 void HandRig::CollapseArm(Side s, Mat34 *bones) const

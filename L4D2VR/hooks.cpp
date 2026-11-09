@@ -7,6 +7,7 @@
 #include "offsets.h"
 #include "diagnostics.h"
 #include "studio.h"
+#include "pose_relay.h"
 #include <algorithm>
 #include <iostream>
 
@@ -86,6 +87,8 @@ Hooks::Hooks(Game *game)
 		hkClientPlayerEyePosition.enableHook();
 		hkClientPlayerEyeVectors.enableHook();
 	}
+	if (hkServerClientCommand.pTarget)
+		hkServerClientCommand.enableHook();
 }
 
 Hooks::~Hooks()
@@ -182,6 +185,7 @@ int Hooks::initSourceHooks()
 
 	initGrenadeThrowHooks();
 	initUseHooks();
+	initRelayHook();
 
 	void *clientMode = nullptr;
 	while (!clientMode)
@@ -707,6 +711,10 @@ Hooks::ModelKind Hooks::GetModelKind(const void *model)
 			kind = ModelKind::FirstPersonArms;
 		else if (strstr(name, "models/v_models/v_"))
 			kind = strstr(name, "dual_pistola") ? ModelKind::DualPistolsViewmodel : ModelKind::Viewmodel;
+		else if (strstr(name, "models/survivors/survivor_"))
+			kind = ModelKind::Survivor;
+		else if (strstr(name, "models/w_models/") || strstr(name, "models/weapons/melee/w_"))
+			kind = ModelKind::WorldWeapon;
 	}
 
 	m_ModelKinds[model] = kind;
@@ -723,12 +731,22 @@ void Hooks::dDrawModelExecute(void *ecx, void *edx, void *state, const ModelRend
 	if (kind == ModelKind::Viewmodel || kind == ModelKind::DualPistolsViewmodel)
 		m_VR->m_ViewmodelHasTwoWeapons = kind == ModelKind::DualPistolsViewmodel;
 
-	if (kind == ModelKind::FirstPersonArms && pCustomBoneToWorld)
+	if (pCustomBoneToWorld && kind != ModelKind::Other && kind != ModelKind::Viewmodel && kind != ModelKind::DualPistolsViewmodel)
 	{
 		Diagnostics::ScopedTimer timer(Diagnostics::Section_Models);
 
 		alignas(16) HandMath::Mat34 bones[Studio::kMaxBones];
-		if (m_VR->BuildFirstPersonHands(*(const void **)state, pCustomBoneToWorld, bones))
+		const void *studioHeader = *(const void **)state;
+
+		bool changed = false;
+		if (kind == ModelKind::FirstPersonArms)
+			changed = m_VR->BuildFirstPersonHands(studioHeader, pCustomBoneToWorld, bones);
+		else if (kind == ModelKind::Survivor)
+			changed = m_VR->BuildRemotePlayerBones(info.entity_index, studioHeader, pCustomBoneToWorld, bones);
+		else if (kind == ModelKind::WorldWeapon)
+			changed = m_VR->BuildRemoteWeaponBones(info.entity_index, studioHeader, pCustomBoneToWorld, bones);
+
+		if (changed)
 			return hkDrawModelExecute.fOriginal(ecx, state, info, bones);
 	}
 
@@ -859,6 +877,35 @@ namespace
 		UseAim &m_Aim;
 		UseAim m_Previous;
 	};
+}
+
+void Hooks::initRelayHook()
+{
+	HMODULE server = GetModuleHandleA("server.dll");
+	typedef void *(__cdecl *tCreateInterface)(const char *, int *);
+	tCreateInterface createInterface = server ? (tCreateInterface)GetProcAddress(server, "CreateInterface") : nullptr;
+	if (!createInterface)
+		return;
+
+	int returnCode = 0;
+	void *serverGameClients = createInterface("ServerGameClients003", &returnCode);
+	if (!serverGameClients)
+	{
+		Diagnostics::Log("pose relay: no ServerGameClients003, this game won't forward poses when hosting");
+		return;
+	}
+
+	// ClientCommand(edict_t *, const CCommand &)
+	void **vtable = *(void ***)serverGameClients;
+	hkServerClientCommand.createHook(vtable[5], &dServerClientCommand);
+}
+
+void __fastcall Hooks::dServerClientCommand(void *ecx, void *edx, edict_t *player, const void *command)
+{
+	if (m_Game->m_PoseRelay && m_Game->m_PoseRelay->HandleServerCommand(player, command))
+		return;
+
+	hkServerClientCommand.fOriginal(ecx, player, command);
 }
 
 void Hooks::initUseHooks()
