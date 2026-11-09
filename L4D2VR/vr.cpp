@@ -2445,6 +2445,7 @@ void VR::ParseConfigFile()
     m_ScopeDebug = userConfig["ScopeDebug"] == "true";
 
     m_DiagnosticsEnabled = userConfig["DiagnosticsEnabled"] == "true";
+    m_InteractWithHand = userConfig["InteractWithHand"] != "false"; // enabled if missing from config
 
     // Fine tuning of the hand, only by editing config.txt
     Vector handOffset = m_HandOffsetMeters;
@@ -2514,6 +2515,7 @@ bool VR::SaveConfigFile()
         { "GrenadeThrowGesture", ConfigBoolString(m_GrenadeThrowGesture) },
         { "GrenadeThrowStrength", ConfigFloatString(m_GrenadeThrowStrength) },
         { "DiagnosticsEnabled", ConfigBoolString(m_DiagnosticsEnabled) },
+        { "InteractWithHand", ConfigBoolString(m_InteractWithHand) },
     };
 
     std::vector<std::string> lines;

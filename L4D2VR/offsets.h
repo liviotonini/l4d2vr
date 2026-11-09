@@ -62,6 +62,15 @@ public:
     // FormatViewModelAttachment(C_BasePlayer *player, Vector &origin, bool inverse), converts points between the viewmodel FOV and the world FOV
     Offset FormatViewModelAttachment =   { "client.dll", 0x6A8B0, "55 8B EC 8B 45 08 83 EC 28 53 56 57 33 FF 85 C0 74 ? 50 E8 ? ? ? ? 83 C4 04 83 F8 FF 75 ? 8B 0D ? ? ? ? 8B 01 8B 90 F8 01 00 00 FF D2 8B F8 8B 0D ? ? ? ? 8B 01 8B 50 30 57 FF D2 8B F0 D9 46 34" };
 
+    // Interacting with the hand: what the game looks at to find the entity to use, and the eyes of the player it looks from
+    Offset ClientPlayerEyeVectors =      { "client.dll", 0x20450, "55 8B EC 56 8B F1 8B 86 ? ? ? ? 83 F8 FF 74 5B", 0, true };
+    Offset ClientPlayerEyePosition =     { "client.dll", 0x20EB0, "55 8B EC 56 8B F1 8B 86 ? ? ? ? 83 F8 FF 74 5D", 0, true };
+    Offset ClientFindUseEntity =         { "client.dll", 0x283200, "55 8B EC 81 EC 78 0B 00 00 A1 ? ? ? ? 33 C5 89 45 FC 0F 57 C9 F3 0F 10 45 0C 0F 2F C8 F3 0F 10 55 08", 0, true };
+    Offset ServerPlayerEyeAngles =       { "server.dll", 0x7B0F0, "55 8B EC 83 EC 64 A1 ? ? ? ? 33 C5 89 45 FC 56 57 8B F9 8B 0D ? ? ? ? E8 ? ? ? ? 84 C0 74 64 80 3D ? ? ? ? 00 75 5B 8B 87 ? ? ? ? 83 F8 FF 74 50", 0, true };
+    Offset ServerPlayerEyePosition =     { "server.dll", 0x7B2A0, "55 8B EC 56 57 8B F9 8B 0D ? ? ? ? E8 ? ? ? ? 84 C0 74 71 80 3D ? ? ? ? 00 75 68 8B 87 ? ? ? ? 83 F8 FF 74 5D", 0, true };
+    Offset FindUseEntity =               { "server.dll", 0x34E6C0, "55 8B EC B8 80 13 00 00 E8 ? ? ? ? A1 ? ? ? ? 33 C5 89 45 FC 0F 57 C9 F3 0F 10 45 0C 0F 2F C8 F3 0F 10 55 08", 0, true };
+    Offset PlayerUse =                   { "server.dll", 0x312AC0, "55 8B EC 81 EC 94 00 00 00 A1 ? ? ? ? 33 C5 89 45 FC 53 56 8B F1 8B 9E B8 1C 00 00 8B 06 8B 90 28 01 00 00", 0, true };
+
     Offset ServerFireTerrorBullets =     { "server.dll", 0x3C3FC0, "55 8B EC 81 EC ? ? ? ? A1 ? ? ? ? 33 C5 89 45 FC 8B 45 08 8B 4D 10" };
     Offset ReadUserCmd =                 { "server.dll", 0x205100, "55 8B EC 53 8B 5D 10 56 57 8B 7D 0C 53" };
     // CBaseCSGrenade::StartGrenadeThrow, called when the trigger is let go: m_fThrowTime = curtime + 0.2

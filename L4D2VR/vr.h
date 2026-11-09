@@ -227,6 +227,8 @@ public:
 	bool m_GrenadeThrowGesture = true;
 	// Writes the time of each part of the frame to VR\\perf.csv once per second
 	bool m_DiagnosticsEnabled = false;
+	// Doors, items and teammates are used by pointing the weapon hand at them instead of looking at them
+	bool m_InteractWithHand = true;
 	// Makes fast throws stronger, up to this many times the speed of the hand (the game's own throw is about 17 m/s).
 	// Gentle throws keep the real speed of the hand.
 	float m_GrenadeThrowStrength = 2.0f;

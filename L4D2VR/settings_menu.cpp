@@ -522,6 +522,7 @@ void SettingsMenu::DrawMenu()
 			ImGui::BeginChild("Page", ImVec2(0.0f, -footerHeight));
 			DrawSlider("Controller angle", "Tilts the aim relative to the controller (default -45).", settings.m_ControllerAngleAdjustment, -90.0f, 90.0f, 1.0f, "%.0f deg");
 			DrawSlider("Weapon side offset", "Moves the weapon sideways from the hand, in game units.", settings.m_WeaponHorizontalPositionAdjustment, -10.0f, 10.0f, 0.5f, "%.1f");
+			DrawCheckbox("Interact with your hand", "Doors, items and teammates are used by pointing your weapon hand at them instead of looking at them. In a game you joined, the host needs this version of the mod.", settings.m_InteractWithHand);
 			DrawCheckbox("Shove by swinging", "Shove by swinging the left controller (or the right one when not holding a melee weapon).", settings.m_IsTrackingManualPush);
 			DrawSlider("Melee swing speed", "How fast the controller has to move to hit with a melee weapon.", settings.m_MeleeSwingVelocityRequired, 0.5f, 4.0f, 0.05f, "%.2f m/s");
 			DrawCheckbox("Throw grenades with your arm", "Hold the trigger, swing your arm and let go: the molotov, pipe bomb or bile jar leaves your hand in the direction and with the speed of the swing. Letting go with a still hand drops it. In a game you joined, the host needs this version of the mod.", settings.m_GrenadeThrowGesture);

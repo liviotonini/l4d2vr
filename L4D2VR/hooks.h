@@ -85,6 +85,10 @@ typedef void(__thiscall *tVgui_Paint)(void *thisptr, int mode);
 typedef int(__cdecl *tIsSplitScreen)();
 typedef DWORD *(__thiscall *tPrePushRenderTarget)(void *thisptr, int a2);
 typedef void(__cdecl *tFormatViewModelAttachment)(void *player, Vector &origin, bool inverse);
+typedef void *(__thiscall *tFindUseEntity)(void *thisptr, float radius, float dotLimit, float defaultDotLimit, void *traceResult, void *extra);
+typedef void(__thiscall *tPlayerUse)(void *thisptr, void *useEntity);
+typedef const QAngle *(__thiscall *tServerEyeAngles)(void *thisptr);
+typedef void(__thiscall *tEyeVectors)(void *thisptr, Vector *forward, Vector *right, Vector *up);
 
 // A Vector passed by value (CBaseCSGrenade::EmitGrenade takes its vectors by value)
 struct VectorValue { float x, y, z; };
@@ -130,6 +134,13 @@ public:
 	static inline Hook<tPrePushRenderTarget> hkPrePushRenderTarget;
 	static inline Hook<tFormatViewModelAttachment> hkFormatViewModelAttachment;
 	static inline Hook<tStartGrenadeThrow> hkStartGrenadeThrow;
+	static inline Hook<tFindUseEntity> hkFindUseEntity;
+	static inline Hook<tFindUseEntity> hkClientFindUseEntity;
+	static inline Hook<tPlayerUse> hkPlayerUse;
+	static inline Hook<tEyePosition> hkServerPlayerEyePosition;
+	static inline Hook<tEyePosition> hkClientPlayerEyePosition;
+	static inline Hook<tServerEyeAngles> hkServerPlayerEyeAngles;
+	static inline Hook<tEyeVectors> hkClientPlayerEyeVectors;
 
 	// Read from the code of CBaseCSGrenade::ThrowGrenade by initGrenadeThrowHooks (null / 0 if it doesn't look as expected)
 	static inline tThrowGrenade m_ThrowGrenade = nullptr;
@@ -148,6 +159,7 @@ public:
 
 	int initSourceHooks();
 	void initGrenadeThrowHooks();
+	void initUseHooks();
 
 	// Detour functions
 	static ITexture *__fastcall dGetRenderTarget(void *ecx, void *edx);
@@ -182,6 +194,14 @@ public:
 	static void __fastcall dStartGrenadeThrow(void *ecx, void *edx);
 	static void *__fastcall dEmitGrenade(void *ecx, void *edx, VectorValue origin, VectorValue angles, VectorValue velocity, VectorValue angularImpulse, void *owner);
 	static void HookEmitGrenade(void *grenade);
+	static void *__fastcall dFindUseEntity(void *ecx, void *edx, float radius, float dotLimit, float defaultDotLimit, void *traceResult, void *extra);
+	static void *__fastcall dClientFindUseEntity(void *ecx, void *edx, float radius, float dotLimit, float defaultDotLimit, void *traceResult, void *extra);
+	static void __fastcall dPlayerUse(void *ecx, void *edx, void *useEntity);
+	static Vector *__fastcall dServerPlayerEyePosition(void *ecx, void *edx, Vector *eyePos);
+	static Vector *__fastcall dClientPlayerEyePosition(void *ecx, void *edx, Vector *eyePos);
+	static const QAngle *__fastcall dServerPlayerEyeAngles(void *ecx, void *edx);
+	static void __fastcall dClientPlayerEyeVectors(void *ecx, void *edx, Vector *forward, Vector *right, Vector *up);
+	static bool GetServerHandAim(void *player, Vector &origin, QAngle &angles);
 	static int GetServerEntityIndex(void *entity);
 	static bool IsVRThrower(int playerIndex, bool &isLocalPlayer);
 

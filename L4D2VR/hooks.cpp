@@ -10,6 +10,22 @@
 #include <algorithm>
 #include <iostream>
 
+// Interacting with the hand: while the game looks for what the player wants to use, the player's eyes are moved to the
+// hand, so it finds what the hand points at. The game then does everything else as usual.
+// The server decides what gets used, so the host needs the mod. The client only decides what is highlighted.
+namespace
+{
+	struct UseAim
+	{
+		void *player = nullptr;
+		Vector origin = { 0,0,0 };
+		QAngle angles = { 0,0,0 };
+	};
+
+	UseAim g_ServerUseAim;
+	UseAim g_ClientUseAim;
+}
+
 Hooks::Hooks(Game *game)
 {
 	if (MH_Initialize() != MH_OK)
@@ -55,6 +71,21 @@ Hooks::Hooks(Game *game)
 	hkFormatViewModelAttachment.enableHook();
 	if (hkStartGrenadeThrow.pTarget)
 		hkStartGrenadeThrow.enableHook();
+	for (auto *hook : { &hkFindUseEntity, &hkClientFindUseEntity })
+		if (hook->pTarget)
+			hook->enableHook();
+	if (hkPlayerUse.pTarget)
+		hkPlayerUse.enableHook();
+	if (hkServerPlayerEyePosition.pTarget)
+	{
+		hkServerPlayerEyePosition.enableHook();
+		hkServerPlayerEyeAngles.enableHook();
+	}
+	if (hkClientPlayerEyePosition.pTarget)
+	{
+		hkClientPlayerEyePosition.enableHook();
+		hkClientPlayerEyeVectors.enableHook();
+	}
 }
 
 Hooks::~Hooks()
@@ -150,6 +181,7 @@ int Hooks::initSourceHooks()
 	hkFormatViewModelAttachment.createHook(FormatViewModelAttachmentAddr, &dFormatViewModelAttachment);
 
 	initGrenadeThrowHooks();
+	initUseHooks();
 
 	void *clientMode = nullptr;
 	while (!clientMode)
@@ -643,6 +675,12 @@ int Hooks::dGetPrimaryAttackActivity(void *ecx, void *edx, void *meleeInfo)
 
 Vector *Hooks::dEyePosition(void *ecx, void *edx, Vector *eyePos)
 {
+	if (eyePos && g_ServerUseAim.player == ecx)
+	{
+		*eyePos = g_ServerUseAim.origin;
+		return eyePos;
+	}
+
 	Vector *result = hkEyePosition.fOriginal(ecx, eyePos);
 
 	if (m_Game->m_PerformingMelee)
@@ -801,6 +839,155 @@ void Hooks::dFormatViewModelAttachment(void *player, Vector &origin, bool invers
 		return;
 
 	hkFormatViewModelAttachment.fOriginal(player, origin, inverse);
+}
+
+namespace
+{
+	class ScopedUseAim
+	{
+	public:
+		ScopedUseAim(UseAim &aim, void *player, const Vector &origin, const QAngle &angles) : m_Aim(aim), m_Previous(aim)
+		{
+			m_Aim.player = player;
+			m_Aim.origin = origin;
+			m_Aim.angles = angles;
+		}
+
+		~ScopedUseAim() { m_Aim = m_Previous; }
+
+	private:
+		UseAim &m_Aim;
+		UseAim m_Previous;
+	};
+}
+
+void Hooks::initUseHooks()
+{
+	const Offsets *offsets = m_Game->m_Offsets;
+
+	if (offsets->FindUseEntity.address && offsets->ServerPlayerEyePosition.address && offsets->ServerPlayerEyeAngles.address)
+	{
+		hkFindUseEntity.createHook((LPVOID)offsets->FindUseEntity.address, &dFindUseEntity);
+		hkServerPlayerEyePosition.createHook((LPVOID)offsets->ServerPlayerEyePosition.address, &dServerPlayerEyePosition);
+		hkServerPlayerEyeAngles.createHook((LPVOID)offsets->ServerPlayerEyeAngles.address, &dServerPlayerEyeAngles);
+
+		if (offsets->PlayerUse.address)
+			hkPlayerUse.createHook((LPVOID)offsets->PlayerUse.address, &dPlayerUse);
+	}
+	else
+	{
+		Diagnostics::Log("interacting with the hand is off in this game version (server signatures)");
+	}
+
+	if (offsets->ClientFindUseEntity.address && offsets->ClientPlayerEyePosition.address && offsets->ClientPlayerEyeVectors.address)
+	{
+		hkClientFindUseEntity.createHook((LPVOID)offsets->ClientFindUseEntity.address, &dClientFindUseEntity);
+		hkClientPlayerEyePosition.createHook((LPVOID)offsets->ClientPlayerEyePosition.address, &dClientPlayerEyePosition);
+		hkClientPlayerEyeVectors.createHook((LPVOID)offsets->ClientPlayerEyeVectors.address, &dClientPlayerEyeVectors);
+	}
+}
+
+bool Hooks::GetServerHandAim(void *player, Vector &origin, QAngle &angles)
+{
+	if (!m_VR->m_InteractWithHand)
+		return false;
+
+	const int index = GetServerEntityIndex(player);
+	if (!m_Game->IsValidPlayerIndex(index))
+		return false;
+
+	if (m_VR->m_IsVREnabled && index == m_Game->m_EngineClient->GetLocalPlayer())
+	{
+		origin = m_VR->GetRightControllerAbsPos();
+		angles = m_VR->GetRightControllerAbsAngle();
+		return true;
+	}
+
+	const Player &vrPlayer = m_Game->m_PlayersVRInfo[index];
+	if (!vrPlayer.isUsingVR)
+		return false;
+
+	origin = vrPlayer.controllerPos;
+	angles = vrPlayer.controllerAngle;
+	return true;
+}
+
+void *__fastcall Hooks::dFindUseEntity(void *ecx, void *edx, float radius, float dotLimit, float defaultDotLimit, void *traceResult, void *extra)
+{
+	Vector origin;
+	QAngle angles;
+	if (GetServerHandAim(ecx, origin, angles))
+	{
+		ScopedUseAim aim(g_ServerUseAim, ecx, origin, angles);
+		return hkFindUseEntity.fOriginal(ecx, radius, dotLimit, defaultDotLimit, traceResult, extra);
+	}
+
+	return hkFindUseEntity.fOriginal(ecx, radius, dotLimit, defaultDotLimit, traceResult, extra);
+}
+
+void __fastcall Hooks::dPlayerUse(void *ecx, void *edx, void *useEntity)
+{
+	Vector origin;
+	QAngle angles;
+	if (GetServerHandAim(ecx, origin, angles))
+	{
+		ScopedUseAim aim(g_ServerUseAim, ecx, origin, angles);
+		return hkPlayerUse.fOriginal(ecx, useEntity);
+	}
+
+	hkPlayerUse.fOriginal(ecx, useEntity);
+}
+
+Vector *__fastcall Hooks::dServerPlayerEyePosition(void *ecx, void *edx, Vector *eyePos)
+{
+	if (eyePos && g_ServerUseAim.player == ecx)
+	{
+		*eyePos = g_ServerUseAim.origin;
+		return eyePos;
+	}
+
+	return hkServerPlayerEyePosition.fOriginal(ecx, eyePos);
+}
+
+const QAngle *__fastcall Hooks::dServerPlayerEyeAngles(void *ecx, void *edx)
+{
+	if (g_ServerUseAim.player == ecx)
+		return &g_ServerUseAim.angles;
+
+	return hkServerPlayerEyeAngles.fOriginal(ecx);
+}
+
+void *__fastcall Hooks::dClientFindUseEntity(void *ecx, void *edx, float radius, float dotLimit, float defaultDotLimit, void *traceResult, void *extra)
+{
+	if (m_VR->m_IsVREnabled && m_VR->m_InteractWithHand && ecx == m_Game->GetClientEntity(m_Game->m_EngineClient->GetLocalPlayer()))
+	{
+		ScopedUseAim aim(g_ClientUseAim, ecx, m_VR->GetRightControllerAbsPos(), m_VR->GetRightControllerAbsAngle());
+		return hkClientFindUseEntity.fOriginal(ecx, radius, dotLimit, defaultDotLimit, traceResult, extra);
+	}
+
+	return hkClientFindUseEntity.fOriginal(ecx, radius, dotLimit, defaultDotLimit, traceResult, extra);
+}
+
+Vector *__fastcall Hooks::dClientPlayerEyePosition(void *ecx, void *edx, Vector *eyePos)
+{
+	if (eyePos && g_ClientUseAim.player == ecx)
+	{
+		*eyePos = g_ClientUseAim.origin;
+		return eyePos;
+	}
+
+	return hkClientPlayerEyePosition.fOriginal(ecx, eyePos);
+}
+
+void __fastcall Hooks::dClientPlayerEyeVectors(void *ecx, void *edx, Vector *forward, Vector *right, Vector *up)
+{
+	if (g_ClientUseAim.player == ecx)
+	{
+		QAngle::AngleVectors(g_ClientUseAim.angles, forward, right, up);
+		return;
+	}
+
+	hkClientPlayerEyeVectors.fOriginal(ecx, forward, right, up);
 }
 
 int Hooks::GetServerEntityIndex(void *entity)
