@@ -21,7 +21,6 @@ namespace Reload
 		Event_GrabbedOld = 1 << 0,
 		Event_MagazineOut = 1 << 1,
 		Event_DroppedOld = 1 << 2,
-		Event_Ejected = 1 << 3,
 		Event_GrabbedFresh = 1 << 4,
 		Event_Inserted = 1 << 5,
 		Event_ShellInserted = 1 << 6,
@@ -35,6 +34,7 @@ namespace Reload
 		HandMath::Vec3 palm;
 		HandMath::Vec3 held;        // center of the magazine or shell in the hand: it goes in when this reaches the socket
 		HandMath::Vec3 socket;      // where the magazine goes, or where shells are loaded
+		HandMath::Vec3 magazineBase; // the end of the magazine that sticks out: it can be taken anywhere from there to the socket
 		HandMath::Vec3 boltGrab;    // what the hand takes to pull the bolt
 		HandMath::Vec3 boltAxis;    // the bolt is pulled against this direction
 		HandMath::Vec3 waist;
@@ -42,7 +42,6 @@ namespace Reload
 		float boltTravel = 2.5f;    // game units
 		bool grip = false;          // takes the magazine and the shells
 		bool trigger = false;       // the left trigger: takes the bolt, so the grip can keep holding the weapon
-		bool ejectPressed = false;  // the reload button: lets the magazine fall
 		bool holdsPump = false;     // the grip holds the weapon by its pump: the trigger works it from wherever the hand is
 		bool pumpEveryShot = false; // pump action: the pump has to be worked after every shot
 		int clip = 0;
@@ -65,12 +64,24 @@ namespace Reload
 	// Pulled back more than this, the weapon doesn't fire
 	const float kBoltBlocksFire = 0.1f;
 
+	inline float DistanceToSegment(const HandMath::Vec3 &point, const HandMath::Vec3 &a, const HandMath::Vec3 &b)
+	{
+		using namespace HandMath;
+		const Vec3 along = b - a;
+		const float lengthSquared = Dot(along, along);
+		const float t = lengthSquared > 1e-6f ? std::clamp(Dot(point - a, along) / lengthSquared, 0.0f, 1.0f) : 0.0f;
+		return Length(point - (a + along * t));
+	}
+
 	class Machine
 	{
 	public:
 		State GetState() const { return m_State; }
 		bool NeedsCycle() const { return m_NeedsCycle; }
 		bool MagazineIsOut() const { return m_MagazineOut; }
+
+		// From taking the magazine out until the weapon is ready to fire again
+		bool ReloadInProgress() const { return m_ReloadInProgress; }
 
 		// Locked back: an empty weapon with a bolt or a slide shows it open until it's worked. Pump actions don't.
 		bool BoltLockedBack() const { return m_NeedsCycle && !m_PumpEveryShot; }
@@ -103,6 +114,7 @@ namespace Reload
 			m_State = State::Idle;
 			m_MagazineOut = false;
 			m_NeedsCycle = false;
+			m_ReloadInProgress = false;
 			m_BoltPull = 0.0f;
 			m_BoltPulledThisGrab = false;
 			m_GripWasDown = false;
@@ -128,6 +140,7 @@ namespace Reload
 			m_PumpEveryShot = in.pumpEveryShot;
 
 			const float toSocket = Length(in.palm - in.socket);
+			const float toMagazine = DistanceToSegment(in.palm, in.socket, in.magazineBase);
 			const float heldToSocket = Length(in.held - in.socket);
 			const float toWaist = Length(in.palm - in.waist);
 			const float toBolt = Length(in.palm - in.boltGrab);
@@ -149,19 +162,7 @@ namespace Reload
 			switch (m_State)
 			{
 			case State::Idle:
-				if (in.ejectPressed && m_NeedsCycle && in.clip > 0)
-				{
-					// The button works the bolt too, for when the hands are busy
-					m_NeedsCycle = false;
-					events |= Event_BoltPulled | Event_BoltReleased;
-				}
-				else if (in.ejectPressed && !in.shells && canReload)
-				{
-					m_MagazineOut = true;
-					m_State = State::NeedFresh;
-					events |= Event_Ejected;
-				}
-				else if (in.hasBolt && ((in.holdsPump && in.trigger) || (triggerPressed && toBolt < kBoltGrabRadius * meters)))
+				if (in.hasBolt && ((in.holdsPump && in.trigger) || (triggerPressed && toBolt < kBoltGrabRadius * meters)))
 				{
 					// Any time, not only when it's needed: it's seen moving either way. The hand holding the pump takes it
 					// as soon as the trigger is held, without pressing it again.
@@ -171,16 +172,17 @@ namespace Reload
 					m_BoltPulledThisGrab = false;
 					events |= Event_GrabbedBolt;
 				}
-				else if (pressed && !in.shells && canReload && toSocket < kGrabRadius * meters)
+				else if (pressed && !in.shells && canReload && toMagazine < kGrabRadius * meters)
 				{
 					m_State = State::HoldingOld;
 					m_MagazineOut = false;
 					m_PressUsed = true;
+					m_OldGrabOffset = in.palm - in.socket;
 					events |= Event_GrabbedOld;
 				}
 				else if (pressed && canTake && toWaist < kPouchRadius * meters)
 				{
-					// A new one straight from the waist: the old magazine comes out when it goes in
+					// One can be taken at any time. It only goes in once the old one is out.
 					m_State = State::HoldingFresh;
 					m_PressUsed = true;
 					events |= Event_GrabbedFresh;
@@ -188,7 +190,8 @@ namespace Reload
 				break;
 
 			case State::HoldingOld:
-				if (!m_MagazineOut && toSocket > kPullDistance * meters)
+				// How far it moved from where it was taken, with the weapon moving too
+				if (!m_MagazineOut && Length((in.palm - in.socket) - m_OldGrabOffset) > kPullDistance * meters)
 				{
 					m_MagazineOut = true;
 					events |= Event_MagazineOut;
@@ -224,11 +227,9 @@ namespace Reload
 				break;
 
 			case State::HoldingFresh:
-				// A shell only goes in while there is room for it
-				if (heldToSocket < kInsertRadius * meters && (!in.shells || in.clip < in.capacity))
+				// A shell only goes in while there is room for it, a magazine once the old one is out
+				if (heldToSocket < kInsertRadius * meters && (in.shells ? in.clip < in.capacity : m_MagazineOut))
 				{
-					if (!in.shells && !m_MagazineOut)
-						events |= Event_MagazineOut; // the old one falls out as the new one goes in
 					m_State = State::Idle;
 					m_MagazineOut = false;
 					events |= in.shells ? Event_ShellInserted : Event_Inserted;
@@ -277,6 +278,11 @@ namespace Reload
 			}
 			}
 
+			if (m_MagazineOut)
+				m_ReloadInProgress = true;
+			else if (!m_NeedsCycle)
+				m_ReloadInProgress = false;
+
 			return events;
 		}
 
@@ -285,6 +291,8 @@ namespace Reload
 		bool m_MagazineOut = false;
 		bool m_NeedsCycle = false;
 		bool m_PumpEveryShot = false;
+		bool m_ReloadInProgress = false;
+		HandMath::Vec3 m_OldGrabOffset;
 		float m_BoltPull = 0.0f;
 		float m_BoltTravel = 0.0f;
 		bool m_BoltPulledThisGrab = false;

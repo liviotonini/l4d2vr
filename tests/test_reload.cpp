@@ -20,6 +20,7 @@ namespace
 		Rig(int clip, int capacity, int reserve, bool shells, bool bolt = true)
 		{
 			in.socket = kSocket;
+			in.magazineBase = kSocket;
 			in.boltGrab = kBolt;
 			in.boltAxis = Vec3(1.0f, 0.0f, 0.0f);
 			in.waist = kWaist;
@@ -33,7 +34,14 @@ namespace
 			step();
 		}
 
-		void step() { events = machine.Update(in); in.ejectPressed = false; }
+		void step() { events = machine.Update(in); }
+		void pullMagazineOut()
+		{
+			moveTo(kSocket);
+			grip(true);
+			moveTo(kSocket + Vec3(0.0f, 0.0f, -8.0f));
+			grip(false);
+		}
 		// What the hand holds is in the palm, unless a test puts it elsewhere
 		void moveTo(const Vec3 &palm) { in.palm = palm; in.held = palm; step(); }
 		void grip(bool down) { in.grip = down; step(); }
@@ -119,11 +127,10 @@ namespace
 		CHECK(r.machine.NeedsCycle());
 		CHECK(r.machine.BlocksFire(0, false)); // doesn't start the game's automatic reload
 
-		// The button drops the magazine
-		r.in.ejectPressed = true;
-		r.step();
-		CHECK(r.events & Event_Ejected);
+		// Takes the magazine out
+		r.pullMagazineOut();
 		CHECK(r.machine.GetState() == State::NeedFresh);
+		CHECK(r.machine.ReloadInProgress());
 
 		r.moveTo(kWaist);
 		r.grip(true);
@@ -136,6 +143,7 @@ namespace
 		r.in.reserve = 150;
 		r.step();
 		CHECK(r.machine.NeedsCycle());
+		CHECK(r.machine.ReloadInProgress()); // until it's pulled
 		CHECK(r.machine.BlocksFire(50, false));
 
 		// The grip doesn't take the bolt: it's the trigger
@@ -166,6 +174,7 @@ namespace
 		CHECK_NEAR(r.machine.BoltPull(), r.in.boltTravel, 0.001f);
 		CHECK(r.events & Event_BoltPulled);
 		CHECK(!r.machine.NeedsCycle());
+		CHECK(!r.machine.ReloadInProgress());
 		CHECK(!r.machine.BoltLockedBack());
 		CHECK(r.machine.BlocksFire(50, false)); // still held back
 
@@ -191,18 +200,6 @@ namespace
 		// It doesn't ask again until the weapon runs out again
 		r.step();
 		CHECK(!r.machine.NeedsCycle());
-
-		// The button can also work the bolt
-		r.in.clip = 0;
-		r.step();
-		r.in.clip = 50;
-		r.step();
-		CHECK(r.machine.NeedsCycle());
-		r.in.ejectPressed = true;
-		r.step();
-		CHECK(r.events & Event_BoltPulled);
-		CHECK(r.events & Event_BoltReleased);
-		CHECK(r.machine.GetState() == State::Idle); // didn't drop the magazine
 
 		// Pulled when it isn't needed, it still moves and clicks, and changes nothing
 		CHECK(!r.machine.NeedsCycle());
@@ -248,17 +245,30 @@ namespace
 		CHECK(r.machine.GetState() == State::Idle);
 		CHECK(!r.machine.BlocksFire(7, false));
 
-		// Into the weapon: the old one comes out as it goes in
+		// It doesn't go in while the old one is in the weapon
+		r.grip(true);
+		r.moveTo(kSocket + Vec3(0.0f, 0.0f, -3.0f));
+		CHECK(!(r.events & Event_Inserted));
+		CHECK(r.machine.GetState() == State::HoldingFresh);
+		r.grip(false);
+		CHECK(r.machine.GetState() == State::Idle);
+		CHECK(!r.machine.ReloadInProgress());
+
+		// The old one out, a new one goes in
+		r.pullMagazineOut();
+		CHECK(r.machine.GetState() == State::NeedFresh);
+		r.moveTo(kWaist);
 		r.grip(true);
 		r.moveTo(kSocket + Vec3(0.0f, 0.0f, -3.0f));
 		CHECK(r.events & Event_Inserted);
-		CHECK(r.events & Event_MagazineOut);
 		CHECK(r.machine.GetState() == State::Idle);
 		CHECK(!r.machine.MagazineIsOut());
+		CHECK(!r.machine.ReloadInProgress()); // it had a round in the chamber
 		r.grip(false);
 
 		// It goes in when the magazine reaches the weapon, wherever the palm is
 		Rig s(7, 15, 999, false);
+		s.pullMagazineOut();
 		s.moveTo(kWaist);
 		s.grip(true);
 		s.in.palm = kSocket + Vec3(0.0f, 0.0f, -6.0f); // 14 cm away
@@ -266,14 +276,28 @@ namespace
 		s.step();
 		CHECK(s.events & Event_Inserted);
 
-		// Full, one can still be taken and swapped
+		// Full, one can still be taken, and it stays in the hand
 		Rig full(15, 15, 999, false);
 		full.moveTo(kWaist);
 		full.grip(true);
 		CHECK(full.machine.GetState() == State::HoldingFresh);
 		full.moveTo(kSocket);
-		CHECK(full.events & Event_Inserted);
+		CHECK(!(full.events & Event_Inserted));
 		full.grip(false);
+
+		// A magazine can be taken by the end that sticks out, far from its center, and it isn't out until it's pulled
+		Rig base(7, 15, 999, false);
+		base.in.magazineBase = kSocket + Vec3(0.0f, 0.0f, -7.0f);
+		base.moveTo(kSocket + Vec3(0.0f, 0.0f, -11.0f)); // 25 cm from the center, 9 cm from the end
+		base.grip(true);
+		CHECK(base.machine.GetState() == State::HoldingOld);
+		CHECK(!base.machine.MagazineIsOut());
+		base.step();
+		CHECK(!base.machine.MagazineIsOut());
+		base.moveTo(kSocket + Vec3(0.0f, 0.0f, -14.5f)); // 8 cm further
+		CHECK(base.machine.MagazineIsOut());
+		CHECK(base.events & Event_MagazineOut);
+		base.grip(false);
 
 		// No ammo left: nothing to take
 		Rig none(10, 50, 0, false);
@@ -484,9 +508,6 @@ namespace
 			r.grip(true);
 			CHECK(r.machine.GetState() == State::Idle);
 			r.grip(false);
-			r.in.ejectPressed = true;
-			r.step();
-			CHECK(r.machine.GetState() == State::Idle);
 		}
 
 		// Full magazine
@@ -500,8 +521,7 @@ namespace
 		// The reserve runs out while the magazine is out (another player took the ammo): back to normal, not stuck
 		{
 			Rig r(10, 50, 100, false);
-			r.in.ejectPressed = true;
-			r.step();
+			r.pullMagazineOut();
 			CHECK(r.machine.GetState() == State::NeedFresh);
 			r.in.reserve = 0;
 			r.step();
@@ -559,8 +579,7 @@ namespace
 		// Reset (weapon changed) clears everything
 		{
 			Rig r(0, 50, 100, false);
-			r.in.ejectPressed = true;
-			r.step();
+			r.pullMagazineOut();
 			r.machine.Reset();
 			CHECK(r.machine.GetState() == State::Idle);
 			CHECK(!r.machine.MagazineIsOut());

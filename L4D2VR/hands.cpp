@@ -74,14 +74,14 @@ bool VR::IsHeldInTheHand(int weaponId)
 }
 
 // The right hand bone where the controller is: the same place and angle as the left hand on its controller
-bool VR::GetRightHandTarget(const HandRig &rig, Mat34 &hand) const
+bool VR::GetRightHandTarget(const HandRig &rig, Mat34 &hand, float backMeters) const
 {
 	if (m_RightControllerDeviceIndex == vr::k_unTrackedDeviceIndexInvalid || !m_Poses[m_RightControllerDeviceIndex].bPoseIsValid)
 		return false;
 
 	const Vector forward = VectorRotate(m_RightControllerForwardRaw, m_RightControllerRightRaw, kHandGripTilt);
 	const Vector up = VectorRotate(m_RightControllerUpRaw, m_RightControllerRightRaw, kHandGripTilt);
-	const Vector wrist = m_RightControllerPosAbs + (forward * m_HandOffsetMeters.x + up * m_HandOffsetMeters.z) * m_VRScale;
+	const Vector wrist = m_RightControllerPosAbs + (forward * (m_HandOffsetMeters.x - backMeters) + up * m_HandOffsetMeters.z) * m_VRScale;
 
 	hand = rig.HandFromFrame(HandRig::Right, ToVec3(forward), ToVec3(up), ToVec3(wrist));
 	return IsFinite(hand);
@@ -252,7 +252,7 @@ bool VR::BuildFirstPersonHands(const void *studioHeader, const void *customBones
 	// animation has the hand somewhere else on the handle for each weapon.
 	// Items held in the fist go to the controller with the hand, keeping the fingers of the animation (ApplyItemInHand).
 	Mat34 rightHand;
-	if (m_Game->m_IsMeleeWeaponActive && GetRightHandTarget(rig, rightHand))
+	if (m_Game->m_IsMeleeWeaponActive && GetRightHandTarget(rig, rightHand, m_MeleeHandBackMeters))
 		rig.PoseHand(HandRig::Right, rightHand, kMeleeGrip, bones);
 	else if (IsHeldInTheHand(m_ActiveWeaponId) && GetRightHandTarget(rig, rightHand))
 		rig.MoveHand(HandRig::Right, Multiply(rightHand, InvertRigid(bones[rig.HandBone(HandRig::Right)])), bones);

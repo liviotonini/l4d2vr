@@ -227,7 +227,7 @@ namespace
 
 	// Meters from the eyes looking straight ahead, for a right handed player of 1.8 m: forward, to the left, up.
 	// Pills by the left shoulder, the grenade on the right one.
-	const Vec3 kChestSpots[2] = { Vec3(0.07f, 0.13f, -0.27f), Vec3(0.06f, -0.16f, -0.24f) };
+	const Vec3 kChestSpots[2] = { Vec3(0.16f, 0.13f, -0.27f), Vec3(0.15f, -0.16f, -0.24f) };
 	const float kChestGrabRadius = 0.12f; // meters
 	const float kChestViewCosine = 0.2f;
 

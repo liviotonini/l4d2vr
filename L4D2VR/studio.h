@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <cstring>
 #include <vector>
 #include "hand_rig.h"
 
@@ -55,6 +56,43 @@ namespace Studio
 				return i;
 		}
 		return -1;
+	}
+
+	// The sounds of working the action (pump, bolt) in the fire animations of a model are switched on or off, in the copy
+	// of the model the game has in memory. The events are the old style ones, which the client only plays from 5000 up.
+	// Returns how many were found.
+	inline int SetFireActionSounds(const void *header, bool on)
+	{
+		const int kPlaySoundEvent = 5004;
+		const int kNewStyleEvent = 1024;
+		const int sequenceSize = 212, eventSize = 80;
+
+		const uint8_t *base = (const uint8_t *)header;
+		const int32_t sequences = *(const int32_t *)(base + 188);
+		const int32_t sequenceIndex = *(const int32_t *)(base + 192);
+
+		int found = 0;
+		for (int s = 0; s < sequences; ++s)
+		{
+			uint8_t *sequence = (uint8_t *)base + sequenceIndex + s * sequenceSize;
+			const char *activity = (const char *)sequence + *(const int32_t *)(sequence + 8);
+			if (!strstr(activity, "PRIMARYATTACK"))
+				continue;
+
+			const int32_t events = *(const int32_t *)(sequence + 24);
+			const int32_t eventIndex = *(const int32_t *)(sequence + 28);
+			for (int e = 0; e < events; ++e)
+			{
+				uint8_t *event = sequence + eventIndex + e * eventSize;
+				const char *options = (const char *)event + 12;
+				if ((*(const int32_t *)(event + 8) & kNewStyleEvent) || (!strstr(options, "Pump") && !strstr(options, "Bolt")))
+					continue;
+
+				*(int32_t *)(event + 4) = on ? kPlaySoundEvent : 0;
+				++found;
+			}
+		}
+		return found;
 	}
 
 	const int kMaxBones = 128;

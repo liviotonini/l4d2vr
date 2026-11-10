@@ -524,9 +524,10 @@ void SettingsMenu::DrawMenu()
 			ImGui::BeginChild("Page", ImVec2(0.0f, -footerHeight));
 			DrawSlider("Controller angle", "Tilts the aim relative to the controller (default -45).", settings.m_ControllerAngleAdjustment, -90.0f, 90.0f, 1.0f, "%.0f deg");
 			DrawSlider("Weapon side offset", "Moves the weapon sideways from the hand, in game units.", settings.m_WeaponHorizontalPositionAdjustment, -10.0f, 10.0f, 0.5f, "%.1f");
-			DrawCheckbox("Reload with your hands", "The ammo bag on your left hip gives the magazine or shell of the weapon in your hand: take it with the left grip and put it in the weapon, the old magazine falls out. You can also pull the old one out first. Shotguns load one shell at a time. The bolt or slide is pulled with the left trigger where the ring with the arrow shows on the weapon (green when the hand is there); when the weapon ran empty it has to be pulled. Pump shotguns need the pump after every shot: holding the shotgun with both hands, keep the left trigger held and move the left hand back and forth. The reload button lets the magazine fall, or works the bolt. In a game whose host doesn't have this version of the mod, the game does the reload after you put the magazine in.", settings.m_ManualReloadEnabled);
+			DrawCheckbox("Reload with your hands", "Weapons are loaded by hand and the reload button does nothing on them. Take the magazine out of the weapon with the left grip and pull it away, take a new one from the ammo bag on your left hip with the left grip and put it in the weapon. Shotguns load one shell at a time. When the weapon ran empty, pull the bolt or slide back with the left trigger. Pump shotguns and bolt action rifles have to be worked after every shot: holding the weapon with both hands, keep the left trigger held and move the left hand back and forth. Turn this off to reload with the button as usual. In a game whose host doesn't have this version of the mod, the game does the reload after you put the magazine in.", settings.m_ManualReloadEnabled);
 
 			ImGui::BeginDisabled(!settings.m_ManualReloadEnabled);
+			DrawCheckbox("Show where to reload", "While a weapon is being reloaded, a ring with an arrow shows where the magazine goes and then the bolt to pull, if the weapon ran empty. It only appears from the moment the magazine is out until the weapon is loaded.", settings.m_ShowReloadMark);
 			DrawSlider("Ammo bag: to the side", "How far to the side of your body the ammo bag is, from the middle of your head.", settings.m_MagazinePouchSide, 0.0f, 0.6f, 0.01f, "%.2f m");
 			DrawSlider("Ammo bag: forward", "How far in front of your head the ammo bag is. Negative is behind.", settings.m_MagazinePouchForward, -0.3f, 0.5f, 0.01f, "%.2f m");
 			DrawSlider("Ammo bag: below the eyes", "How far below your eyes the ammo bag is.", settings.m_MagazinePouchBelowEyes, 0.2f, 1.2f, 0.01f, "%.2f m");
@@ -550,7 +551,8 @@ void SettingsMenu::DrawMenu()
 			DrawCheckbox("Working scope", "Shows a magnified view in the scope of the sniper rifles when you look through it. Renders the game one more time while you aim, which costs performance.", settings.m_ScopeEnabled);
 
 			ImGui::BeginDisabled(!settings.m_ScopeEnabled);
-			DrawSlider("Magnification", "Zoom of the scope.", settings.m_ScopeMagnification, 1.5f, 10.0f, 0.5f, "%.1fx");
+			DrawSlider("Magnification", "Zoom of the scope when a weapon is taken.", settings.m_ScopeMagnification, 1.5f, 20.0f, 0.5f, "%.1fx");
+			DrawSlider("High magnification", "Zoom of the scope after pressing the left trigger with the left hand on it. Pressing it again goes back.", settings.m_ScopeMagnificationHigh, 1.5f, 20.0f, 0.5f, "%.1fx");
 			DrawCheckbox("Debug: always show", "Shows the scope image whenever a sniper rifle is held, even when not looking through it, and writes what the scope is doing to VR\\scope_debug.txt.", settings.m_ScopeDebug);
 			ImGui::EndDisabled();
 			ImGui::EndChild();

@@ -32,6 +32,10 @@ namespace
 	const Sounds kPumpSounds = { nullptr, "weapons/shotgun/gunother/shotgun_load_shell_2.wav", "weapons/shotgun/gunother/shotgun_pump_1.wav", nullptr };
 	const Sounds kAutoShotgunSounds = { nullptr, "weapons/auto_shotgun/gunother/auto_shotgun_load_shell_2.wav", "weapons/auto_shotgun/gunother/autoshotgun_boltback.wav", "weapons/auto_shotgun/gunother/autoshotgun_boltforward.wav" };
 
+	const Sounds kChromeSounds = { nullptr, "weapons/shotgun_chrome/gunother/shotgun_load_shell_2.wav", "weapons/shotgun_chrome/gunother/shotgun_pump_1.wav", nullptr };
+	const Sounds kAwpSounds = { "weapons/awp/gunother/awp_clipout.wav", "weapons/awp/gunother/awp_clipin.wav", "weapons/awp/gunother/awp_bolt.wav", "weapons/awp/gunother/awp_bolt_forward.wav" };
+	const Sounds kScoutSounds = { "weapons/scout/gunother/scout_clipout.wav", "weapons/scout/gunother/scout_clipin.wav", "weapons/scout/gunother/scout_bolt.wav", "weapons/scout/gunother/scout_bolt_forward.wav" };
+
 	// Measured from the game's models: the bones of the magazine (the shell for shotguns) and of the bolt (the slide of
 	// pistols, the pump of pump shotguns), the center of their mesh relative to the bone, and how far the bolt travels.
 	struct Profile
@@ -47,28 +51,32 @@ namespace
 		int capacity;
 		float boltTravel;
 		const Sounds *sounds;
-		bool pump;  // pump action: worked after every shot, and the game's own pumping isn't shown
+		bool pump;  // the other hand holds the part that's worked: it goes back and forth with it
+		float magazineLength; // game units, along the weapon's up axis
+		// Worked by hand after every shot (pump action, bolt action): for how long the game's fire animation, which does
+		// it by itself, isn't shown. 0 for the others.
+		int firePoseMs;
 	};
 
 	const Profile kProfiles[] =
 	{
-		{ C_WeaponCSBase::M16A1, "v_rifle.mdl", "ValveBiped.weapon_clip", "ValveBiped.weapon_clip_bullets", "ValveBiped.weapon_bolt", { -0.01f, -1.73f, -0.30f }, { 0.21f, 1.22f, -8.56f }, false, 50, 2.5f, &kRifleSounds, false },
-		{ C_WeaponCSBase::AK47, "v_rifle_ak47.mdl", "ValveBiped.weapon_clip", "ValveBiped.weapon_clip_bullets", "ValveBiped.weapon_bolt", { 0.01f, -2.89f, 3.04f }, { -1.37f, -0.25f, 0.88f }, false, 40, 2.5f, &kRifleSounds, false },
-		{ C_WeaponCSBase::SCAR, "v_desert_rifle.mdl", "ValveBiped.weapon_clip", "ValveBiped.weapon_clip_bullets", "ValveBiped.weapon_bolt", { -0.01f, -3.10f, -0.35f }, { 0.96f, 1.09f, 0.65f }, false, 60, 2.5f, &kRifleSounds, false },
-		{ C_WeaponCSBase::SG552, "v_rif_sg552.mdl", "ValveBiped.weapon_clip", nullptr, "ValveBiped.weapon_bolt", { 0.24f, -1.98f, 0.26f }, { 0.79f, 1.13f, 2.79f }, false, 50, 2.5f, &kRifleSounds, false },
-		{ C_WeaponCSBase::UZI, "v_smg.mdl", "ValveBiped.weapon_clip", nullptr, "ValveBiped.weapon_bolt", { -0.02f, -3.03f, 0.05f }, { 0.01f, 0.33f, -7.39f }, false, 50, 1.5f, &kSmgSounds, false },
-		{ C_WeaponCSBase::MAC10, "v_silenced_smg.mdl", "ValveBiped.weapon_clip", "ValveBiped.weapon_clip_bullets", "ValveBiped.weapon_bolt", { -0.07f, -3.25f, -0.04f }, { -0.16f, 0.24f, -9.07f }, false, 50, 1.5f, &kSmgSounds, false },
-		{ C_WeaponCSBase::MP5, "v_smg_mp5.mdl", "ValveBiped.weapon_clip", nullptr, "ValveBiped.weapon_bolt", { -0.00f, -2.71f, 0.78f }, { 0.77f, 0.30f, -0.39f }, false, 50, 1.5f, &kSmgSounds, false },
-		{ C_WeaponCSBase::HUNTING_RIFLE, "v_huntingrifle.mdl", "ValveBiped.weapon_clip", "ValveBiped.weapon_clip_bullets", "ValveBiped.weapon_bolt", { 0.06f, 0.70f, -0.15f }, { -0.39f, 0.04f, 0.45f }, false, 15, 2.5f, &kRifleSounds, false },
-		{ C_WeaponCSBase::SNIPER_MILITARY, "v_sniper_military.mdl", "ValveBiped.weapon_clip", "ValveBiped.weapon_clip_bullets", "ValveBiped.weapon_charger_slide", { 0.12f, -0.83f, 2.74f }, { 0.74f, 0.23f, 2.05f }, false, 30, 2.5f, &kRifleSounds, false },
-		{ C_WeaponCSBase::AWP, "v_snip_awp.mdl", "ValveBiped.weapon_clip", nullptr, "ValveBiped.weapon_bolt", { 0.01f, -1.35f, 0.70f }, { 2.22f, -0.54f, -0.20f }, false, 20, 2.5f, &kRifleSounds, false },
-		{ C_WeaponCSBase::SCOUT, "v_snip_scout.mdl", "ValveBiped.weapon_clip", nullptr, "ValveBiped.weapon_bolt", { -0.17f, -1.16f, 1.71f }, { 0.97f, 0.89f, 1.13f }, false, 15, 2.5f, &kRifleSounds, false },
-		{ C_WeaponCSBase::PISTOL, "v_pistola.mdl", "ValveBiped.weapon_clip", "ValveBiped.weapon_clip_bullets", "ValveBiped.weapon_charger_slide", { -0.03f, -0.32f, 0.51f }, { 0.63f, 1.38f, 6.35f }, false, 15, 1.2f, &kPistolSounds, false },
-		{ C_WeaponCSBase::MAGNUM, "v_desert_eagle.mdl", "ValveBiped.weapon_clip", "ValveBiped.weapon_clip_bullets", "ValveBiped.weapon_charger_slide", { -0.01f, -2.89f, 1.13f }, { 0.47f, 2.26f, 5.10f }, false, 8, 1.5f, &kPistolSounds, false },
-		{ C_WeaponCSBase::PUMPSHOTGUN, "v_pumpshotgun.mdl", "ValveBiped.weapon_clip_bullets", nullptr, "ValveBiped.weapon_charger_slide", { -0.00f, 0.07f, 1.37f }, { -0.01f, 0.31f, -4.80f }, true, 8, 4.5f, &kPumpSounds, true },
-		{ C_WeaponCSBase::SHOTGUN_CHROME, "v_shotgun_chrome.mdl", "ValveBiped.weapon_clip_bullets", nullptr, "ValveBiped.weapon_charger_slide", { -0.00f, 0.07f, 1.37f }, { -0.05f, 0.17f, -5.32f }, true, 8, 4.5f, &kPumpSounds, true },
-		{ C_WeaponCSBase::AUTOSHOTGUN, "v_autoshotgun.mdl", "ValveBiped.weapon_clip", nullptr, "ValveBiped.weapon_bolt", { -0.00f, 0.21f, 0.04f }, { -0.89f, -0.27f, 0.79f }, true, 10, 2.0f, &kAutoShotgunSounds, false },
-		{ C_WeaponCSBase::SPAS, "v_shotgun_spas.mdl", "ValveBiped.weapon_clip", nullptr, "ValveBiped.weapon_bolt", { 0.00f, 0.20f, 0.02f }, { -1.06f, -0.21f, -0.22f }, true, 10, 2.0f, &kAutoShotgunSounds, false },
+		{ C_WeaponCSBase::M16A1, "v_rifle.mdl", "ValveBiped.weapon_clip", "ValveBiped.weapon_clip_bullets", "ValveBiped.weapon_bolt", { -0.01f, -1.73f, -0.30f }, { 0.21f, 1.22f, -8.56f }, false, 50, 2.5f, &kRifleSounds, false, 7.7f, 0 },
+		{ C_WeaponCSBase::AK47, "v_rifle_ak47.mdl", "ValveBiped.weapon_clip", "ValveBiped.weapon_clip_bullets", "ValveBiped.weapon_bolt", { 0.01f, -2.89f, 3.04f }, { -1.37f, -0.25f, 0.88f }, false, 40, 2.5f, &kRifleSounds, false, 10.7f, 0 },
+		{ C_WeaponCSBase::SCAR, "v_desert_rifle.mdl", "ValveBiped.weapon_clip", "ValveBiped.weapon_clip_bullets", "ValveBiped.weapon_bolt", { -0.01f, -3.10f, -0.35f }, { 0.96f, 1.09f, 0.65f }, false, 60, 2.5f, &kRifleSounds, false, 10.7f, 0 },
+		{ C_WeaponCSBase::SG552, "v_rif_sg552.mdl", "ValveBiped.weapon_clip", nullptr, "ValveBiped.weapon_bolt", { 0.24f, -1.98f, 0.26f }, { 0.79f, 1.13f, 2.79f }, false, 50, 2.5f, &kRifleSounds, false, 5.8f, 0 },
+		{ C_WeaponCSBase::UZI, "v_smg.mdl", "ValveBiped.weapon_clip", nullptr, "ValveBiped.weapon_bolt", { -0.02f, -3.03f, 0.05f }, { 0.01f, 0.33f, -7.39f }, false, 50, 1.5f, &kSmgSounds, false, 8.6f, 0 },
+		{ C_WeaponCSBase::MAC10, "v_silenced_smg.mdl", "ValveBiped.weapon_clip", "ValveBiped.weapon_clip_bullets", "ValveBiped.weapon_bolt", { -0.07f, -3.25f, -0.04f }, { -0.16f, 0.24f, -9.07f }, false, 50, 1.5f, &kSmgSounds, false, 8.6f, 0 },
+		{ C_WeaponCSBase::MP5, "v_smg_mp5.mdl", "ValveBiped.weapon_clip", nullptr, "ValveBiped.weapon_bolt", { -0.00f, -2.71f, 0.78f }, { 0.77f, 0.30f, -0.39f }, false, 50, 1.5f, &kSmgSounds, false, 6.1f, 0 },
+		{ C_WeaponCSBase::HUNTING_RIFLE, "v_huntingrifle.mdl", "ValveBiped.weapon_clip", "ValveBiped.weapon_clip_bullets", "ValveBiped.weapon_bolt", { 0.06f, 0.70f, -0.15f }, { -0.39f, 0.04f, 0.45f }, false, 15, 2.5f, &kRifleSounds, false, 3.7f, 0 },
+		{ C_WeaponCSBase::SNIPER_MILITARY, "v_sniper_military.mdl", "ValveBiped.weapon_clip", "ValveBiped.weapon_clip_bullets", "ValveBiped.weapon_charger_slide", { 0.12f, -0.83f, 2.74f }, { 0.74f, 0.23f, 2.05f }, false, 30, 2.5f, &kRifleSounds, false, 7.9f, 0 },
+		{ C_WeaponCSBase::AWP, "v_snip_awp.mdl", "ValveBiped.weapon_clip", nullptr, "ValveBiped.weapon_bolt", { 0.01f, -1.35f, 0.70f }, { 2.22f, -0.54f, -0.20f }, false, 20, 3.5f, &kAwpSounds, false, 3.3f, 1500 },
+		{ C_WeaponCSBase::SCOUT, "v_snip_scout.mdl", "ValveBiped.weapon_clip", nullptr, "ValveBiped.weapon_bolt", { -0.17f, -1.16f, 1.71f }, { 0.97f, 0.89f, 1.13f }, false, 15, 3.5f, &kScoutSounds, false, 1.8f, 1800 },
+		{ C_WeaponCSBase::PISTOL, "v_pistola.mdl", "ValveBiped.weapon_clip", "ValveBiped.weapon_clip_bullets", "ValveBiped.weapon_charger_slide", { -0.03f, -0.32f, 0.51f }, { 0.63f, 1.38f, 6.35f }, false, 15, 1.2f, &kPistolSounds, false, 6.3f, 0 },
+		{ C_WeaponCSBase::MAGNUM, "v_desert_eagle.mdl", "ValveBiped.weapon_clip", "ValveBiped.weapon_clip_bullets", "ValveBiped.weapon_charger_slide", { -0.01f, -2.89f, 1.13f }, { 0.47f, 2.26f, 5.10f }, false, 8, 1.5f, &kPistolSounds, false, 6.4f, 0 },
+		{ C_WeaponCSBase::PUMPSHOTGUN, "v_pumpshotgun.mdl", "ValveBiped.weapon_clip_bullets", nullptr, "ValveBiped.weapon_charger_slide", { -0.00f, 0.07f, 1.37f }, { -0.01f, 0.31f, -4.80f }, true, 8, 4.5f, &kPumpSounds, true, 0.0f, 1050 },
+		{ C_WeaponCSBase::SHOTGUN_CHROME, "v_shotgun_chrome.mdl", "ValveBiped.weapon_clip_bullets", nullptr, "ValveBiped.weapon_charger_slide", { -0.00f, 0.07f, 1.37f }, { -0.05f, 0.17f, -5.32f }, true, 8, 4.5f, &kChromeSounds, true, 0.0f, 1050 },
+		{ C_WeaponCSBase::AUTOSHOTGUN, "v_autoshotgun.mdl", "ValveBiped.weapon_clip", nullptr, "ValveBiped.weapon_bolt", { -0.00f, 0.21f, 0.04f }, { -0.89f, -0.27f, 0.79f }, true, 10, 2.0f, &kAutoShotgunSounds, false, 0.0f, 0 },
+		{ C_WeaponCSBase::SPAS, "v_shotgun_spas.mdl", "ValveBiped.weapon_clip", nullptr, "ValveBiped.weapon_bolt", { 0.00f, 0.20f, 0.02f }, { -1.06f, -0.21f, -0.22f }, true, 10, 2.0f, &kAutoShotgunSounds, false, 0.0f, 0 },
 	};
 
 	// The weapon a model in first person is, by its file name
@@ -111,6 +119,7 @@ namespace
 		int boltParent = -1;
 		Mat34 boltRest;  // where the bolt sits on its parent when nothing moves it
 		float gamePumpTravel = 0.0f; // how far back the game's own animation takes the pump, for the log
+		int actionSounds = -1;       // the sounds of the action in its fire animations: 1 on, 0 off, -1 not set yet
 	};
 
 	std::unordered_map<const void *, ViewmodelBones> g_ViewmodelBones;
@@ -118,6 +127,7 @@ namespace
 	// The parts of the weapon, from the last time it was drawn
 	Mat34 g_MagazineWorld;
 	Vec3 g_Socket;
+	Vec3 g_MagazineBase;
 	Vec3 g_BoltGrab;
 	bool g_HaveBolt = false;
 	ULONGLONG g_LastViewmodelDraw = 0;
@@ -138,9 +148,8 @@ namespace
 	const ULONGLONG kIdleAfterDeployMs = 2000;
 	const ULONGLONG kIdleAfterShotMs = 1500;
 	bool g_WasAtPouch = false;
-	// The game's fire animation of a pump action pumps by itself: it isn't shown for this long after a shot. The shot is
-	// seen in the draw itself, from the clip, so not even its first frame is shown.
-	const ULONGLONG kFirePoseMs = 1050;
+	// The game's fire animation of a pump or bolt action works it by itself: it isn't shown for a while after a shot. The
+	// shot is seen in the draw itself, from the clip, so not even its first frame is shown.
 	int g_DrawClip = -1;
 	int g_DrawWeaponId = 0;
 	ULONGLONG g_FirePoseUntil = 0;
@@ -150,8 +159,7 @@ namespace
 	// The mark where the bolt is taken: relative to the right controller in its OpenVR frame, from the last draw
 	vr::HmdMatrix34_t g_MarkerTransform = {};
 	bool g_MarkerPlaced = false;
-	// Shown when the hand is this close, or when the bolt has to be worked
-	const float kMarkerShowDistance = 0.35f; // meters
+	bool g_ActionSoundsOff = false;
 	const float kMarkerWidth = 0.035f;       // meters
 	const int kMarkerSize = 64;              // pixels
 
@@ -245,6 +253,19 @@ void VR::PlayWeaponSound(const char *sound)
 
 namespace
 {
+	// A wrong layout or a read only model must not take the game down
+	int SetActionSounds(const void *studioHeader, bool on)
+	{
+		__try
+		{
+			return Studio::SetFireActionSounds(studioHeader, on);
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			return -1;
+		}
+	}
+
 	float Coverage(float distance, float halfWidth)
 	{
 		return std::clamp(halfWidth + 0.5f - distance, 0.0f, 1.0f);
@@ -318,7 +339,7 @@ void VR::UpdateBoltMarker(bool show, bool inReach)
 bool VR::ManualReloadPumpsByHand() const
 {
 	const Profile *profile = m_ManualReloadEnabled ? FindProfile(m_ActiveWeaponId) : nullptr;
-	return profile && profile->pump && m_Game->m_PoseRelay->IsServerCapable();
+	return profile && profile->firePoseMs > 0 && m_Game->m_PoseRelay->IsServerCapable();
 }
 
 // True while the game's fire animation of a pump action would be playing, which isn't shown (ApplyThrowPose). Called
@@ -327,7 +348,8 @@ bool VR::ManualReloadHoldsFirePose()
 {
 	C_BasePlayer *local = (C_BasePlayer *)m_Game->GetClientEntity(m_Game->m_EngineClient->GetLocalPlayer());
 	const C_BaseCombatWeapon *weapon = local ? local->GetActiveWeapon() : nullptr;
-	if (!weapon)
+	const Profile *profile = m_ManualReloadEnabled ? FindProfile(m_ActiveWeaponId) : nullptr;
+	if (!weapon || !profile)
 		return false;
 
 	const int clip = Read<int>(weapon, kClientClipOffset);
@@ -335,7 +357,7 @@ bool VR::ManualReloadHoldsFirePose()
 	if (g_DrawWeaponId != m_ActiveWeaponId)
 		g_FirePoseUntil = 0;
 	else if (g_DrawClip >= 0 && clip < g_DrawClip)
-		g_FirePoseUntil = now + kFirePoseMs;
+		g_FirePoseUntil = now + profile->firePoseMs;
 	g_DrawWeaponId = m_ActiveWeaponId;
 	g_DrawClip = clip;
 	return now < g_FirePoseUntil;
@@ -361,6 +383,23 @@ void VR::UpdateManualReload()
 
 	const Profile *profile = m_ManualReloadEnabled ? FindProfile(m_ActiveWeaponId) : nullptr;
 	const ULONGLONG now = GetTickCount64();
+
+	// The left trigger on a scope changes its zoom, whatever the reload is doing
+	const bool scopeTookTrigger = UpdateScopeZoom(g_HaveBolt, g_BoltGrab);
+
+	// Reloading the game's way again: its own sounds are back
+	if (!m_ManualReloadEnabled && g_ActionSoundsOff)
+	{
+		for (auto &entry : g_ViewmodelBones)
+		{
+			if (entry.second.actionSounds == 0)
+			{
+				SetActionSounds(entry.first, true);
+				entry.second.actionSounds = 1;
+			}
+		}
+		g_ActionSoundsOff = false;
+	}
 
 	// Facing and the point the waist hangs from, without the pitch and roll of the head. Same as the items on the body.
 	Vector facing(m_HmdForward.x, m_HmdForward.y, 0.0f);
@@ -424,6 +463,7 @@ void VR::UpdateManualReload()
 	inputs.palm = GetLeftPalm();
 	inputs.held = holdingBefore ? TransformPoint(heldWorld, ArrayToVec3(profile->magazineCenter)) : inputs.palm;
 	inputs.socket = g_Socket;
+	inputs.magazineBase = g_MagazineBase;
 	inputs.boltGrab = g_BoltGrab;
 	inputs.boltAxis = ToVec3(m_ViewmodelForward);
 	inputs.waist = m_WaistWorld;
@@ -431,13 +471,12 @@ void VR::UpdateManualReload()
 	inputs.boltTravel = profile->boltTravel;
 	inputs.grip = PressedDigitalAction(m_LeftHandGrab);
 	// The left trigger shoves no more, and only cancels a grenade, which has no reload
-	inputs.trigger = PressedDigitalAction(m_ActionSecondaryAttack);
-	// Holding a pump action with both hands, the other hand is on the pump
-	inputs.holdsPump = profile->pump && isHoldingWeapon2Handed;
-	inputs.pumpEveryShot = profile->pump;
-	// With a host that doesn't have the mod, the button is the game's reload and the game works the bolt
+	inputs.trigger = PressedDigitalAction(m_ActionSecondaryAttack) && !scopeTookTrigger;
+	// Worked after every shot: holding the weapon with both hands, the trigger works it from wherever the other hand is
+	inputs.holdsPump = profile->firePoseMs > 0 && isHoldingWeapon2Handed;
+	inputs.pumpEveryShot = profile->firePoseMs > 0;
+	// With a host that doesn't have the mod the game works the bolt
 	const bool serverCommits = m_Game->m_PoseRelay->IsServerCapable();
-	inputs.ejectPressed = serverCommits && PressedDigitalAction(m_ActionReload, true);
 	inputs.clip = Read<int>(weapon, kClientClipOffset);
 	inputs.capacity = std::max(profile->capacity, inputs.clip);
 	// Pistols never run out of magazines, and the game reports their reserve as 0
@@ -458,13 +497,15 @@ void VR::UpdateManualReload()
 	if (state == Reload::State::HoldingOld || state == Reload::State::HoldingFresh || state == Reload::State::HoldingBolt)
 		g_LeftHandUsedTime = now;
 
-	// The mark of the bolt: when it has to be worked, or when the hand comes near it. Not while it's held, nor on a pump
-	// already in the hand.
-	if (inputs.hasBolt && state != Reload::State::HoldingBolt && !holdingBefore && !inputs.holdsPump)
+	// The mark: from the moment the magazine is out until the weapon is loaded. First where the magazine goes, then, if
+	// the weapon ran empty, the bolt.
+	if (m_ShowReloadMark)
 	{
-		const float toBolt = Length(inputs.palm - inputs.boltGrab) / m_VRScale;
-		marker.show = g_Machine.NeedsCycle() || toBolt < kMarkerShowDistance;
-		marker.inReach = toBolt < Reload::kBoltGrabRadius;
+		const bool magazineOut = !profile->shells && g_Machine.MagazineIsOut();
+		const bool chamberIt = inputs.hasBolt && g_Machine.NeedsCycle() && inputs.clip > 0 && (profile->firePoseMs == 0 || g_Machine.ReloadInProgress())
+			&& state != Reload::State::HoldingBolt && !inputs.holdsPump;
+		marker.show = magazineOut || chamberIt;
+		marker.inReach = magazineOut ? state == Reload::State::HoldingFresh : Length(inputs.palm - inputs.boltGrab) < Reload::kBoltGrabRadius * m_VRScale;
 	}
 
 	// The hand reaches the waist where it can take one: a faint tick, so it can be found without looking
@@ -504,10 +545,10 @@ void VR::UpdateManualReload()
 	// Feedback: what was taken is felt in the hand that took it, what went in or reached its end in both
 	if (events & (Reload::Event_GrabbedOld | Reload::Event_GrabbedFresh | Reload::Event_GrabbedBolt))
 		m_Haptics.Play(Haptics::Hand::OtherHand, HapticEffects::Take);
-	if (events & (Reload::Event_Inserted | Reload::Event_ShellInserted | Reload::Event_BoltPulled | Reload::Event_MagazineOut | Reload::Event_Ejected))
+	if (events & (Reload::Event_Inserted | Reload::Event_ShellInserted | Reload::Event_BoltPulled | Reload::Event_MagazineOut))
 		m_Haptics.Play(Haptics::Hand::BothHands, HapticEffects::Click);
 
-	if (events & (Reload::Event_MagazineOut | Reload::Event_Ejected))
+	if (events & Reload::Event_MagazineOut)
 		PlayWeaponSound(profile->sounds->magazineOut);
 	if (events & (Reload::Event_Inserted | Reload::Event_ShellInserted))
 		PlayWeaponSound(profile->sounds->magazineIn);
@@ -520,6 +561,12 @@ void VR::UpdateManualReload()
 bool VR::ManualReloadBlocksFire() const
 {
 	return m_ReloadActive && m_ManualReloadEnabled && FindProfile(m_ActiveWeaponId) && g_Machine.BlocksFire(m_ReloadClip, m_ReloadUsesShells);
+}
+
+// With manual reload the reload button does nothing on the weapons reloaded by hand
+bool VR::ManualReloadOwnsReloadButton() const
+{
+	return m_ReloadActive && m_ManualReloadEnabled && FindProfile(m_ActiveWeaponId) != nullptr;
 }
 
 bool VR::ManualReloadBlocksNativeReload() const
@@ -603,6 +650,7 @@ bool VR::BuildReloadViewmodel(const void *studioHeader, const void *customBones,
 
 	g_MagazineWorld = source[ids.magazine];
 	g_Socket = TransformPoint(g_MagazineWorld, ArrayToVec3(profile->magazineCenter));
+	g_MagazineBase = g_Socket - ToVec3(m_ViewmodelUp) * (profile->magazineLength * 0.5f + 0.5f);
 	g_HaveBolt = ids.bolt >= 0;
 	if (g_HaveBolt)
 	{
@@ -612,24 +660,35 @@ bool VR::BuildReloadViewmodel(const void *studioHeader, const void *customBones,
 	}
 	g_LastViewmodelDraw = now;
 
-	// Where the bolt is taken, for its mark: relative to the right controller in its OpenVR frame (x right, y up,
-	// z back). It faces the eyes, with its arrow pointing the way the bolt is pulled.
-	if (g_HaveBolt)
+	// Where the mark goes: relative to the right controller in its OpenVR frame (x right, y up, z back). It faces the eyes,
+	// on the bolt with its arrow pointing the way it's pulled, or where the magazine goes with the arrow pointing in.
+	const bool markMagazine = !profile->shells && g_Machine.MagazineIsOut();
+	if (g_HaveBolt || markMagazine)
 	{
+		const Vec3 markPoint = markMagazine ? g_Socket : g_BoltGrab;
 		const Vec3 controllerRight = ToVec3(m_RightControllerRightRaw), controllerUp = ToVec3(m_RightControllerUpRaw), controllerForward = ToVec3(m_RightControllerForwardRaw);
 		auto toController = [&](const Vec3 &v) { return Vec3(Dot(v, controllerRight), Dot(v, controllerUp), -Dot(v, controllerForward)); };
 
-		const Vec3 normal = Normalized(ToVec3(m_HmdPosAbs) - g_BoltGrab);
-		Vec3 along = forward * -1.0f;
+		const Vec3 normal = Normalized(ToVec3(m_HmdPosAbs) - markPoint);
+		Vec3 along = markMagazine ? ToVec3(m_ViewmodelUp) : forward * -1.0f;
 		along = Normalized(along - normal * Dot(along, normal), Normalized(Cross(Vec3(0.0f, 0.0f, 1.0f), normal)));
 		const Vec3 x = toController(along), y = toController(Cross(normal, along)), z = toController(normal);
-		const Vec3 p = toController(g_BoltGrab - ToVec3(m_RightControllerPosAbsRaw)) * (1.0f / m_VRScale);
+		const Vec3 p = toController(markPoint - ToVec3(m_RightControllerPosAbsRaw)) * (1.0f / m_VRScale);
 		g_MarkerTransform = { { { x.x, y.x, z.x, p.x }, { x.y, y.y, z.y, p.y }, { x.z, y.z, z.z, p.z } } };
 		g_MarkerPlaced = IsFinite(FromAxes(x, y, z, p));
 	}
 
-	// With a host without the mod the game still pumps by itself, and that is what is shown
-	const bool pinPump = profile->pump && g_HaveBolt && ids.boltParent >= 0 && m_Game->m_PoseRelay->IsServerCapable();
+	// With a host without the mod the game still works it by itself, and that is what is shown and heard
+	const bool byHand = profile->firePoseMs > 0 && m_Game->m_PoseRelay->IsServerCapable();
+	if (profile->firePoseMs > 0 && ids.actionSounds != (byHand ? 0 : 1))
+	{
+		ids.actionSounds = byHand ? 0 : 1;
+		const int found = SetActionSounds(studioHeader, !byHand);
+		g_ActionSoundsOff = g_ActionSoundsOff || byHand;
+		Diagnostics::Log("manual reload: %s, %d action sounds in the fire animation %s", Studio::ModelName(studioHeader), found, byHand ? "off" : "on");
+	}
+
+	const bool pinPump = byHand && g_HaveBolt && ids.boltParent >= 0;
 	if (pinPump && now - g_DeployTime > kIdleAfterDeployMs && now - g_LastShotTime > kIdleAfterShotMs && !IsWeaponReloading())
 		ids.boltRest = Multiply(InvertRigid(source[ids.boltParent]), source[ids.bolt]);
 
@@ -667,7 +726,8 @@ bool VR::BuildReloadViewmodel(const void *studioHeader, const void *customBones,
 		}
 		bones[ids.bolt] = rest;
 		SetAxis(bones[ids.bolt], 3, Origin(rest) - forward * boltPull);
-		m_PumpHandShift = boltPull - animatedBack;
+		if (profile->pump)
+			m_PumpHandShift = boltPull - animatedBack;
 	}
 	else if (boltPull > 0.0f && g_HaveBolt)
 	{

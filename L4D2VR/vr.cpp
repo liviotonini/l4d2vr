@@ -18,6 +18,7 @@
 #include "settings_menu.h"
 #include "diagnostics.h"
 #include "pose_relay.h"
+#include "reload_logic.h"
 
 VR::VR(Game *game) 
 {
@@ -666,7 +667,7 @@ void VR::ProcessInput()
     SetGameButton(GameButton_Jump, PressedDigitalAction(m_ActionJump));
     SetGameButton(GameButton_Use, PressedDigitalAction(m_ActionUse));
 
-    SetGameButton(GameButton_Reload, (PressedDigitalAction(m_ActionReload) && !ManualReloadBlocksNativeReload()) || isReloading);
+    SetGameButton(GameButton_Reload, (PressedDigitalAction(m_ActionReload) && !ManualReloadOwnsReloadButton()) || isReloading);
     isReloading = false;
 
     //if (PressedDigitalAction(m_ActionSecondaryAttack) || (m_IsTrackingManualPush && VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 5.0))
@@ -1114,7 +1115,12 @@ namespace
         { C_WeaponCSBase::SNIPER_MILITARY, { -31.0f,  5.79f,  0.0f  }, 0.80f },
         { C_WeaponCSBase::AWP,             { -21.05f, 3.81f, -1.17f }, 1.30f },
         { C_WeaponCSBase::SCOUT,           { -18.0f,  3.43f,  0.02f }, 0.90f },
+        { C_WeaponCSBase::SG552,           { -16.8f,  0.0f,   4.65f }, 0.75f },
     };
+
+    // Length of the scope, and how close the hand has to be to it for its trigger to change the zoom
+    constexpr float kScopeBodyLength = 9.0f;  // game units
+    constexpr float kScopeZoomReach = 0.11f;  // meters
 
     // Field of view seen through the eyepiece at 1x magnification
     constexpr float kScopeReferenceFov = 40.0f;
@@ -1298,11 +1304,39 @@ bool VR::UpdateScope()
     Vector attachmentForward, attachmentRight, attachmentUp;
     QAngle::AngleVectors(attachmentAngles, &attachmentForward, &attachmentRight, &attachmentUp);
 
+    // While the fire animation of a bolt action isn't shown, the scope stays where the weapon is drawn
+    if (ManualReloadPumpsByHand())
+    {
+        using namespace HandMath;
+        auto vec = [](const Vector &v) { return Vec3(v.x, v.y, v.z); };
+        auto toVector = [](const Vec3 &v) { return Vector(v.x, v.y, v.z); };
+        const Mat34 frame = FromAxes(vec(m_ViewmodelForward), vec(m_ViewmodelRight) * -1.0f, vec(m_ViewmodelUp), vec(GetRecommendedViewmodelAbsPos()));
+
+        if (!ManualReloadHoldsFirePose() || m_ScopeAttachmentWeaponId != m_ActiveWeaponId)
+        {
+            m_ScopeAttachmentInFrame = Multiply(InvertRigid(frame), FromAxes(vec(attachmentForward), vec(attachmentRight) * -1.0f, vec(attachmentUp), vec(attachmentOrigin)));
+            m_ScopeAttachmentWeaponId = m_ActiveWeaponId;
+        }
+        else
+        {
+            const Mat34 held = Multiply(frame, m_ScopeAttachmentInFrame);
+            attachmentForward = toVector(Axis(held, 0));
+            attachmentRight = toVector(Axis(held, 1) * -1.0f);
+            attachmentUp = toVector(Axis(held, 2));
+            attachmentOrigin = toVector(Origin(held));
+        }
+    }
+
     Vector eyepiece = attachmentOrigin + attachmentForward * scope->eyepiece.x - attachmentRight * scope->eyepiece.y + attachmentUp * scope->eyepiece.z;
 
     // The scope looks where the bullets go
     Vector scopeForward, scopeRight, scopeUp;
     QAngle::AngleVectors(m_RightControllerAngAbs, &scopeForward, &scopeRight, &scopeUp);
+
+    const Vector scopeFront = eyepiece + scopeForward * kScopeBodyLength;
+    m_ScopeRear = HandMath::Vec3(eyepiece.x, eyepiece.y, eyepiece.z);
+    m_ScopeFront = HandMath::Vec3(scopeFront.x, scopeFront.y, scopeFront.z);
+    m_ScopeBodyWeaponId = m_ActiveWeaponId;
 
     // Only show (and render) the scope while an eye is behind the eyepiece
     const Vector eyes[2] = { GetViewOriginLeft(), GetViewOriginRight() };
@@ -1365,13 +1399,48 @@ bool VR::UpdateScope()
     if (alpha < 0.01f)
         return false;
 
-    float magnification = std::max(m_ScopeMagnification, 1.0f);
+    float magnification = std::max(m_ScopeZoomHigh ? m_ScopeMagnificationHigh : m_ScopeMagnification, 1.0f);
     m_ScopeFov = 2.0f * RAD2DEG(atanf(tanf(DEG2RAD(kScopeReferenceFov * 0.5f)) / magnification));
     m_ScopeCameraPos = eyepiece;
     m_ScopeCameraAng = m_RightControllerAngAbs;
     m_ScopeAlpha = alpha;
 
     return true;
+}
+
+// The left trigger with the hand on the scope changes between its two magnifications. Called every frame. Returns true
+// while that press is the one holding the trigger, so it doesn't work the bolt as well. With both hands on the weapon the
+// trigger is for the bolt, and when the hand is closer to the bolt, too.
+bool VR::UpdateScopeZoom(bool haveBolt, const HandMath::Vec3 &boltGrab)
+{
+    const bool trigger = PressedDigitalAction(m_ActionSecondaryAttack);
+    const bool pressed = trigger && !m_ScopeZoomTriggerDown;
+    m_ScopeZoomTriggerDown = trigger;
+    if (!trigger)
+        m_ScopeZoomTookTrigger = false;
+
+    // Each time a weapon is taken it starts with the lower magnification
+    if (m_ActiveWeaponId != m_ScopeZoomWeaponId)
+    {
+        m_ScopeZoomWeaponId = m_ActiveWeaponId;
+        m_ScopeZoomHigh = false;
+    }
+
+    if (pressed && m_ScopeEnabled && !isHoldingWeapon2Handed && m_ScopeBodyWeaponId == m_ActiveWeaponId && FindScope(m_ActiveWeaponId))
+    {
+        const HandMath::Vec3 palm = GetLeftPalm();
+        const float toScope = Reload::DistanceToSegment(palm, m_ScopeRear, m_ScopeFront);
+        const bool nearerThanBolt = !haveBolt || !m_ManualReloadEnabled || toScope <= HandMath::Length(palm - boltGrab);
+        if (toScope < kScopeZoomReach * m_VRScale && nearerThanBolt)
+        {
+            m_ScopeZoomHigh = !m_ScopeZoomHigh;
+            m_ScopeZoomTookTrigger = true;
+            m_Haptics.Play(Haptics::Hand::OtherHand, HapticEffects::Take);
+            PlayWeaponSound("weapons/awp/gunother/zoom.wav");
+        }
+    }
+
+    return m_ScopeZoomTookTrigger;
 }
 
 void VR::SubmitScopeOverlays()
@@ -2315,7 +2384,7 @@ void VR::UpdateTracking()
             // Check if reloading
             float maxHandsDistanceToReload = 15.0f;
 
-            if (!ManualReloadBlocksNativeReload()
+            if (!ManualReloadOwnsReloadButton()
                 && isHoldingWeapon2Handed == false
                 && dotProduct_RightControllerUp_HandsDistLocalWorld <= -0.9f
                 && handsDistanceLocalInWorldLength <= maxHandsDistanceToReload)
@@ -2466,6 +2535,9 @@ void VR::ParseConfigFile()
         const std::string &text = userConfig[key];
         return text.empty() ? fallback : std::clamp(std::stof(text), minimum, maximum);
     };
+    m_ShowReloadMark = userConfig["ShowReloadMark"] != "false"; // enabled if missing from config
+    m_ScopeMagnificationHigh = readFloat("ScopeMagnificationHigh", m_ScopeMagnificationHigh, 1.0f, 20.0f);
+    m_MeleeHandBackMeters = readFloat("MeleeHandBackMeters", m_MeleeHandBackMeters, -0.2f, 0.2f); // only by editing config.txt
     m_MagazinePouchSide = readFloat("MagazinePouchSide", m_MagazinePouchSide, 0.0f, 0.6f);
     m_MagazinePouchForward = readFloat("MagazinePouchForward", m_MagazinePouchForward, -0.3f, 0.5f);
     m_MagazinePouchBelowEyes = readFloat("MagazinePouchBelowEyes", kMagazinePouchBelowEyesPerHeight * m_PlayerHeightInMeters, 0.2f, 1.2f);
@@ -2534,6 +2606,7 @@ bool VR::SaveConfigFile()
         { "AttachFlashlightToHeadWhenMelee", ConfigBoolString(m_AttachFlashlightToHeadWhenMelee) },
         { "ScopeEnabled", ConfigBoolString(m_ScopeEnabled) },
         { "ScopeMagnification", ConfigFloatString(m_ScopeMagnification) },
+        { "ScopeMagnificationHigh", ConfigFloatString(m_ScopeMagnificationHigh) },
         { "ScopeDebug", ConfigBoolString(m_ScopeDebug) },
         { "GrenadeThrowGesture", ConfigBoolString(m_GrenadeThrowGesture) },
         { "GrenadeThrowStrength", ConfigFloatString(m_GrenadeThrowStrength) },
@@ -2541,6 +2614,7 @@ bool VR::SaveConfigFile()
         { "InteractWithHand", ConfigBoolString(m_InteractWithHand) },
         { "WristHudEnabled", ConfigBoolString(m_WristHudEnabled) },
         { "ManualReload", ConfigBoolString(m_ManualReloadEnabled) },
+        { "ShowReloadMark", ConfigBoolString(m_ShowReloadMark) },
         { "MagazinePouchSide", ConfigFloatString(m_MagazinePouchSide) },
         { "MagazinePouchForward", ConfigFloatString(m_MagazinePouchForward) },
         { "MagazinePouchBelowEyes", ConfigFloatString(m_MagazinePouchBelowEyes) },

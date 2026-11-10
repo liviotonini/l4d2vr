@@ -234,7 +234,8 @@ public:
 	bool m_UseCrouchButtonAsToggle = false;
 	bool m_AttachFlashlightToHeadWhenMelee = true;
 	bool m_ScopeEnabled = true;
-	float m_ScopeMagnification = 4.0f;
+	float m_ScopeMagnification = 4.0f;      // the left trigger on the scope changes between these two
+	float m_ScopeMagnificationHigh = 10.0f;
 	// Shows the scope whenever a sniper rifle is held (even when not looking through it) and writes its state
 	// to VR\scope_debug.txt once per second
 	bool m_ScopeDebug = false;
@@ -304,6 +305,17 @@ public:
 	bool m_ScopeRendered = false;
 	float m_ScopeAlpha = 0.0f;
 	float m_ScopeOverlayWidth = 0.05f;
+	bool m_ScopeZoomHigh = false;
+	bool m_ScopeZoomTriggerDown = false;
+	bool m_ScopeZoomTookTrigger = false;
+	int m_ScopeZoomWeaponId = 0;
+	// Where the scope is, from the last time it was updated: for the hand that changes its zoom
+	HandMath::Vec3 m_ScopeRear;
+	HandMath::Vec3 m_ScopeFront;
+	int m_ScopeBodyWeaponId = 0;
+	// The scope's attachment relative to the weapon's frame, kept while the fire animation isn't shown
+	HandMath::Mat34 m_ScopeAttachmentInFrame;
+	int m_ScopeAttachmentWeaponId = 0;
 	vr::HmdMatrix34_t m_ScopeOverlayTransform = {};
 	Vector m_ScopeCameraPos = { 0,0,0 };
 	QAngle m_ScopeCameraAng = { 0,0,0 };
@@ -336,6 +348,7 @@ public:
 	bool m_ViewmodelHasTwoWeapons = false;  // dual pistols, both hands are holding one
 	// Where the wrist is from the controller and how the hand is turned, see DefaultHandOffset. Not in the menu.
 	Vector m_HandOffsetMeters = { -0.10f, 0.0f, -0.08f }; // forward, right, up
+	float m_MeleeHandBackMeters = 0.03f;  // how much further back the hand is on melee weapons. MeleeHandBackMeters in config.txt
 	QAngle m_HandAngleOffset = { 0.0f, 0.0f, 0.0f };
 
 	// HUD on the wrist of the hand that doesn't hold the weapon (wrist_hud.cpp)
@@ -354,6 +367,7 @@ public:
 	float m_MagazinePouchSide = 0.24f;
 	float m_MagazinePouchForward = 0.10f;
 	float m_MagazinePouchBelowEyes = kMagazinePouchBelowEyesPerHeight * 1.8f;
+	bool m_ShowReloadMark = true;        // the mark on the weapon while it's being reloaded
 	bool m_ReloadPouchVisible = false;   // the waist can be in view, the bag is drawn
 	float m_PumpHandShift = 0.0f;        // game units the hand holding a pump goes back, from the last weapon draw
 	const HandRig *m_ArmsRig = nullptr;  // of the first person arms last drawn
@@ -449,6 +463,7 @@ public:
 	static int GetReloadCapacity(int weaponId);
 	bool ManualReloadBlocksFire() const;
 	bool ManualReloadBlocksNativeReload() const;
+	bool ManualReloadOwnsReloadButton() const;
 	bool ManualReloadHandIsBusy() const;
 	void ClearManualReloadCache();
 	bool BuildReloadViewmodel(const void *studioHeader, const void *customBones, void *outBones, void *outDetached, bool &drawDetached);
@@ -464,7 +479,7 @@ public:
 	void BuildBodyModelBones(const void *studioHeader, const HandMath::Mat34 &frame, void *outBones);
 	bool BuildRemoteItemBones(int entityIndex, const void *weapon, const void *studioHeader, void *outBones);
 	static bool IsHeldInTheHand(int weaponId);
-	bool GetRightHandTarget(const HandRig &rig, HandMath::Mat34 &hand) const;
+	bool GetRightHandTarget(const HandRig &rig, HandMath::Mat34 &hand, float backMeters = 0.0f) const;
 	const void *ApplyItemInHand(const void *studioHeader, const void *customBones, void *storage);
 	HandMath::Vec3 GetLeftPalm() const;
 	HandMath::Mat34 GetLeftHandGrabFrame() const;
@@ -476,6 +491,7 @@ public:
 	void PatchLaserSight();
 	void CreateScopeOverlays();
 	bool UpdateScope();
+	bool UpdateScopeZoom(bool haveBolt, const HandMath::Vec3 &boltGrab);
 	void SubmitScopeOverlays();
 	void HideScopeOverlays();
 	static bool IsThrowableWeapon(int weaponId);
