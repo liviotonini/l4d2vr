@@ -201,6 +201,8 @@ void VR::UpdateManualReload()
 	inputs.unitsPerMeter = m_VRScale;
 	inputs.boltTravel = profile->boltTravel;
 	inputs.grip = PressedDigitalAction(m_LeftHandGrab);
+	// The left trigger shoves no more, and only cancels a grenade, which has no reload
+	inputs.trigger = PressedDigitalAction(m_ActionSecondaryAttack);
 	// With a host that doesn't have the mod, the button is the game's reload and the game works the bolt
 	const bool serverCommits = m_Game->m_PoseRelay->IsServerCapable();
 	inputs.ejectPressed = serverCommits && PressedDigitalAction(m_ActionReload, true);

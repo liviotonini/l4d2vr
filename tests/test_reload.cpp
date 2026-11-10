@@ -35,6 +35,7 @@ namespace
 		void step() { events = machine.Update(in); in.ejectPressed = false; }
 		void moveTo(const Vec3 &palm) { in.palm = palm; step(); }
 		void grip(bool down) { in.grip = down; step(); }
+		void trigger(bool down) { in.trigger = down; step(); }
 	};
 
 	void TestMagazine()
@@ -135,10 +136,17 @@ namespace
 		CHECK(r.machine.NeedsCycle());
 		CHECK(r.machine.BlocksFire(50, false));
 
-		// Grab it and pull only a little
+		// The grip doesn't take the bolt: it's the trigger
 		r.moveTo(kBolt);
 		r.grip(true);
+		CHECK(r.machine.GetState() != State::HoldingBolt);
+		r.grip(false);
+
+		// Grab it and pull only a little
+		r.trigger(true);
 		CHECK(r.machine.GetState() == State::HoldingBolt);
+		CHECK(r.events & Event_GrabbedBolt);
+		CHECK(!r.machine.HandIsBusy()); // the grip can keep holding the weapon
 		r.moveTo(kBolt + Vec3(-0.5f, 0.0f, 0.0f));
 		CHECK_NEAR(r.machine.BoltPull(), 0.5f, 0.001f);
 		CHECK(r.machine.NeedsCycle());
@@ -152,7 +160,13 @@ namespace
 		CHECK(!r.machine.NeedsCycle());
 		CHECK(!r.machine.BlocksFire(50, false));
 
+		// Pressing the grip meanwhile doesn't let go of it
+		r.grip(true);
+		CHECK(r.machine.GetState() == State::HoldingBolt);
 		r.grip(false);
+		CHECK(r.machine.GetState() == State::HoldingBolt);
+
+		r.trigger(false);
 		CHECK(r.machine.GetState() == State::Idle);
 		CHECK_NEAR(r.machine.BoltPull(), 0.0f, 0.001f);
 
@@ -228,12 +242,20 @@ namespace
 		r.in.clip = 1;
 		r.step();
 		CHECK(r.machine.BlocksFire(1, true));
+
+		// Pumped holding the weapon with both hands: the grip is held on the pump and the trigger pulls it
 		r.moveTo(kBolt);
 		r.grip(true);
+		CHECK(!r.machine.HandIsBusy());
+		r.trigger(true);
+		CHECK(r.machine.GetState() == State::HoldingBolt);
+		CHECK(!r.machine.HandIsBusy());
 		r.moveTo(kBolt + Vec3(-9.0f, 0.0f, 0.0f));
 		CHECK(r.events & Event_BoltPulled);
 		CHECK(!r.machine.BlocksFire(1, true));
+		r.trigger(false);
 		r.grip(false);
+		CHECK(r.machine.GetState() == State::Idle);
 	}
 
 	void TestEdges()
@@ -287,6 +309,36 @@ namespace
 			r.moveTo(kSocket);
 			CHECK(r.machine.GetState() == State::Idle);
 			r.grip(false);
+		}
+
+		// Same with the trigger and the bolt
+		{
+			Rig r(1, 50, 100, false);
+			r.in.clip = 0;
+			r.step();
+			r.in.clip = 50;
+			r.step();
+			CHECK(r.machine.NeedsCycle());
+			r.trigger(true);
+			r.moveTo(kBolt);
+			CHECK(r.machine.GetState() == State::Idle);
+			r.trigger(false);
+			r.trigger(true);
+			CHECK(r.machine.GetState() == State::HoldingBolt);
+		}
+
+		// The trigger doesn't take a magazine or a shell
+		{
+			Rig r(10, 50, 100, false);
+			r.moveTo(kSocket);
+			r.trigger(true);
+			CHECK(r.machine.GetState() == State::Idle);
+			r.trigger(false);
+
+			Rig s(3, 8, 50, true);
+			s.moveTo(kWaist);
+			s.trigger(true);
+			CHECK(s.machine.GetState() == State::Idle);
 		}
 
 		// Reset (weapon changed) clears everything

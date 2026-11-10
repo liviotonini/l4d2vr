@@ -38,7 +38,8 @@ namespace Reload
 		HandMath::Vec3 waist;
 		float unitsPerMeter = 43.2f;
 		float boltTravel = 2.5f;    // game units
-		bool grip = false;
+		bool grip = false;          // takes the magazine and the shells
+		bool trigger = false;       // the left trigger: takes the bolt, so the grip can keep holding the weapon
 		bool ejectPressed = false;  // the reload button: lets the magazine fall
 		int clip = 0;
 		int capacity = 0;
@@ -64,8 +65,9 @@ namespace Reload
 		bool MagazineIsOut() const { return m_MagazineOut; }
 		float BoltPull() const { return m_State == State::HoldingBolt ? m_BoltPull : 0.0f; }
 
-		// The left grip is being used by the reload, so it isn't taking items or holding the weapon with both hands
-		bool HandIsBusy() const { return m_State == State::HoldingOld || m_State == State::HoldingFresh || m_State == State::HoldingBolt || m_PressUsed; }
+		// The left grip is being used by the reload, so it isn't taking items or holding the weapon with both hands.
+		// The bolt is pulled with the trigger, so the grip can keep holding the weapon (the pump of a shotgun).
+		bool HandIsBusy() const { return m_State == State::HoldingOld || m_State == State::HoldingFresh || m_PressUsed; }
 
 		bool BlocksFire(int clip, bool shells) const
 		{
@@ -86,6 +88,7 @@ namespace Reload
 			m_BoltPull = 0.0f;
 			m_BoltPulledThisGrab = false;
 			m_GripWasDown = false;
+			m_TriggerWasDown = false;
 			m_PressUsed = false;
 			m_LastClip = -1;
 		}
@@ -99,6 +102,9 @@ namespace Reload
 			m_GripWasDown = in.grip;
 			if (released)
 				m_PressUsed = false;
+
+			const bool triggerPressed = in.trigger && !m_TriggerWasDown;
+			m_TriggerWasDown = in.trigger;
 
 			const float toSocket = Length(in.palm - in.socket);
 			const float toWaist = Length(in.palm - in.waist);
@@ -128,13 +134,12 @@ namespace Reload
 					m_State = State::NeedFresh;
 					events |= Event_Ejected;
 				}
-				else if (pressed && m_NeedsCycle && in.clip > 0 && in.hasBolt && toBolt < kBoltGrabRadius * meters)
+				else if (triggerPressed && m_NeedsCycle && in.clip > 0 && in.hasBolt && toBolt < kBoltGrabRadius * meters)
 				{
 					m_State = State::HoldingBolt;
 					m_BoltGrabPalm = in.palm;
 					m_BoltPull = 0.0f;
 					m_BoltPulledThisGrab = false;
-					m_PressUsed = true;
 					events |= Event_GrabbedBolt;
 				}
 				else if (pressed && !in.shells && canReload && toSocket < kGrabRadius * meters)
@@ -213,7 +218,7 @@ namespace Reload
 					events |= Event_BoltPulled;
 				}
 
-				if (!in.grip)
+				if (!in.trigger)
 				{
 					m_State = State::Idle;
 					m_BoltPull = 0.0f;
@@ -233,6 +238,7 @@ namespace Reload
 		bool m_BoltPulledThisGrab = false;
 		HandMath::Vec3 m_BoltGrabPalm;
 		bool m_GripWasDown = false;
+		bool m_TriggerWasDown = false;
 		bool m_PressUsed = false;
 		int m_LastClip = -1;
 	};
