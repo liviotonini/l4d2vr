@@ -152,6 +152,26 @@ namespace
 		// The right hand is mirrored: its palm faces the left
 		const Mat34 rightPose = rig.HandFromFrame(HandRig::Right, forward, up, wrist);
 		CHECK_NEAR(Dot(Cross(Axis(rightPose, 0), Axis(rightPose, 1)), Axis(rightPose, 2)), 1.0f, 0.001f);
+
+		// Moving the right hand of the animation onto a target (an item held in the fist): the hand gets there and
+		// the fingers keep their grip on it
+		{
+			const int rightHandBone = rig.HandBone(HandRig::Right);
+			std::vector<Mat34> moved = rest;
+			const Mat34 move = Multiply(rightPose, InvertRigid(rest[rightHandBone]));
+			rig.MoveHand(HandRig::Right, move, moved.data());
+			CHECK_NEAR(Length(Origin(moved[rightHandBone]) - Origin(rightPose)), 0.0f, 0.001f);
+			CHECK_NEAR(Dot(Axis(moved[rightHandBone], 0), Axis(rightPose, 0)), 1.0f, 0.001f);
+			for (size_t i = 0; i < moved.size(); ++i)
+			{
+				const Mat34 before = Multiply(InvertRigid(rest[rightHandBone]), rest[i]);
+				const Mat34 after = Multiply(InvertRigid(moved[rightHandBone]), moved[i]);
+				// Fingers keep their place on the hand, the rest of the body doesn't move
+				if (Length(Origin(moved[i]) - Origin(rest[i])) > 0.001f)
+					CHECK_NEAR(Length(Origin(after) - Origin(before)), 0.0f, 0.01f);
+			}
+			CHECK_NEAR(Length(Origin(moved[leftHand]) - Origin(rest[leftHand])), 0.0f, 0.0001f);
+		}
 	}
 }
 

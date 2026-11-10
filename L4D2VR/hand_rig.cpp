@@ -268,6 +268,17 @@ void HandRig::PoseHand(Side s, const Mat34 &hand, const float curls[FingerCount]
 	}
 }
 
+void HandRig::MoveHand(Side s, const Mat34 &move, Mat34 *bones) const
+{
+	const SideData &side = m_Sides[s];
+	if (side.hand < 0)
+		return;
+
+	bones[side.hand] = Multiply(move, bones[side.hand]);
+	for (const Joint &joint : side.joints)
+		bones[joint.bone] = Multiply(move, bones[joint.bone]);
+}
+
 void HandRig::BlendHand(Side s, const Mat34 *from, const Mat34 *to, float amount, Mat34 *bones) const
 {
 	const SideData &side = m_Sides[s];

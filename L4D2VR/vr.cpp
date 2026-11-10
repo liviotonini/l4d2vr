@@ -1907,8 +1907,8 @@ namespace
 
         { "grenade (behind the shoulder)", false, 3, 5, [](const HandOnBody &hand, float)
             { return InRange(hand.distance, Tuned(14.0f), Tuned(2.0f)) && hand.side <= -0.4f && hand.drop <= Tuned(8.0f); } },
-        { "pills or adrenaline (leg)", false, 5, 3, [](const HandOnBody &hand, float height)
-            { return InRange(hand.distance, Tuned(22.5f) * height, Tuned(5.0f)) && hand.side <= -0.8f && InRange(hand.drop, Tuned(21.5f) * height, Tuned(5.0f)); } },
+        // "pills or adrenaline (leg)" is off for now: it's where the magazines are, and took the pills instead of one.
+        // Pills and adrenaline are still taken behind the shoulder when the grenade is already in hand.
         { "medkit (back)", false, 4, 4, [](const HandOnBody &hand, float height)
             { return hand.forward < -0.9f && InRange(hand.drop, Tuned(11.9f) * height, Tuned(5.0f)); } },
     };
@@ -2448,6 +2448,16 @@ void VR::ParseConfigFile()
     m_ShareBodyMovement = userConfig["ShareBodyMovement"] != "false"; // enabled if missing from config
     m_ShowOtherPlayersMovement = userConfig["ShowOtherPlayersMovement"] != "false"; // enabled if missing from config
 
+    // Where the magazines and shells are at the waist, meters from the eyes (UpdateManualReload)
+    auto readFloat = [&userConfig](const char *key, float fallback, float minimum, float maximum)
+    {
+        const std::string &text = userConfig[key];
+        return text.empty() ? fallback : std::clamp(std::stof(text), minimum, maximum);
+    };
+    m_MagazinePouchSide = readFloat("MagazinePouchSide", m_MagazinePouchSide, 0.0f, 0.6f);
+    m_MagazinePouchForward = readFloat("MagazinePouchForward", m_MagazinePouchForward, -0.3f, 0.5f);
+    m_MagazinePouchBelowEyes = readFloat("MagazinePouchBelowEyes", kMagazinePouchBelowEyesPerHeight * m_PlayerHeightInMeters, 0.2f, 1.2f);
+
     // Fine tuning of the hand, only by editing config.txt
     Vector handOffset = m_HandOffsetMeters;
     if (sscanf_s(userConfig["HandOffsetMeters"].c_str(), "%f,%f,%f", &handOffset.x, &handOffset.y, &handOffset.z) == 3)
@@ -2519,6 +2529,9 @@ bool VR::SaveConfigFile()
         { "InteractWithHand", ConfigBoolString(m_InteractWithHand) },
         { "WristHudEnabled", ConfigBoolString(m_WristHudEnabled) },
         { "ManualReload", ConfigBoolString(m_ManualReloadEnabled) },
+        { "MagazinePouchSide", ConfigFloatString(m_MagazinePouchSide) },
+        { "MagazinePouchForward", ConfigFloatString(m_MagazinePouchForward) },
+        { "MagazinePouchBelowEyes", ConfigFloatString(m_MagazinePouchBelowEyes) },
         { "ShareBodyMovement", ConfigBoolString(m_ShareBodyMovement) },
         { "ShowOtherPlayersMovement", ConfigBoolString(m_ShowOtherPlayersMovement) },
     };

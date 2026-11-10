@@ -348,6 +348,15 @@ public:
 	int m_ReloadClip = 0;
 	HandMath::Vec3 m_WaistWorld;
 	HandMath::Vec3 m_WaistForward;
+	// Where the magazines and shells are, meters from the eyes looking straight ahead: to the side of the other hand,
+	// forward, and down. The default height follows the player's height.
+	static constexpr float kMagazinePouchBelowEyesPerHeight = 0.36f;
+	float m_MagazinePouchSide = 0.24f;
+	float m_MagazinePouchForward = 0.10f;
+	float m_MagazinePouchBelowEyes = kMagazinePouchBelowEyesPerHeight * 1.8f;
+	bool m_ReloadPouchVisible = false;   // a magazine is drawn at the waist, it can be in view
+	float m_PumpHandShift = 0.0f;        // game units the hand holding a pump goes back, from the last weapon draw
+	const HandRig *m_ArmsRig = nullptr;  // of the first person arms last drawn
 
 	// Other players' movements (pose_relay.cpp, world_pose.cpp)
 	bool m_ShareBodyMovement = true;       // the others see my arms
@@ -423,6 +432,10 @@ public:
 	bool ManualReloadHandIsBusy() const;
 	void ClearManualReloadCache();
 	bool BuildReloadViewmodel(const void *studioHeader, const void *customBones, void *outBones, void *outDetached, bool &drawDetached);
+	void PlayWeaponSound(const char *sound);
+	static bool IsHeldInTheHand(int weaponId);
+	bool GetRightHandTarget(const HandRig &rig, HandMath::Mat34 &hand) const;
+	const void *ApplyItemInHand(const void *studioHeader, const void *customBones, void *storage);
 	HandMath::Vec3 GetLeftPalm() const;
 	HandMath::Mat34 GetLeftHandGrabFrame() const;
 	HandMath::Vec3 GetRightWristAbs() const;

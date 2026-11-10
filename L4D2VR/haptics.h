@@ -27,6 +27,13 @@ namespace HapticEffects
 	inline const HapticEffect Confirm = { { 0.0f, 0.04f, 160.0f, 0.3f } };
 	// Two short, gentle taps: something was cancelled
 	inline const HapticEffect Cancel = { { 0.0f, 0.035f, 120.0f, 0.3f }, { 0.09f, 0.035f, 120.0f, 0.3f } };
+	// Weapon handling, strong enough to be felt through a Quest controller (Confirm hardly is).
+	// A part of the weapon taken in the hand: magazine, shell, bolt
+	inline const HapticEffect Take = { { 0.0f, 0.05f, 170.0f, 0.45f } };
+	// It went in, or the bolt reached the end: felt in both hands, like the weapon's own click
+	inline const HapticEffect Click = { { 0.0f, 0.06f, 110.0f, 0.6f } };
+	// A faint tick: the hand is where it can take something
+	inline const HapticEffect Hint = { { 0.0f, 0.025f, 220.0f, 0.25f } };
 }
 
 // Controller vibrations through SteamVR Input: the /actions/base/out/vibration_left and vibration_right actions, which

@@ -24,6 +24,7 @@ namespace
 			in.boltAxis = Vec3(1.0f, 0.0f, 0.0f);
 			in.waist = kWaist;
 			in.palm = kNowhere;
+			in.held = kNowhere;
 			in.clip = clip;
 			in.capacity = capacity;
 			in.reserve = reserve;
@@ -33,7 +34,8 @@ namespace
 		}
 
 		void step() { events = machine.Update(in); in.ejectPressed = false; }
-		void moveTo(const Vec3 &palm) { in.palm = palm; step(); }
+		// What the hand holds is in the palm, unless a test puts it elsewhere
+		void moveTo(const Vec3 &palm) { in.palm = palm; in.held = palm; step(); }
 		void grip(bool down) { in.grip = down; step(); }
 		void trigger(bool down) { in.trigger = down; step(); }
 	};
@@ -142,23 +144,29 @@ namespace
 		CHECK(r.machine.GetState() != State::HoldingBolt);
 		r.grip(false);
 
-		// Grab it and pull only a little
+		// Until then it's drawn locked back
+		CHECK(r.machine.BoltLockedBack());
+		CHECK_NEAR(r.machine.BoltPull(), r.in.boltTravel, 0.001f);
+
+		// Grab it and pull only a little: it stays back, still locked
 		r.trigger(true);
 		CHECK(r.machine.GetState() == State::HoldingBolt);
 		CHECK(r.events & Event_GrabbedBolt);
 		CHECK(!r.machine.HandIsBusy()); // the grip can keep holding the weapon
 		r.moveTo(kBolt + Vec3(-0.5f, 0.0f, 0.0f));
-		CHECK_NEAR(r.machine.BoltPull(), 0.5f, 0.001f);
+		CHECK_NEAR(r.machine.BoltPull(), r.in.boltTravel, 0.001f);
 		CHECK(r.machine.NeedsCycle());
+		CHECK(!(r.events & Event_BoltPulled));
 
 		// Moving it forward doesn't count, and it can't go past its travel
 		r.moveTo(kBolt + Vec3(3.0f, 0.0f, 0.0f));
-		CHECK_NEAR(r.machine.BoltPull(), 0.0f, 0.001f);
+		CHECK(r.machine.NeedsCycle());
 		r.moveTo(kBolt + Vec3(-9.0f, 0.0f, 0.0f));
 		CHECK_NEAR(r.machine.BoltPull(), r.in.boltTravel, 0.001f);
 		CHECK(r.events & Event_BoltPulled);
 		CHECK(!r.machine.NeedsCycle());
-		CHECK(!r.machine.BlocksFire(50, false));
+		CHECK(!r.machine.BoltLockedBack());
+		CHECK(r.machine.BlocksFire(50, false)); // still held back
 
 		// Pressing the grip meanwhile doesn't let go of it
 		r.grip(true);
@@ -166,7 +174,15 @@ namespace
 		r.grip(false);
 		CHECK(r.machine.GetState() == State::HoldingBolt);
 
+		// Going forward with the hand, it follows
+		r.moveTo(kBolt + Vec3(-0.5f, 0.0f, 0.0f));
+		CHECK_NEAR(r.machine.BoltPull(), 0.5f, 0.001f);
+		CHECK(r.machine.BlocksFire(50, false)); // more than a tenth of the way back
+		r.moveTo(kBolt + Vec3(-0.1f, 0.0f, 0.0f));
+		CHECK(!r.machine.BlocksFire(50, false));
+
 		r.trigger(false);
+		CHECK(r.events & Event_BoltReleased);
 		CHECK(r.machine.GetState() == State::Idle);
 		CHECK_NEAR(r.machine.BoltPull(), 0.0f, 0.001f);
 
@@ -183,7 +199,163 @@ namespace
 		r.in.ejectPressed = true;
 		r.step();
 		CHECK(r.events & Event_BoltPulled);
+		CHECK(r.events & Event_BoltReleased);
 		CHECK(r.machine.GetState() == State::Idle); // didn't drop the magazine
+
+		// Pulled when it isn't needed, it still moves and clicks, and changes nothing
+		CHECK(!r.machine.NeedsCycle());
+		r.moveTo(kBolt);
+		r.trigger(true);
+		CHECK(r.machine.GetState() == State::HoldingBolt);
+		r.moveTo(kBolt + Vec3(-1.0f, 0.0f, 0.0f));
+		CHECK_NEAR(r.machine.BoltPull(), 1.0f, 0.001f);
+		r.moveTo(kBolt + Vec3(-9.0f, 0.0f, 0.0f));
+		CHECK(r.events & Event_BoltPulled);
+		r.trigger(false);
+		CHECK(r.events & Event_BoltReleased);
+		CHECK(!r.machine.NeedsCycle());
+
+		// An empty weapon racked with nothing to chamber still needs it afterwards
+		r.in.clip = 0;
+		r.step();
+		CHECK(r.machine.NeedsCycle());
+		r.moveTo(kBolt);
+		r.trigger(true);
+		r.moveTo(kBolt + Vec3(-9.0f, 0.0f, 0.0f));
+		CHECK(r.events & Event_BoltPulled);
+		CHECK(r.machine.NeedsCycle());
+		r.trigger(false);
+	}
+
+	void TestMagazineFromWaist()
+	{
+		printf("manual reload: new magazine straight from the waist\n");
+		Rig r(7, 15, 999, false);
+
+		// Taken without taking the old one out first
+		r.moveTo(kWaist);
+		r.grip(true);
+		CHECK(r.events & Event_GrabbedFresh);
+		CHECK(r.machine.GetState() == State::HoldingFresh);
+		CHECK(r.machine.HandIsBusy());
+		CHECK(!r.machine.MagazineIsOut());
+		CHECK(!r.machine.BlocksFire(7, false)); // the old one is still in
+
+		// Let go: back to the waist, nothing changed
+		r.grip(false);
+		CHECK(r.machine.GetState() == State::Idle);
+		CHECK(!r.machine.BlocksFire(7, false));
+
+		// Into the weapon: the old one comes out as it goes in
+		r.grip(true);
+		r.moveTo(kSocket + Vec3(0.0f, 0.0f, -3.0f));
+		CHECK(r.events & Event_Inserted);
+		CHECK(r.events & Event_MagazineOut);
+		CHECK(r.machine.GetState() == State::Idle);
+		CHECK(!r.machine.MagazineIsOut());
+		r.grip(false);
+
+		// It goes in when the magazine reaches the weapon, wherever the palm is
+		Rig s(7, 15, 999, false);
+		s.moveTo(kWaist);
+		s.grip(true);
+		s.in.palm = kSocket + Vec3(0.0f, 0.0f, -6.0f); // 14 cm away
+		s.in.held = kSocket + Vec3(0.0f, 0.0f, -3.0f); // the magazine sticks out of the hand towards it
+		s.step();
+		CHECK(s.events & Event_Inserted);
+
+		// Full: nothing to take
+		Rig full(15, 15, 999, false);
+		full.moveTo(kWaist);
+		full.grip(true);
+		CHECK(full.machine.GetState() == State::Idle);
+		CHECK(!full.machine.HandIsBusy()); // free to take an item from the body
+	}
+
+	void TestPumpEveryShot()
+	{
+		printf("manual reload: pump after every shot\n");
+		Rig r(8, 8, 50, true);
+		r.in.pumpEveryShot = true;
+		r.step();
+		CHECK(!r.machine.NeedsCycle());
+		CHECK(!r.machine.BlocksFire(8, true));
+
+		// A shot: the pump has to be worked before the next
+		r.in.clip = 7;
+		r.step();
+		CHECK(r.machine.NeedsCycle());
+		CHECK(r.machine.BlocksFire(7, true));
+		CHECK(!r.machine.BoltLockedBack()); // the pump stays forward
+		CHECK_NEAR(r.machine.BoltPull(), 0.0f, 0.001f);
+
+		// Holding the shotgun with both hands, the trigger takes the pump from wherever the hand is
+		r.in.holdsPump = true;
+		r.grip(true);
+		r.moveTo(kBolt + Vec3(4.0f, 0.0f, 3.0f)); // 12 cm from where the pump is measured
+		r.trigger(true);
+		CHECK(r.machine.GetState() == State::HoldingBolt);
+		CHECK(!r.machine.HandIsBusy());
+
+		// Back: it's drawn following the hand, and chambers the next shell at the end
+		r.moveTo(kBolt + Vec3(4.0f - 1.5f, 0.0f, 3.0f));
+		CHECK_NEAR(r.machine.BoltPull(), 1.5f, 0.001f);
+		CHECK(r.machine.NeedsCycle());
+		r.moveTo(kBolt + Vec3(4.0f - 6.0f, 0.0f, 3.0f));
+		CHECK(r.events & Event_BoltPulled);
+		CHECK(!r.machine.NeedsCycle());
+		CHECK(r.machine.BlocksFire(7, true)); // not while it's back
+
+		// And forward again
+		r.moveTo(kBolt + Vec3(4.0f, 0.0f, 3.0f));
+		CHECK(!r.machine.BlocksFire(7, true));
+		r.trigger(false);
+		CHECK(r.events & Event_BoltReleased);
+
+		// Two more shots, each needing it
+		for (int clip = 6; clip >= 5; --clip)
+		{
+			r.in.clip = clip;
+			r.step();
+			CHECK(r.machine.BlocksFire(clip, true));
+			r.trigger(true);
+			r.moveTo(kBolt + Vec3(4.0f - 6.0f, 0.0f, 3.0f));
+			r.moveTo(kBolt + Vec3(4.0f, 0.0f, 3.0f));
+			r.trigger(false);
+			CHECK(!r.machine.BlocksFire(clip, true));
+		}
+
+		// Loading a shell isn't a shot
+		r.moveTo(kWaist);
+		r.trigger(false);
+		r.grip(false);
+		r.grip(true);
+		r.moveTo(kSocket);
+		CHECK(r.events & Event_ShellInserted);
+		r.grip(false);
+		r.in.clip = 6;
+		r.step();
+		CHECK(!r.machine.NeedsCycle());
+
+		// Without both hands on it, the trigger only takes the pump near it
+		r.in.holdsPump = false;
+		r.in.clip = 5;
+		r.step();
+		r.moveTo(kNowhere);
+		r.trigger(true);
+		CHECK(r.machine.GetState() == State::Idle);
+		r.trigger(false);
+		r.moveTo(kBolt);
+		r.trigger(true);
+		CHECK(r.machine.GetState() == State::HoldingBolt);
+		r.trigger(false);
+
+		// Without the mod on the host there is no bolt to work: the game pumps by itself
+		Rig g(8, 8, 50, true, false);
+		g.in.pumpEveryShot = true;
+		g.in.clip = 7;
+		g.step();
+		CHECK(!g.machine.NeedsCycle());
 	}
 
 	void TestShells()
@@ -252,8 +424,9 @@ namespace
 		CHECK(!r.machine.HandIsBusy());
 		r.moveTo(kBolt + Vec3(-9.0f, 0.0f, 0.0f));
 		CHECK(r.events & Event_BoltPulled);
-		CHECK(!r.machine.BlocksFire(1, true));
+		CHECK(r.machine.BlocksFire(1, true)); // until it goes forward again
 		r.trigger(false);
+		CHECK(!r.machine.BlocksFire(1, true));
 		r.grip(false);
 		CHECK(r.machine.GetState() == State::Idle);
 	}
@@ -369,6 +542,8 @@ void RunReloadTests()
 {
 	TestMagazine();
 	TestEmptyAndBolt();
+	TestMagazineFromWaist();
+	TestPumpEveryShot();
 	TestShells();
 	TestEdges();
 }

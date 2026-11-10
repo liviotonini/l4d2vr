@@ -23,6 +23,8 @@ namespace
 
 	// The pose of the weapon and the hand before the throw started, relative to the weapon's frame, per model
 	std::unordered_map<const void *, std::vector<Mat34>> g_ThrowPoses;
+	// The right hand bone of each weapon model in first person (-1 if it has none)
+	std::unordered_map<const void *, int> g_ViewmodelRightHands;
 	// After the throw the hand stays as it was until the game changes weapon
 	const auto kThrownGrenadeTime = std::chrono::milliseconds(1500);
 
@@ -57,8 +59,61 @@ namespace
 void VR::ClearModelCaches()
 {
 	m_HandModels.clear();
+	m_ArmsRig = nullptr;
 	g_ThrowPoses.clear();
+	g_ViewmodelRightHands.clear();
 	Hooks::m_ModelKinds.clear();
+}
+
+// Items held in the fist instead of by a grip: the game's animations hold them away from where the pistol's grip is,
+// so the hand and the item are put on the controller instead
+bool VR::IsHeldInTheHand(int weaponId)
+{
+	return IsThrowableWeapon(weaponId) || weaponId == C_WeaponCSBase::PAIN_PILLS || weaponId == C_WeaponCSBase::ADRENALINE;
+}
+
+// The right hand bone where the controller is: the same place and angle as the left hand on its controller
+bool VR::GetRightHandTarget(const HandRig &rig, Mat34 &hand) const
+{
+	if (m_RightControllerDeviceIndex == vr::k_unTrackedDeviceIndexInvalid || !m_Poses[m_RightControllerDeviceIndex].bPoseIsValid)
+		return false;
+
+	const Vector forward = VectorRotate(m_RightControllerForwardRaw, m_RightControllerRightRaw, kHandGripTilt);
+	const Vector up = VectorRotate(m_RightControllerUpRaw, m_RightControllerRightRaw, kHandGripTilt);
+	const Vector wrist = m_RightControllerPosAbs + (forward * m_HandOffsetMeters.x + up * m_HandOffsetMeters.z) * m_VRScale;
+
+	hand = rig.HandFromFrame(HandRig::Right, ToVec3(forward), ToVec3(up), ToVec3(wrist));
+	return IsFinite(hand);
+}
+
+// The weapon model of an item held in the fist moves with the hand, so the item stays in it (see BuildFirstPersonHands
+// for the hand itself). Returns the bones to draw with.
+const void *VR::ApplyItemInHand(const void *studioHeader, const void *customBones, void *storage)
+{
+	if (!IsHeldInTheHand(m_ActiveWeaponId) || !m_ArmsRig || !Studio::IsValid(studioHeader))
+		return customBones;
+
+	const int boneCount = Studio::BoneCount(studioHeader);
+	if (boneCount <= 0 || boneCount > Studio::kMaxBones)
+		return customBones;
+
+	auto found = g_ViewmodelRightHands.find(studioHeader);
+	if (found == g_ViewmodelRightHands.end())
+		found = g_ViewmodelRightHands.emplace(studioHeader, Studio::FindBone(studioHeader, "ValveBiped.Bip01_R_Hand")).first;
+	const int handBone = found->second;
+	if (handBone < 0 || handBone >= boneCount)
+		return customBones;
+
+	Mat34 target;
+	if (!GetRightHandTarget(*m_ArmsRig, target))
+		return customBones;
+
+	const Mat34 *source = (const Mat34 *)customBones;
+	const Mat34 move = Multiply(target, InvertRigid(source[handBone]));
+	Mat34 *bones = (Mat34 *)storage;
+	for (int i = 0; i < boneCount; ++i)
+		bones[i] = Multiply(move, source[i]);
+	return bones;
 }
 
 bool VR::IsWeaponReloading() const
@@ -175,21 +230,27 @@ bool VR::BuildFirstPersonHands(const void *studioHeader, const void *customBones
 	const HandRig &rig = model.rig;
 	if (!rig.HasHand(HandRig::Left) || !rig.HasHand(HandRig::Right))
 		return false;
+	m_ArmsRig = &rig;
 
 	Mat34 *bones = (Mat34 *)outBones;
 	memcpy(bones, customBones, boneCount * sizeof(Mat34));
 
 	// Melee weapons are placed on the controller (see meleeViewmodelOffsets), so the hand has to be there too. The
 	// animation has the hand somewhere else on the handle for each weapon.
-	if (m_Game->m_IsMeleeWeaponActive && m_RightControllerDeviceIndex != vr::k_unTrackedDeviceIndexInvalid && m_Poses[m_RightControllerDeviceIndex].bPoseIsValid)
-	{
-		const Vector forward = VectorRotate(m_RightControllerForwardRaw, m_RightControllerRightRaw, kHandGripTilt);
-		const Vector up = VectorRotate(m_RightControllerUpRaw, m_RightControllerRightRaw, kHandGripTilt);
-		const Vector wrist = m_RightControllerPosAbs + (forward * m_HandOffsetMeters.x + up * m_HandOffsetMeters.z) * m_VRScale;
+	// Items held in the fist go to the controller with the hand, keeping the fingers of the animation (ApplyItemInHand).
+	Mat34 rightHand;
+	if (m_Game->m_IsMeleeWeaponActive && GetRightHandTarget(rig, rightHand))
+		rig.PoseHand(HandRig::Right, rightHand, kMeleeGrip, bones);
+	else if (IsHeldInTheHand(m_ActiveWeaponId) && GetRightHandTarget(rig, rightHand))
+		rig.MoveHand(HandRig::Right, Multiply(rightHand, InvertRigid(bones[rig.HandBone(HandRig::Right)])), bones);
 
-		const Mat34 hand = rig.HandFromFrame(HandRig::Right, ToVec3(forward), ToVec3(up), ToVec3(wrist));
-		if (IsFinite(hand))
-			rig.PoseHand(HandRig::Right, hand, kMeleeGrip, bones);
+	// Holding a pump action by the pump, the hand goes back and forth with it, and not with the game's own pumping
+	// (see BuildReloadViewmodel)
+	if (m_PumpHandShift != 0.0f && m_LeftHandFollow < 1.0f)
+	{
+		Mat34 move;
+		SetAxis(move, 3, ToVec3(m_ViewmodelForward) * -m_PumpHandShift);
+		rig.MoveHand(HandRig::Left, move, bones);
 	}
 
 	if (m_LeftHandFollow > 0.0f)
@@ -229,7 +290,7 @@ bool VR::BuildFirstPersonHands(const void *studioHeader, const void *customBones
 			Mat34 *posed = (Mat34 *)storage;
 			memcpy(posed, bones, boneCount * sizeof(Mat34));
 			rig.PoseHand(HandRig::Left, hand, curls, posed);
-			rig.BlendHand(HandRig::Left, (const Mat34 *)customBones, posed, m_LeftHandFollow, bones);
+			rig.BlendHand(HandRig::Left, bones, posed, m_LeftHandFollow, bones);
 		}
 	}
 

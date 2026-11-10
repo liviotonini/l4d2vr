@@ -767,6 +767,11 @@ void Hooks::dDrawModelExecute(void *ecx, void *edx, void *state, const ModelRend
 	if (pCustomBoneToWorld && (kind == ModelKind::Viewmodel || kind == ModelKind::FirstPersonArms))
 		pCustomBoneToWorld = (void *)m_VR->ApplyThrowPose(*(const void **)state, pCustomBoneToWorld, throwPose);
 
+	// Grenades, pills and adrenaline go with the hand to the controller
+	alignas(16) unsigned char itemPose[sizeof(HandMath::Mat34) * Studio::kMaxBones];
+	if (pCustomBoneToWorld && kind == ModelKind::Viewmodel)
+		pCustomBoneToWorld = (void *)m_VR->ApplyItemInHand(*(const void **)state, pCustomBoneToWorld, itemPose);
+
 	if (kind == ModelKind::Viewmodel && pCustomBoneToWorld)
 	{
 		Diagnostics::ScopedTimer timer(Diagnostics::Section_Models);

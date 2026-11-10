@@ -524,7 +524,13 @@ void SettingsMenu::DrawMenu()
 			ImGui::BeginChild("Page", ImVec2(0.0f, -footerHeight));
 			DrawSlider("Controller angle", "Tilts the aim relative to the controller (default -45).", settings.m_ControllerAngleAdjustment, -90.0f, 90.0f, 1.0f, "%.0f deg");
 			DrawSlider("Weapon side offset", "Moves the weapon sideways from the hand, in game units.", settings.m_WeaponHorizontalPositionAdjustment, -10.0f, 10.0f, 0.5f, "%.1f");
-			DrawCheckbox("Reload with your hands", "Take the magazine out with the left grip, take a new one from your left side at the waist and put it in. Shotguns load one shell at a time. When the weapon ran empty, put the left hand on the bolt or the pump, hold the left trigger and pull it back. The reload button lets the magazine fall, or works the bolt. In a game whose host doesn't have this version of the mod, the game does the reload after you put the magazine in.", settings.m_ManualReloadEnabled);
+			DrawCheckbox("Reload with your hands", "Take a new magazine from your left side at the waist with the left grip and put it in the weapon: the old one falls out. You can also pull the old one out first. Shotguns load one shell at a time. When the weapon ran empty, put the left hand on the bolt or the slide, hold the left trigger and pull it back. Pump shotguns need the pump after every shot: holding the shotgun with both hands, hold the left trigger and pull the left hand back. The reload button lets the magazine fall, or works the bolt. In a game whose host doesn't have this version of the mod, the game does the reload after you put the magazine in.", settings.m_ManualReloadEnabled);
+
+			ImGui::BeginDisabled(!settings.m_ManualReloadEnabled);
+			DrawSlider("Magazines: to the side", "How far to the side of your body the magazines and shells are, from the middle of your head.", settings.m_MagazinePouchSide, 0.0f, 0.6f, 0.01f, "%.2f m");
+			DrawSlider("Magazines: forward", "How far in front of your head the magazines and shells are. Negative is behind.", settings.m_MagazinePouchForward, -0.3f, 0.5f, 0.01f, "%.2f m");
+			DrawSlider("Magazines: below the eyes", "How far below your eyes the magazines and shells are.", settings.m_MagazinePouchBelowEyes, 0.2f, 1.2f, 0.01f, "%.2f m");
+			ImGui::EndDisabled();
 			DrawCheckbox("Interact with your hand", "Doors, items and teammates are used by pointing your weapon hand at them instead of looking at them. In a game you joined, the host needs this version of the mod.", settings.m_InteractWithHand);
 			DrawCheckbox("Shove by swinging", "Shove by swinging the left controller (or the right one when not holding a melee weapon).", settings.m_IsTrackingManualPush);
 			DrawSlider("Melee swing speed", "How fast the controller has to move to hit with a melee weapon.", settings.m_MeleeSwingVelocityRequired, 0.5f, 4.0f, 0.05f, "%.2f m/s");

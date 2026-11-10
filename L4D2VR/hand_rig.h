@@ -40,6 +40,9 @@ public:
 	// Places the hand and its fingers. curls: 0 = open, 1 = closed. The rest pose of the model is curl kRelaxedCurl.
 	void PoseHand(Side side, const HandMath::Mat34 &hand, const float curls[FingerCount], HandMath::Mat34 *bones) const;
 
+	// Moves the hand and its fingers rigidly, keeping their pose: `move` is applied in world space
+	void MoveHand(Side side, const HandMath::Mat34 &move, HandMath::Mat34 *bones) const;
+
 	// Copies the transforms of a hand from `from` to `to`, gradually
 	void BlendHand(Side side, const HandMath::Mat34 *from, const HandMath::Mat34 *to, float amount, HandMath::Mat34 *bones) const;
 
