@@ -2,6 +2,7 @@
 #include <iostream>
 #include <unordered_map>
 #include "MinHook.h"
+#include "hand_math.h"
 
 class Game;
 class VR;
@@ -163,6 +164,15 @@ public:
 	static inline std::unordered_map<const void *, ModelKind> m_ModelKinds;
 	static ModelKind GetModelKind(const void *model);
 	static inline bool m_LoggedArmsDraw = false;
+
+	// Models of what the player carries, drawn with the weapon (VR::DrawBodyModels): DrawModel is asked to draw them,
+	// and dDrawModelExecute gives them their place
+	static void DrawBodyModel(int flags, void *renderable, int entityIndex, const void *model, const HandMath::Mat34 &frame);
+	static void DrawModelForVR(void *ecx, void *state, const ModelRenderInfo_t &info, void *pCustomBoneToWorld);
+	static inline bool m_BodyModelChecked = false;
+	static inline bool m_BodyModelsBroken = false;
+	static inline bool m_LoggedBodyModel = false;
+	static inline bool m_LoggedBodyModelMiss = false;
 
 	Hooks() {};
 	Hooks(Game *game);

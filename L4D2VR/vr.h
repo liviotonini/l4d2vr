@@ -354,9 +354,29 @@ public:
 	float m_MagazinePouchSide = 0.24f;
 	float m_MagazinePouchForward = 0.10f;
 	float m_MagazinePouchBelowEyes = kMagazinePouchBelowEyesPerHeight * 1.8f;
-	bool m_ReloadPouchVisible = false;   // a magazine is drawn at the waist, it can be in view
+	bool m_ReloadPouchVisible = false;   // the waist can be in view, the bag is drawn
 	float m_PumpHandShift = 0.0f;        // game units the hand holding a pump goes back, from the last weapon draw
 	const HandRig *m_ArmsRig = nullptr;  // of the first person arms last drawn
+	// The mark on the weapon where the bolt is taken (manual_reload.cpp)
+	vr::VROverlayHandle_t m_BoltMarkerHandle = vr::k_ulOverlayHandleInvalid;
+	bool m_BoltMarkerVisible = false;
+	bool m_BoltMarkerFailed = false;
+
+	// What the player carries, seen on the body (body_items.cpp): the ammo bag, pills and grenades on the chest
+	struct BodyModelDraw
+	{
+		const void *model = nullptr;
+		HandMath::Mat34 frame;
+	};
+	static constexpr int kMaxBodyDraws = 3;
+	BodyModelDraw m_BodyDraws[kMaxBodyDraws];
+	int m_BodyDrawCount = 0;
+	bool m_AmmoBagDrawn = false;           // the game has the bag's model: the magazines don't hang at the waist themselves
+	int m_ChestItemIds[2] = { 0, 0 };      // carried and not in the hand: pills or adrenaline, a grenade
+	HandMath::Vec3 m_ChestItemPoints[2];
+	// From the head of other VR players' poses to the head of their models, from the last time they were drawn
+	HandMath::Vec3 m_RemoteHeadOffset[33];
+	bool m_RemoteHeadOffsetValid[33] = {};
 
 	// Other players' movements (pose_relay.cpp, world_pose.cpp)
 	bool m_ShareBodyMovement = true;       // the others see my arms
@@ -433,6 +453,16 @@ public:
 	void ClearManualReloadCache();
 	bool BuildReloadViewmodel(const void *studioHeader, const void *customBones, void *outBones, void *outDetached, bool &drawDetached);
 	void PlayWeaponSound(const char *sound);
+	void UpdateBoltMarker(bool show, bool inReach);
+	bool ManualReloadPumpsByHand() const;
+	bool ManualReloadHoldsFirePose();
+	bool ManualReloadUsesLeftHand() const;
+	void ClearBodyModels();
+	void UpdateBodyItems();
+	void DrawBodyModels(int flags, void *renderable, int entityIndex);
+	int GetChestItemSlotAt(const HandMath::Vec3 &handWorld) const;
+	void BuildBodyModelBones(const void *studioHeader, const HandMath::Mat34 &frame, void *outBones);
+	bool BuildRemoteItemBones(int entityIndex, const void *weapon, const void *studioHeader, void *outBones);
 	static bool IsHeldInTheHand(int weaponId);
 	bool GetRightHandTarget(const HandRig &rig, HandMath::Mat34 &hand) const;
 	const void *ApplyItemInHand(const void *studioHeader, const void *customBones, void *storage);

@@ -61,6 +61,12 @@ bool VR::BuildRemotePlayerBones(int playerIndex, const void *studioHeader, const
 	// away from where the game has the player, and this keeps the arms attached to the body anyway.
 	const Vec3 head = Origin(bones[rig.HeadBone()]);
 	const Vec3 toWorld = head - pose.head.position;
+	if (playerIndex > 0 && playerIndex <= 32)
+	{
+		// For what the player carries on the chest (BuildRemoteItemBones)
+		m_RemoteHeadOffset[playerIndex] = toWorld;
+		m_RemoteHeadOffsetValid[playerIndex] = true;
+	}
 
 	Mat34 weaponDelta;
 	bool haveWeaponDelta = false;
@@ -134,5 +140,6 @@ bool VR::BuildRemoteWeaponBones(int entityIndex, const void *studioHeader, const
 		return true;
 	}
 
-	return false;
+	// Not in a hand: pills or a grenade they carry go on the chest
+	return BuildRemoteItemBones(entityIndex, weapon, studioHeader, outBones);
 }

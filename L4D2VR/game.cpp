@@ -27,6 +27,7 @@ Game::Game()
     m_EngineClient = (IEngineClient *)GetInterface("engine.dll", "VEngineClient013");
     m_MaterialSystem = (IMaterialSystem *)GetInterface("MaterialSystem.dll", "VMaterialSystem080");
     m_ClientViewRender = (IViewRender *)GetInterface("client.dll", "VEngineRenderView013");
+    m_BaseClientDll = (IBaseClientDLL *)GetInterface("client.dll", "VClient016");
     m_EngineViewRender = (IViewRender *)GetInterface("engine.dll", "VEngineRenderView013");
     m_ModelInfo = (IModelInfo *)GetInterface("engine.dll", "VModelInfoClient004");
     m_ModelRender = (IModelRender *)GetInterface("engine.dll", "VEngineModel016");

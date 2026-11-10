@@ -744,6 +744,95 @@ Hooks::ModelKind Hooks::GetModelKind(const void *model)
 
 void Hooks::dDrawModelExecute(void *ecx, void *edx, void *state, const ModelRenderInfo_t &info, void *pCustomBoneToWorld)
 {
+	DrawModelForVR(ecx, state, info, pCustomBoneToWorld);
+
+	// What the player carries is drawn with the weapon, in the same pass
+	if (m_VR->m_IsVREnabled && info.pModel && state && GetModelKind(info.pModel) == ModelKind::Viewmodel)
+		m_VR->DrawBodyModels(info.flags, info.pRenderable, info.entity_index);
+}
+
+namespace
+{
+	// What IVModelRender::DrawModelSetup fills (engine.dll of Left 4 Dead 2)
+	struct DrawModelState
+	{
+		const void *studioHeader;
+		void *hardwareData;
+		void *renderable;
+		const void *modelToWorld;
+		void *decals;
+		int drawFlags;
+		int lod;
+	};
+
+	// The start of CModelRender::DrawModelSetup, to be sure it's the function at its place in the interface
+	const unsigned char kDrawModelSetupStart[] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x20, 0x8B, 0x45, 0x10, 0x53, 0x56, 0x57, 0x8B, 0x7D, 0x08 };
+	const int kDrawModelSetupIndex = 18;
+}
+
+// Draws a model of the game that no entity draws, with the weapon's renderable for what the engine asks of one.
+// IVModelRender::DrawModel can't be used: it asks that renderable for bones, and the weapon has more bones than the
+// model, so it refuses. DrawModelSetup without STUDIO_RENDER prepares the model (header, mesh, detail level) without
+// asking for them, and then the model is drawn with its own bones.
+void Hooks::DrawBodyModel(int flags, void *renderable, int entityIndex, const void *model, const HandMath::Mat34 &frame)
+{
+	if (!model || !renderable || !m_Game->m_ModelRender || m_BodyModelsBroken)
+		return;
+
+	typedef bool(__thiscall *tDrawModelSetup)(void *thisptr, ModelRenderInfo_t &info, DrawModelState *state, void **bonesOut);
+	const tDrawModelSetup setup = (tDrawModelSetup)(*(void ***)m_Game->m_ModelRender)[kDrawModelSetupIndex];
+	if (!m_BodyModelChecked)
+	{
+		m_BodyModelChecked = true;
+		if (memcmp((const void *)setup, kDrawModelSetupStart, sizeof(kDrawModelSetupStart)) != 0)
+		{
+			m_BodyModelsBroken = true;
+			Diagnostics::Log("body items: DrawModelSetup isn't where it was expected in this version of the game, nothing is drawn on the body");
+			return;
+		}
+	}
+
+	ModelRenderInfo_t info;
+	info.origin = Vector(frame.m[0][3], frame.m[1][3], frame.m[2][3]);
+	info.angles = QAngle(0.0f, 0.0f, 0.0f);
+	info.pRenderable = renderable;
+	info.pModel = (model_t *)model;
+	info.pModelToWorld = (const matrix3x4_t *)&frame;
+	info.pLightingOffset = nullptr;
+	info.pLightingOrigin = nullptr;
+	info.flags = 0;
+	info.entity_index = entityIndex;
+	info.skin = 0;
+	info.body = 0;
+	info.hitboxset = 0;
+	info.instance = 0xFFFF; // MODEL_INSTANCE_INVALID
+
+	DrawModelState state = {};
+	void *unusedBones = nullptr;
+	if (!setup(m_Game->m_ModelRender, info, &state, &unusedBones) || !state.studioHeader || !state.hardwareData)
+	{
+		if (!m_LoggedBodyModelMiss)
+			Diagnostics::Log("body items: the engine couldn't prepare %s yet", Studio::IsValid(state.studioHeader) ? Studio::ModelName(state.studioHeader) : "a model");
+		m_LoggedBodyModelMiss = true;
+		return;
+	}
+
+	const int boneCount = Studio::IsValid(state.studioHeader) ? Studio::BoneCount(state.studioHeader) : 0;
+	if (boneCount <= 0 || boneCount > Studio::kMaxBones)
+		return;
+
+	alignas(16) unsigned char bones[sizeof(HandMath::Mat34) * Studio::kMaxBones];
+	m_VR->BuildBodyModelBones(state.studioHeader, frame, bones);
+	info.flags = flags;
+	hkDrawModelExecute.fOriginal(m_Game->m_ModelRender, &state, info, bones);
+
+	if (!m_LoggedBodyModel)
+		Diagnostics::Log("body items: drawn with the weapon (%s)", Studio::ModelName(state.studioHeader));
+	m_LoggedBodyModel = true;
+}
+
+void Hooks::DrawModelForVR(void *ecx, void *state, const ModelRenderInfo_t &info, void *pCustomBoneToWorld)
+{
 	if (!m_VR->m_IsVREnabled || !info.pModel || !state)
 		return hkDrawModelExecute.fOriginal(ecx, state, info, pCustomBoneToWorld);
 

@@ -62,6 +62,7 @@ void VR::ClearModelCaches()
 	m_ArmsRig = nullptr;
 	g_ThrowPoses.clear();
 	g_ViewmodelRightHands.clear();
+	ClearBodyModels();
 	Hooks::m_ModelKinds.clear();
 }
 
@@ -143,11 +144,23 @@ bool VR::ThrownGrenadeHasLeftTheHand() const
 		&& std::chrono::steady_clock::now() - m_GrenadeReleaseTime < kThrownGrenadeTime;
 }
 
-// While throwing with the arm the game plays its wind-up animation, which pulls the hand back. Holding the last pose from
-// before the trigger was pressed keeps the grenade where the real hand is. Returns the bones to draw with.
+// Animations of the game that don't fit VR are not shown: the weapon and the hands keep the last pose from before they
+// started, relative to the weapon's frame.
+// - While throwing with the arm the game plays its wind-up animation, which pulls the hand back: the grenade stays
+//   where the real hand is.
+// - A pump action pumps by itself in its fire animation: it's pumped by hand instead (ManualReloadHoldsFirePose).
+// Returns the bones to draw with.
 const void *VR::ApplyThrowPose(const void *studioHeader, const void *customBones, void *storage)
 {
-	if (!m_GrenadeThrowGesture || !IsThrowableWeapon(m_ActiveWeaponId) || !Studio::IsValid(studioHeader))
+	bool hold;
+	if (m_GrenadeThrowGesture && IsThrowableWeapon(m_ActiveWeaponId))
+		hold = m_GrenadeTriggerHeld || ThrownGrenadeHasLeftTheHand();
+	else if (ManualReloadPumpsByHand())
+		hold = ManualReloadHoldsFirePose();
+	else
+		return customBones;
+
+	if (!Studio::IsValid(studioHeader))
 		return customBones;
 
 	const int boneCount = Studio::BoneCount(studioHeader);
@@ -157,7 +170,7 @@ const void *VR::ApplyThrowPose(const void *studioHeader, const void *customBones
 	const Mat34 frame = FromAxes(ToVec3(m_ViewmodelForward), ToVec3(m_ViewmodelRight) * -1.0f, ToVec3(m_ViewmodelUp), ToVec3(GetRecommendedViewmodelAbsPos()));
 	std::vector<Mat34> &pose = g_ThrowPoses[studioHeader];
 
-	if (!m_GrenadeTriggerHeld && !ThrownGrenadeHasLeftTheHand())
+	if (!hold)
 	{
 		pose.resize(boneCount);
 		const Mat34 inverse = InvertRigid(frame);

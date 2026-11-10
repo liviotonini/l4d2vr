@@ -210,6 +210,7 @@ void VR::Update()
     {
         Diagnostics::ScopedTimer timer(Diagnostics::Section_Tracking);
         UpdateTracking();
+        UpdateBodyItems();
     }
 
     {
@@ -671,7 +672,7 @@ void VR::ProcessInput()
     //if (PressedDigitalAction(m_ActionSecondaryAttack) || (m_IsTrackingManualPush && VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 5.0))
     // The swing gestures don't shove while throwing a grenade with the arm (both arms move fast, and holding the shove
     // button stops the game from throwing). Neither does the shove button press that cancelled a throw.
-    SetGameButton(GameButton_Attack2, m_IsTrackingManualPush && !IsGrenadeThrowInProgress() && (VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 4.0 || (!m_Game->m_IsMeleeWeaponActive && VectorLength(m_RightControllerPose.TrackedDeviceVel) > 4.0)));
+    SetGameButton(GameButton_Attack2, m_IsTrackingManualPush && !IsGrenadeThrowInProgress() && ((VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 4.0 && !ManualReloadUsesLeftHand()) || (!m_Game->m_IsMeleeWeaponActive && VectorLength(m_RightControllerPose.TrackedDeviceVel) > 4.0)));
 
     if (PressedDigitalAction(m_ActionPrevItem, true))
     {
@@ -1905,10 +1906,7 @@ namespace
         { "medkit (back)", true, 4, 4, [](const HandOnBody &hand, float height)
             { return hand.forward < -0.9f && InRange(hand.drop, Tuned(11.9f) * height, Tuned(5.0f)); } },
 
-        { "grenade (behind the shoulder)", false, 3, 5, [](const HandOnBody &hand, float)
-            { return InRange(hand.distance, Tuned(14.0f), Tuned(2.0f)) && hand.side <= -0.4f && hand.drop <= Tuned(8.0f); } },
-        // "pills or adrenaline (leg)" is off for now: it's where the magazines are, and took the pills instead of one.
-        // Pills and adrenaline are still taken behind the shoulder when the grenade is already in hand.
+        // Grenades, pills and adrenaline are taken where they're seen on the chest (body_items.cpp), with either hand
         { "medkit (back)", false, 4, 4, [](const HandOnBody &hand, float height)
             { return hand.forward < -0.9f && InRange(hand.drop, Tuned(11.9f) * height, Tuned(5.0f)); } },
     };
@@ -1975,6 +1973,20 @@ void VR::UpdateBodyGrab(bool weaponHand, const Vector &handPosLocalInWorld, int 
 
     const float headPitchDown = RAD2DEG(asinf(std::clamp(-m_HmdForward.z, -1.0f, 1.0f)));
     const char *handName = weaponHand ? "weapon hand" : "other hand";
+
+    // The pills or the grenade on the chest
+    const Vector handWorld = m_CameraAnchor - Vector(0, 0, 64) + handPosLocalInWorld;
+    const int chestSlot = GetChestItemSlotAt(HandMath::Vec3(handWorld.x, handWorld.y, handWorld.z));
+    if (chestSlot)
+    {
+        char command[16];
+        snprintf(command, sizeof(command), "slot%d", chestSlot);
+        m_Game->ClientCmd_Unrestricted(command);
+        m_Haptics.Play(weaponHand ? Haptics::Hand::WeaponHand : Haptics::Hand::OtherHand, HapticEffects::Take);
+        WriteBodyGrabLog("%s: %.2f m away, side %.2f, forward %.2f, %.2f m below, head pitched %.0f deg down: %s on the chest, %s",
+            handName, hand.distance, hand.side, hand.forward, hand.drop, headPitchDown, chestSlot == 3 ? "grenade" : "pills or adrenaline", command);
+        return;
+    }
 
     for (const BodyGrabPlace &place : kBodyGrabPlaces)
     {

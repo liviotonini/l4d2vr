@@ -158,7 +158,8 @@ namespace
 		CHECK(r.machine.NeedsCycle());
 		CHECK(!(r.events & Event_BoltPulled));
 
-		// Moving it forward doesn't count, and it can't go past its travel
+		// Moving it forward doesn't count: the pull counts from the furthest forward the hand went. And it can't go past
+		// its travel.
 		r.moveTo(kBolt + Vec3(3.0f, 0.0f, 0.0f));
 		CHECK(r.machine.NeedsCycle());
 		r.moveTo(kBolt + Vec3(-9.0f, 0.0f, 0.0f));
@@ -174,15 +175,16 @@ namespace
 		r.grip(false);
 		CHECK(r.machine.GetState() == State::HoldingBolt);
 
-		// Going forward with the hand, it follows
-		r.moveTo(kBolt + Vec3(-0.5f, 0.0f, 0.0f));
+		// Going forward with the hand, it follows, and it's ready to be pulled again
+		r.moveTo(kBolt + Vec3(3.0f - 0.5f, 0.0f, 0.0f));
 		CHECK_NEAR(r.machine.BoltPull(), 0.5f, 0.001f);
+		CHECK(r.events & Event_BoltReleased);
 		CHECK(r.machine.BlocksFire(50, false)); // more than a tenth of the way back
-		r.moveTo(kBolt + Vec3(-0.1f, 0.0f, 0.0f));
+		r.moveTo(kBolt + Vec3(3.0f - 0.1f, 0.0f, 0.0f));
 		CHECK(!r.machine.BlocksFire(50, false));
 
 		r.trigger(false);
-		CHECK(r.events & Event_BoltReleased);
+		CHECK(!(r.events & Event_BoltReleased)); // it already went forward
 		CHECK(r.machine.GetState() == State::Idle);
 		CHECK_NEAR(r.machine.BoltPull(), 0.0f, 0.001f);
 
@@ -264,12 +266,21 @@ namespace
 		s.step();
 		CHECK(s.events & Event_Inserted);
 
-		// Full: nothing to take
+		// Full, one can still be taken and swapped
 		Rig full(15, 15, 999, false);
 		full.moveTo(kWaist);
 		full.grip(true);
-		CHECK(full.machine.GetState() == State::Idle);
-		CHECK(!full.machine.HandIsBusy()); // free to take an item from the body
+		CHECK(full.machine.GetState() == State::HoldingFresh);
+		full.moveTo(kSocket);
+		CHECK(full.events & Event_Inserted);
+		full.grip(false);
+
+		// No ammo left: nothing to take
+		Rig none(10, 50, 0, false);
+		none.moveTo(kWaist);
+		none.grip(true);
+		CHECK(none.machine.GetState() == State::Idle);
+		CHECK(!none.machine.HandIsBusy()); // free to take an item from the body
 	}
 
 	void TestPumpEveryShot()
@@ -308,9 +319,9 @@ namespace
 
 		// And forward again
 		r.moveTo(kBolt + Vec3(4.0f, 0.0f, 3.0f));
+		CHECK(r.events & Event_BoltReleased);
 		CHECK(!r.machine.BlocksFire(7, true));
 		r.trigger(false);
-		CHECK(r.events & Event_BoltReleased);
 
 		// Two more shots, each needing it
 		for (int clip = 6; clip >= 5; --clip)
@@ -324,6 +335,33 @@ namespace
 			r.trigger(false);
 			CHECK(!r.machine.BlocksFire(clip, true));
 		}
+
+		// Several in a row without letting go of the trigger
+		r.trigger(true);
+		CHECK(r.machine.GetState() == State::HoldingBolt);
+		for (int clip = 4; clip >= 3; --clip)
+		{
+			r.in.clip = clip;
+			r.step();
+			CHECK(r.machine.BlocksFire(clip, true));
+			r.moveTo(kBolt + Vec3(4.0f - 6.0f, 0.0f, 3.0f));
+			CHECK(r.events & Event_BoltPulled);
+			CHECK(!r.machine.NeedsCycle());
+			r.moveTo(kBolt + Vec3(4.0f, 0.0f, 3.0f));
+			CHECK(r.events & Event_BoltReleased);
+			CHECK(!r.machine.BlocksFire(clip, true));
+		}
+		r.trigger(false);
+
+		// Already holding the trigger when the hand takes the weapon: no need to press it again
+		r.in.holdsPump = false;
+		r.moveTo(kNowhere);
+		r.trigger(true);
+		CHECK(r.machine.GetState() == State::Idle); // not on the pump yet, and far from it
+		r.in.holdsPump = true;
+		r.step();
+		CHECK(r.machine.GetState() == State::HoldingBolt);
+		r.trigger(false);
 
 		// Loading a shell isn't a shot
 		r.moveTo(kWaist);
@@ -388,16 +426,20 @@ namespace
 			r.step();
 		}
 
-		// Full: no more
+		// Full: a shell can be taken, but it doesn't go in
 		CHECK(r.in.clip == 8);
 		r.moveTo(kWaist);
 		r.grip(true);
-		CHECK(r.machine.GetState() == State::Idle);
+		CHECK(r.machine.GetState() == State::HoldingFresh);
+		r.moveTo(kSocket);
+		CHECK(!(r.events & Event_ShellInserted));
+		CHECK(r.machine.GetState() == State::HoldingFresh);
 		r.grip(false);
+		CHECK(r.machine.GetState() == State::Idle);
 
 		// Dropping a shell doesn't need anything else
 		r.in.clip = 5;
-		r.step();
+		r.moveTo(kWaist);
 		r.grip(true);
 		CHECK(r.machine.GetState() == State::HoldingFresh);
 		r.grip(false);

@@ -57,9 +57,11 @@ namespace Reload
 	const float kPullDistance = 0.07f;
 	const float kPouchRadius = 0.15f;
 	const float kInsertRadius = 0.10f;
-	const float kBoltGrabRadius = 0.10f;
-	// How much of its travel the bolt has to be pulled
+	const float kBoltGrabRadius = 0.12f;
+	// How much of its travel the bolt has to be pulled, and how far forward it has to go again for the next pull
+	// while the trigger is still held (a pump worked several times in a row)
 	const float kBoltPullNeeded = 0.8f;
+	const float kBoltReturned = 0.2f;
 	// Pulled back more than this, the weapon doesn't fire
 	const float kBoltBlocksFire = 0.1f;
 
@@ -131,6 +133,8 @@ namespace Reload
 			const float toBolt = Length(in.palm - in.boltGrab);
 			const float meters = in.unitsPerMeter;
 			const bool canReload = in.capacity > 0 && in.clip < in.capacity && in.reserve > 0;
+			// The waist always gives one while there is ammo left, even with the weapon full
+			const bool canTake = in.capacity > 0 && in.reserve > 0;
 
 			// The weapon ran out: the bolt stays back until it's pulled
 			if (in.clip == 0 && m_LastClip != 0 && in.hasBolt && in.capacity > 0)
@@ -157,9 +161,10 @@ namespace Reload
 					m_State = State::NeedFresh;
 					events |= Event_Ejected;
 				}
-				else if (triggerPressed && in.hasBolt && (in.holdsPump || toBolt < kBoltGrabRadius * meters))
+				else if (in.hasBolt && ((in.holdsPump && in.trigger) || (triggerPressed && toBolt < kBoltGrabRadius * meters)))
 				{
-					// Any time, not only when it's needed: it's seen moving either way
+					// Any time, not only when it's needed: it's seen moving either way. The hand holding the pump takes it
+					// as soon as the trigger is held, without pressing it again.
 					m_State = State::HoldingBolt;
 					m_BoltGrabPalm = in.palm;
 					m_BoltPull = 0.0f;
@@ -173,7 +178,7 @@ namespace Reload
 					m_PressUsed = true;
 					events |= Event_GrabbedOld;
 				}
-				else if (pressed && canReload && toWaist < kPouchRadius * meters)
+				else if (pressed && canTake && toWaist < kPouchRadius * meters)
 				{
 					// A new one straight from the waist: the old magazine comes out when it goes in
 					m_State = State::HoldingFresh;
@@ -219,7 +224,8 @@ namespace Reload
 				break;
 
 			case State::HoldingFresh:
-				if (heldToSocket < kInsertRadius * meters)
+				// A shell only goes in while there is room for it
+				if (heldToSocket < kInsertRadius * meters && (!in.shells || in.clip < in.capacity))
 				{
 					if (!in.shells && !m_MagazineOut)
 						events |= Event_MagazineOut; // the old one falls out as the new one goes in
@@ -236,8 +242,14 @@ namespace Reload
 
 			case State::HoldingBolt:
 			{
-				const float pulled = Dot(in.palm - m_BoltGrabPalm, in.boltAxis) * -1.0f;
-				m_BoltPull = std::clamp(pulled, 0.0f, in.boltTravel);
+				float pulled = Dot(in.palm - m_BoltGrabPalm, in.boltAxis) * -1.0f;
+				if (pulled < 0.0f)
+				{
+					// The hand went further forward than where it took it: the pull counts from there
+					m_BoltGrabPalm = m_BoltGrabPalm - in.boltAxis * pulled;
+					pulled = 0.0f;
+				}
+				m_BoltPull = std::min(pulled, in.boltTravel);
 
 				if (!m_BoltPulledThisGrab && m_BoltPull >= in.boltTravel * kBoltPullNeeded)
 				{
@@ -246,6 +258,12 @@ namespace Reload
 					if (in.clip > 0)
 						m_NeedsCycle = false;
 					events |= Event_BoltPulled;
+				}
+				else if (m_BoltPulledThisGrab && in.trigger && m_BoltPull <= in.boltTravel * kBoltReturned)
+				{
+					// Forward again with the trigger still held: ready to be pulled again
+					m_BoltPulledThisGrab = false;
+					events |= Event_BoltReleased;
 				}
 
 				if (!in.trigger)
