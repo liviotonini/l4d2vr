@@ -1,0 +1,12 @@
+"l4d2vrtest"
+{
+	"base"			"coop"
+	"maxplayers"	"4"
+	"hasdifficulty"	"0"
+
+	"DisplayTitle"	"L4D2VR test room"
+	"ShortDescription" "Every weapon and item on tables, no infected"
+	"Description"	"Tables in front of you with every weapon, grenade, pills, adrenaline, kits and ammo, to test the VR mod. No infected and no bots."
+	"Image"			"maps/any"
+	"Author"		"L4D2VR"
+}
