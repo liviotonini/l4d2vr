@@ -171,6 +171,11 @@ namespace
 					CHECK_NEAR(Length(Origin(after) - Origin(before)), 0.0f, 0.01f);
 			}
 			CHECK_NEAR(Length(Origin(moved[leftHand]) - Origin(rest[leftHand])), 0.0f, 0.0001f);
+
+			// The grip follows the knuckles, across the fingers
+			const Vec3 grip = rig.GripAxis(HandRig::Right, moved.data());
+			CHECK_NEAR(Length(grip), 1.0f, 0.001f);
+			CHECK(fabsf(Dot(grip, Axis(rightPose, 0))) < 0.6f);
 		}
 	}
 }

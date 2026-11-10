@@ -32,6 +32,7 @@ namespace
 	const Sounds kPumpSounds = { nullptr, "weapons/shotgun/gunother/shotgun_load_shell_2.wav", "weapons/shotgun/gunother/shotgun_pump_1.wav", nullptr };
 	const Sounds kAutoShotgunSounds = { nullptr, "weapons/auto_shotgun/gunother/auto_shotgun_load_shell_2.wav", "weapons/auto_shotgun/gunother/autoshotgun_boltback.wav", "weapons/auto_shotgun/gunother/autoshotgun_boltforward.wav" };
 
+	const Sounds kGrenadeLauncherSounds = { nullptr, "weapons/grenade_launcher/grenadeother/grenade_launcher_shellin.wav", nullptr, nullptr };
 	const Sounds kChromeSounds = { nullptr, "weapons/shotgun_chrome/gunother/shotgun_load_shell_2.wav", "weapons/shotgun_chrome/gunother/shotgun_pump_1.wav", nullptr };
 	const Sounds kAwpSounds = { "weapons/awp/gunother/awp_clipout.wav", "weapons/awp/gunother/awp_clipin.wav", "weapons/awp/gunother/awp_bolt.wav", "weapons/awp/gunother/awp_bolt_forward.wav" };
 	const Sounds kScoutSounds = { "weapons/scout/gunother/scout_clipout.wav", "weapons/scout/gunother/scout_clipin.wav", "weapons/scout/gunother/scout_bolt.wav", "weapons/scout/gunother/scout_bolt_forward.wav" };
@@ -76,6 +77,8 @@ namespace
 		{ C_WeaponCSBase::PUMPSHOTGUN, "v_pumpshotgun.mdl", "ValveBiped.weapon_clip_bullets", nullptr, "ValveBiped.weapon_charger_slide", { -0.00f, 0.07f, 1.37f }, { -0.01f, 0.31f, -4.80f }, true, 8, 4.5f, &kPumpSounds, true, 0.0f, 1050 },
 		{ C_WeaponCSBase::SHOTGUN_CHROME, "v_shotgun_chrome.mdl", "ValveBiped.weapon_clip_bullets", nullptr, "ValveBiped.weapon_charger_slide", { -0.00f, 0.07f, 1.37f }, { -0.05f, 0.17f, -5.32f }, true, 8, 4.5f, &kChromeSounds, true, 0.0f, 1050 },
 		{ C_WeaponCSBase::AUTOSHOTGUN, "v_autoshotgun.mdl", "ValveBiped.weapon_clip", nullptr, "ValveBiped.weapon_bolt", { -0.00f, 0.21f, 0.04f }, { -0.89f, -0.27f, 0.79f }, true, 10, 2.0f, &kAutoShotgunSounds, false, 0.0f, 0 },
+		// One round, loaded like a shell. It has nothing to pull.
+		{ C_WeaponCSBase::GRENADE_LAUNCHER, "v_grenade_launcher.mdl", "ValveBiped.weapon_clip", nullptr, nullptr, { -0.16f, 0.27f, 1.02f }, { 0.0f, 0.0f, 0.0f }, true, 1, 0.0f, &kGrenadeLauncherSounds, false, 0.0f, 0 },
 		{ C_WeaponCSBase::SPAS, "v_shotgun_spas.mdl", "ValveBiped.weapon_clip", nullptr, "ValveBiped.weapon_bolt", { 0.00f, 0.20f, 0.02f }, { -1.06f, -0.21f, -0.22f }, true, 10, 2.0f, &kAutoShotgunSounds, false, 0.0f, 0 },
 	};
 
@@ -478,7 +481,7 @@ void VR::UpdateManualReload()
 	// With a host that doesn't have the mod the game works the bolt
 	const bool serverCommits = m_Game->m_PoseRelay->IsServerCapable();
 	inputs.clip = Read<int>(weapon, kClientClipOffset);
-	inputs.capacity = std::max(profile->capacity, inputs.clip);
+	inputs.capacity = std::max(m_DualAsOnePistol ? profile->capacity * 2 : profile->capacity, inputs.clip);
 	// Pistols never run out of magazines, and the game reports their reserve as 0
 	inputs.reserve = ReloadHasUnlimitedReserve(m_ActiveWeaponId) ? 999 : Read<int>(local, kClientAmmoArrayOffset + ammoType * 4);
 	inputs.shells = profile->shells;
@@ -532,7 +535,7 @@ void VR::UpdateManualReload()
 		if (serverCommits)
 		{
 			char command[64];
-			snprintf(command, sizeof(command), "l4d2vr_reload %d %d %d", (events & Reload::Event_ShellInserted) ? 1 : 0, ammoType, inputs.reserve);
+			snprintf(command, sizeof(command), "l4d2vr_reload %d %d %d %d", (events & Reload::Event_ShellInserted) ? 1 : 0, ammoType, inputs.reserve, inputs.capacity);
 			m_Game->m_EngineClient->ServerCmd(command, true);
 		}
 		else
@@ -622,7 +625,7 @@ bool VR::BuildReloadViewmodel(const void *studioHeader, const void *customBones,
 		ids.nameChecked = true;
 		ids.magazine = Studio::FindBone(studioHeader, profile->magazineBone);
 		ids.bullets = profile->bulletsBone ? Studio::FindBone(studioHeader, profile->bulletsBone) : -1;
-		ids.bolt = Studio::FindBone(studioHeader, profile->boltBone);
+		ids.bolt = profile->boltBone ? Studio::FindBone(studioHeader, profile->boltBone) : -1;
 		if (ids.bolt >= 0)
 		{
 			// Until the weapon has been idle, the model's own pose: where the mesh was made
@@ -637,7 +640,7 @@ bool VR::BuildReloadViewmodel(const void *studioHeader, const void *customBones,
 		if (ids.magazine < 0)
 			Diagnostics::Log("manual reload: %s has no %s, this weapon uses the game's reload", Studio::ModelName(studioHeader), profile->magazineBone);
 		else
-			Diagnostics::Log("manual reload: %s, magazine bone %d, bolt bone %d (%s)", Studio::ModelName(studioHeader), ids.magazine, ids.bolt, profile->boltBone);
+			Diagnostics::Log("manual reload: %s, magazine bone %d, bolt bone %d (%s)", Studio::ModelName(studioHeader), ids.magazine, ids.bolt, profile->boltBone ? profile->boltBone : "none");
 	}
 
 	ViewmodelBones &ids = found->second;

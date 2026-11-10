@@ -532,6 +532,8 @@ void SettingsMenu::DrawMenu()
 			DrawSlider("Ammo bag: forward", "How far in front of your head the ammo bag is. Negative is behind.", settings.m_MagazinePouchForward, -0.3f, 0.5f, 0.01f, "%.2f m");
 			DrawSlider("Ammo bag: below the eyes", "How far below your eyes the ammo bag is.", settings.m_MagazinePouchBelowEyes, 0.2f, 1.2f, 0.01f, "%.2f m");
 			ImGui::EndDisabled();
+			DrawCheckbox("One pistol, double damage", "When you pick up a second pistol you keep seeing one pistol, with a golden tint, that does double damage and holds both magazines. The host needs this version of the mod for the damage. Off, you see the game's two pistols.", settings.m_OnePistolDoubled);
+			DrawCheckbox("Smaller items on the chest", "Shows the pills, adrenaline and grenades carried on your chest a bit smaller.", settings.m_SmallBodyItems);
 			DrawCheckbox("Interact with your hand", "Doors, items and teammates are used by pointing your weapon hand at them instead of looking at them. In a game you joined, the host needs this version of the mod.", settings.m_InteractWithHand);
 			DrawCheckbox("Shove by swinging", "Shove by swinging the left controller (or the right one when not holding a melee weapon).", settings.m_IsTrackingManualPush);
 			DrawSlider("Melee swing speed", "How fast the controller has to move to hit with a melee weapon.", settings.m_MeleeSwingVelocityRequired, 0.5f, 4.0f, 0.05f, "%.2f m/s");

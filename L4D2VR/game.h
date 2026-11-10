@@ -40,6 +40,12 @@ struct Player
 
     bool manualReload = false;  // reloads with the hands: the game doesn't reload this player's weapon by itself
     bool reloadButton = false;  // has the reload button pressed in the last usercmd
+    bool onePistolDoubled = false; // holds two pistols shown as one, which does double damage
+
+    // Where this player's hand aims the use for a moment, after grabbing something in the world
+    Vector useAimOrigin = { 0,0,0 };
+    QAngle useAimAngles = { 0,0,0 };
+    unsigned long long useAimUntil = 0;
 
     // Last grenade throw received from the player (VR::EncodeGrenadeThrow, decoded in Hooks::dReadUsercmd)
     int throwSequence = 0;

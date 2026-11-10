@@ -17,14 +17,14 @@ namespace
 	// How fast the left hand goes between the weapon and the controller, per second
 	const float kFollowSpeed = 8.0f;
 	const float kFingerSmoothing = 18.0f;
-	// Fingers around what the hand is holding
-	const float kMeleeGrip[HandRig::FingerCount] = { 0.75f, 0.9f, 0.9f, 0.9f, 0.9f };
 	const float kHoldingMagazineCurl = 0.55f;
 
 	// The pose of the weapon and the hand before the throw started, relative to the weapon's frame, per model
 	std::unordered_map<const void *, std::vector<Mat34>> g_ThrowPoses;
 	// The right hand bone of each weapon model in first person (-1 if it has none)
 	std::unordered_map<const void *, int> g_ViewmodelRightHands;
+	// The bones of the left pistol in the dual pistols model
+	std::unordered_map<const void *, std::vector<int>> g_SecondPistolBones;
 	// After the throw the hand stays as it was until the game changes weapon
 	const auto kThrownGrenadeTime = std::chrono::milliseconds(1500);
 
@@ -38,7 +38,6 @@ namespace
 	{
 		switch (weaponId)
 		{
-		case C_WeaponCSBase::FIRST_AID_KIT:
 		case C_WeaponCSBase::DEFIBRILLATOR:
 		case C_WeaponCSBase::CHAINSAW:
 		case C_WeaponCSBase::GASCAN:
@@ -62,6 +61,7 @@ void VR::ClearModelCaches()
 	m_ArmsRig = nullptr;
 	g_ThrowPoses.clear();
 	g_ViewmodelRightHands.clear();
+	g_SecondPistolBones.clear();
 	ClearBodyModels();
 	Hooks::m_ModelKinds.clear();
 }
@@ -70,7 +70,7 @@ void VR::ClearModelCaches()
 // so the hand and the item are put on the controller instead
 bool VR::IsHeldInTheHand(int weaponId)
 {
-	return IsThrowableWeapon(weaponId) || weaponId == C_WeaponCSBase::PAIN_PILLS || weaponId == C_WeaponCSBase::ADRENALINE;
+	return IsThrowableWeapon(weaponId) || weaponId == C_WeaponCSBase::PAIN_PILLS || weaponId == C_WeaponCSBase::ADRENALINE || weaponId == C_WeaponCSBase::FIRST_AID_KIT;
 }
 
 // The right hand bone where the controller is: the same place and angle as the left hand on its controller
@@ -91,6 +91,35 @@ bool VR::GetRightHandTarget(const HandRig &rig, Mat34 &hand, float backMeters) c
 // for the hand itself). Returns the bones to draw with.
 const void *VR::ApplyItemInHand(const void *studioHeader, const void *customBones, void *storage)
 {
+	// Two pistols shown as one: the left pistol is folded away
+	if (m_DualAsOnePistol && Studio::IsValid(studioHeader))
+	{
+		const int count = Studio::BoneCount(studioHeader);
+		if (count <= 0 || count > Studio::kMaxBones)
+			return customBones;
+
+		auto cached = g_SecondPistolBones.find(studioHeader);
+		if (cached == g_SecondPistolBones.end())
+		{
+			std::vector<int> left;
+			for (int i = 0; i < count; ++i)
+			{
+				const char *name = Studio::BoneName(studioHeader, i);
+				const size_t length = strlen(name);
+				if (length > 2 && _stricmp(name + length - 2, "_l") == 0 && strstr(name, "weapon"))
+					left.push_back(i);
+			}
+			Diagnostics::Log("two pistols shown as one: %d bones of the left pistol in %s", (int)left.size(), Studio::ModelName(studioHeader));
+			cached = g_SecondPistolBones.emplace(studioHeader, std::move(left)).first;
+		}
+
+		Mat34 *folded = (Mat34 *)storage;
+		memcpy(folded, customBones, count * sizeof(Mat34));
+		for (int bone : cached->second)
+			folded[bone] = CollapsedAt(Origin(folded[bone]));
+		return folded;
+	}
+
 	if (!IsHeldInTheHand(m_ActiveWeaponId) || !m_ArmsRig || !Studio::IsValid(studioHeader))
 		return customBones;
 
@@ -253,7 +282,14 @@ bool VR::BuildFirstPersonHands(const void *studioHeader, const void *customBones
 	// Items held in the fist go to the controller with the hand, keeping the fingers of the animation (ApplyItemInHand).
 	Mat34 rightHand;
 	if (m_Game->m_IsMeleeWeaponActive && GetRightHandTarget(rig, rightHand, m_MeleeHandBackMeters))
-		rig.PoseHand(HandRig::Right, rightHand, kMeleeGrip, bones);
+	{
+		// The hand keeps the grip of the animation, with its fingers around the handle, and only slides along the handle
+		// to where the hand really is
+		const Vec3 grip = rig.GripAxis(HandRig::Right, bones);
+		Mat34 slide;
+		SetAxis(slide, 3, grip * Dot(Origin(rightHand) - Origin(bones[rig.HandBone(HandRig::Right)]), grip));
+		rig.MoveHand(HandRig::Right, slide, bones);
+	}
 	else if (IsHeldInTheHand(m_ActiveWeaponId) && GetRightHandTarget(rig, rightHand))
 		rig.MoveHand(HandRig::Right, Multiply(rightHand, InvertRigid(bones[rig.HandBone(HandRig::Right)])), bones);
 

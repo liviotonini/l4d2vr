@@ -235,7 +235,7 @@ public:
 	bool m_AttachFlashlightToHeadWhenMelee = true;
 	bool m_ScopeEnabled = true;
 	float m_ScopeMagnification = 4.0f;      // the left trigger on the scope changes between these two
-	float m_ScopeMagnificationHigh = 10.0f;
+	float m_ScopeMagnificationHigh = 15.0f;
 	// Shows the scope whenever a sniper rifle is held (even when not looking through it) and writes its state
 	// to VR\scope_debug.txt once per second
 	bool m_ScopeDebug = false;
@@ -345,7 +345,10 @@ public:
 	HandMath::Vec3 m_LeftHandWrist;
 	float m_LeftFingerCurls[HandRig::FingerCount] = { HandRig::kRelaxedCurl, HandRig::kRelaxedCurl, HandRig::kRelaxedCurl, HandRig::kRelaxedCurl, HandRig::kRelaxedCurl };
 	float m_LeftHandFollow = 0.0f;          // 0 = the weapon's animation, 1 = the controller
-	bool m_ViewmodelHasTwoWeapons = false;  // dual pistols, both hands are holding one
+	bool m_ViewmodelHasTwoWeapons = false;  // dual pistols shown as such, both hands are holding one
+	bool m_OnePistolDoubled = true;         // the second pistol isn't shown: one pistol that does double damage, with a mark
+	bool m_DualAsOnePistol = false;         // holding two pistols now, shown as one
+	bool m_SmallBodyItems = true;           // the pills and grenades on the chest are a bit smaller
 	// Where the wrist is from the controller and how the hand is turned, see DefaultHandOffset. Not in the menu.
 	Vector m_HandOffsetMeters = { -0.10f, 0.0f, -0.08f }; // forward, right, up
 	float m_MeleeHandBackMeters = 0.03f;  // how much further back the hand is on melee weapons. MeleeHandBackMeters in config.txt
@@ -381,7 +384,16 @@ public:
 	{
 		const void *model = nullptr;
 		HandMath::Mat34 frame;
+		float scale = 1.0f;
+		bool hasCenter = false;      // otherwise the middle of the model's hull is at the frame
+		HandMath::Vec3 center;
 	};
+	// Using something in the world with the hand on it (the grab buttons): the game's use, aimed at it for a moment
+	Vector m_GrabUseOrigin = { 0, 0, 0 };
+	QAngle m_GrabUseAngles = { 0, 0, 0 };
+	unsigned long long m_GrabUseAimUntil = 0;
+	unsigned long long m_GrabUsePressAt = 0;
+	unsigned long long m_GrabUsePressUntil = 0;
 	static constexpr int kMaxBodyDraws = 3;
 	BodyModelDraw m_BodyDraws[kMaxBodyDraws];
 	int m_BodyDrawCount = 0;
@@ -476,7 +488,11 @@ public:
 	void UpdateBodyItems();
 	void DrawBodyModels(int flags, void *renderable, int entityIndex);
 	int GetChestItemSlotAt(const HandMath::Vec3 &handWorld) const;
-	void BuildBodyModelBones(const void *studioHeader, const HandMath::Mat34 &frame, void *outBones);
+	void BuildBodyModelBones(const void *studioHeader, const BodyModelDraw &draw, void *outBones);
+	bool TryGrabWorld(const HandMath::Vec3 &handWorld);
+	bool GetGrabUseAim(Vector &origin, QAngle &angles) const;
+	void UpdateOnePistolModel(const void *studioHeader, bool oneShown);
+	void ApplyOnePistolPlacement();
 	bool BuildRemoteItemBones(int entityIndex, const void *weapon, const void *studioHeader, void *outBones);
 	static bool IsHeldInTheHand(int weaponId);
 	bool GetRightHandTarget(const HandRig &rig, HandMath::Mat34 &hand, float backMeters = 0.0f) const;

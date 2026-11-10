@@ -665,7 +665,10 @@ void VR::ProcessInput()
 
     SetGameButton(GameButton_Attack, GetAttackButton(PressedDigitalAction(m_ActionPrimaryAttack)));
     SetGameButton(GameButton_Jump, PressedDigitalAction(m_ActionJump));
-    SetGameButton(GameButton_Use, PressedDigitalAction(m_ActionUse));
+    // A grab next to something in the world presses use for a moment (TryGrabWorld)
+    const unsigned long long useTick = GetTickCount64();
+    const bool grabbingUse = useTick >= m_GrabUsePressAt && useTick < m_GrabUsePressUntil;
+    SetGameButton(GameButton_Use, PressedDigitalAction(m_ActionUse) || grabbingUse);
 
     SetGameButton(GameButton_Reload, (PressedDigitalAction(m_ActionReload) && !ManualReloadOwnsReloadButton()) || isReloading);
     isReloading = false;
@@ -2073,6 +2076,13 @@ void VR::UpdateBodyGrab(bool weaponHand, const Vector &handPosLocalInWorld, int 
         return;
     }
 
+    // Nothing on the body here: a weapon, an item or a door handle in the world, if the hand is on one
+    if (TryGrabWorld(HandMath::Vec3(handWorld.x, handWorld.y, handWorld.z)))
+    {
+        m_Haptics.Play(weaponHand ? Haptics::Hand::WeaponHand : Haptics::Hand::OtherHand, HapticEffects::Take);
+        return;
+    }
+
     WriteBodyGrabLog("%s: %.2f m away, side %.2f, forward %.2f, %.2f m below, head pitched %.0f deg down: no place",
         handName, hand.distance, hand.side, hand.forward, hand.drop, headPitchDown);
 }
@@ -2439,6 +2449,7 @@ void VR::UpdateTracking()
     // Viewmodel roll offset
     m_ViewmodelRight = VectorRotate(m_ViewmodelRight, m_ViewmodelForward, m_ViewmodelAngOffset.z);
     m_ViewmodelUp = VectorRotate(m_ViewmodelUp, m_ViewmodelForward, m_ViewmodelAngOffset.z);
+    ApplyOnePistolPlacement();
 
     UpdateHands(deltaTime * 0.001f);
     m_Game->m_PoseRelay->Update(this, localPlayer);
@@ -2536,6 +2547,8 @@ void VR::ParseConfigFile()
         return text.empty() ? fallback : std::clamp(std::stof(text), minimum, maximum);
     };
     m_ShowReloadMark = userConfig["ShowReloadMark"] != "false"; // enabled if missing from config
+    m_OnePistolDoubled = userConfig["OnePistolDoubled"] != "false"; // enabled if missing from config
+    m_SmallBodyItems = userConfig["SmallBodyItems"] != "false"; // enabled if missing from config
     m_ScopeMagnificationHigh = readFloat("ScopeMagnificationHigh", m_ScopeMagnificationHigh, 1.0f, 20.0f);
     m_MeleeHandBackMeters = readFloat("MeleeHandBackMeters", m_MeleeHandBackMeters, -0.2f, 0.2f); // only by editing config.txt
     m_MagazinePouchSide = readFloat("MagazinePouchSide", m_MagazinePouchSide, 0.0f, 0.6f);
@@ -2615,6 +2628,8 @@ bool VR::SaveConfigFile()
         { "WristHudEnabled", ConfigBoolString(m_WristHudEnabled) },
         { "ManualReload", ConfigBoolString(m_ManualReloadEnabled) },
         { "ShowReloadMark", ConfigBoolString(m_ShowReloadMark) },
+        { "OnePistolDoubled", ConfigBoolString(m_OnePistolDoubled) },
+        { "SmallBodyItems", ConfigBoolString(m_SmallBodyItems) },
         { "MagazinePouchSide", ConfigFloatString(m_MagazinePouchSide) },
         { "MagazinePouchForward", ConfigFloatString(m_MagazinePouchForward) },
         { "MagazinePouchBelowEyes", ConfigFloatString(m_MagazinePouchBelowEyes) },

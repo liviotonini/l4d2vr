@@ -95,5 +95,27 @@ namespace Studio
 		return found;
 	}
 
+	// Attachments: index by name, and their place on a bone (the bone and the matrix) inside the model
+	const int kAttachmentPlacementSize = 52;
+
+	inline int FindAttachment(const void *header, const char *name)
+	{
+		const uint8_t *base = (const uint8_t *)header;
+		const int32_t count = *(const int32_t *)(base + 240), index = *(const int32_t *)(base + 244);
+		for (int i = 0; i < count; ++i)
+		{
+			const uint8_t *attachment = base + index + i * 92;
+			if (_stricmp((const char *)attachment + *(const int32_t *)attachment, name) == 0)
+				return i;
+		}
+		return 0;
+	}
+
+	inline void *AttachmentPlacement(const void *header, int attachment)
+	{
+		const uint8_t *base = (const uint8_t *)header;
+		return (uint8_t *)base + *(const int32_t *)(base + 244) + attachment * 92 + 8;
+	}
+
 	const int kMaxBones = 128;
 }

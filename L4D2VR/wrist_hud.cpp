@@ -26,12 +26,10 @@ namespace
 	const ULONGLONG kRefreshIntervalMs = 250;
 	const int kMaxUploadFailures = 5;
 
-	// Width on the wrist and where it is on the controller, meters and degrees
+	// Width on the wrist, and where it is from the wrist like a watch, meters: towards the elbow and out of the back of the hand
 	const float kWidthMeters = 0.1f;
-	const float kOffsetX = 0.01f;
-	const float kOffsetY = 0.01f;
-	const float kOffsetZ = 0.0f;
-	const float kTiltDegrees = -75.0f;
+	const float kTowardsElbow = 0.04f;
+	const float kAboveTheWrist = 0.04f;
 	const float kAlpha = 1.0f; // only the panel is see-through, that's in the image
 
 	template <typename T>
@@ -170,13 +168,26 @@ void VR::UpdateWristHud()
 
 	if (m_WristHudDevice != m_LeftControllerDeviceIndex)
 	{
-		const float radians = kTiltDegrees * 3.14159265f / 180.0f;
+		// Worn like a watch, in the frame of the controller (x right, y up, z back). The hand holds it tilted: the fingers
+		// go along `f`, the thumb's side along `u`. The face looks out of the back of the hand and reads across the arm.
+		const float radians = kHandGripTilt * 3.14159265f / 180.0f;
 		const float s = sinf(radians), c = cosf(radians);
+		const HandMath::Vec3 f(0.0f, s, -c);
+		const HandMath::Vec3 u(0.0f, c, s);
+		const HandMath::Vec3 wrist = f * m_HandOffsetMeters.x + u * m_HandOffsetMeters.z + HandMath::Vec3(m_HandOffsetMeters.y, 0.0f, 0.0f);
+
+		// The back of the left hand faces -x, of the right one +x
+		const HandMath::Vec3 back(m_LeftHanded ? 1.0f : -1.0f, 0.0f, 0.0f);
+		// To read it, the fingers are to the right on the left arm, and to the left on the right one
+		const HandMath::Vec3 across = m_LeftHanded ? f * -1.0f : f;
+		const HandMath::Vec3 top = HandMath::Cross(back, across);
+		const HandMath::Vec3 position = wrist - f * kTowardsElbow + back * kAboveTheWrist;
+
 		vr::HmdMatrix34_t transform =
 		{
-			1.0f, 0.0f, 0.0f, kOffsetX,
-			0.0f, c,    -s,   kOffsetY,
-			0.0f, s,    c,    kOffsetZ
+			across.x, top.x, back.x, position.x,
+			across.y, top.y, back.y, position.y,
+			across.z, top.z, back.z, position.z
 		};
 		m_Overlay->SetOverlayTransformTrackedDeviceRelative(m_WristHudHandle, m_LeftControllerDeviceIndex, &transform);
 		m_WristHudDevice = m_LeftControllerDeviceIndex;

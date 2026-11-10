@@ -398,7 +398,13 @@ int Hooks::dServerFireTerrorBullets(int playerId, const Vector &vecOrigin, const
 		vecNewAngles = m_Game->m_PlayersVRInfo[playerId].controllerAngle;
 	}
 
-	return hkServerFireTerrorBullets.fOriginal(playerId, vecNewOrigin, vecNewAngles, a4, a5, a6, a7);
+	const int result = hkServerFireTerrorBullets.fOriginal(playerId, vecNewOrigin, vecNewAngles, a4, a5, a6, a7);
+
+	// Two pistols shown as one: every shot is two. a4 is the weapon.
+	if (m_Game->IsValidPlayerIndex(playerId) && m_Game->m_PlayersVRInfo[playerId].onePistolDoubled && a4 == C_WeaponCSBase::PISTOL)
+		hkServerFireTerrorBullets.fOriginal(playerId, vecNewOrigin, vecNewAngles, a4, a5, a6, a7);
+
+	return result;
 }
 
 int Hooks::dClientFireTerrorBullets(int playerId, const Vector &vecOrigin, const QAngle &vecAngles, int a4, int a5, int a6, float a7)
@@ -744,10 +750,34 @@ Hooks::ModelKind Hooks::GetModelKind(const void *model)
 
 void Hooks::dDrawModelExecute(void *ecx, void *edx, void *state, const ModelRenderInfo_t &info, void *pCustomBoneToWorld)
 {
+	const ModelKind kind = (m_VR->m_IsVREnabled && info.pModel && state) ? GetModelKind(info.pModel) : ModelKind::Other;
+
+	// Two pistols shown as one have a golden tint: the mark that it's the stronger one. In the colour the engine
+	// draws models with (IVRenderView::SetColorModulation and GetColorModulation).
+	float savedColor[3];
+	typedef void(__thiscall *tSetColor)(void *thisptr, const float *color);
+	typedef void(__thiscall *tGetColor)(void *thisptr, float *color);
+	void **renderView = m_Game->m_EngineViewRender ? *(void ***)m_Game->m_EngineViewRender : nullptr;
+	bool tinted = false;
+	if (kind == ModelKind::DualPistolsViewmodel)
+	{
+		m_VR->UpdateOnePistolModel(*(const void **)state, m_VR->m_OnePistolDoubled);
+		if (m_VR->m_OnePistolDoubled && renderView)
+		{
+			static const float kOnePistolTint[3] = { 1.0f, 0.78f, 0.38f };
+			((tGetColor)renderView[7])(m_Game->m_EngineViewRender, savedColor);
+			((tSetColor)renderView[6])(m_Game->m_EngineViewRender, kOnePistolTint);
+			tinted = true;
+		}
+	}
+
 	DrawModelForVR(ecx, state, info, pCustomBoneToWorld);
 
+	if (tinted)
+		((tSetColor)renderView[6])(m_Game->m_EngineViewRender, savedColor);
+
 	// What the player carries is drawn with the weapon, in the same pass
-	if (m_VR->m_IsVREnabled && info.pModel && state && GetModelKind(info.pModel) == ModelKind::Viewmodel)
+	if (kind == ModelKind::Viewmodel || kind == ModelKind::DualPistolsViewmodel)
 		m_VR->DrawBodyModels(info.flags, info.pRenderable, info.entity_index);
 }
 
@@ -774,8 +804,11 @@ namespace
 // IVModelRender::DrawModel can't be used: it asks that renderable for bones, and the weapon has more bones than the
 // model, so it refuses. DrawModelSetup without STUDIO_RENDER prepares the model (header, mesh, detail level) without
 // asking for them, and then the model is drawn with its own bones.
-void Hooks::DrawBodyModel(int flags, void *renderable, int entityIndex, const void *model, const HandMath::Mat34 &frame)
+void Hooks::DrawBodyModel(int flags, void *renderable, int entityIndex, const void *bodyDraw)
 {
+	const VR::BodyModelDraw &draw = *(const VR::BodyModelDraw *)bodyDraw;
+	const void *model = draw.model;
+	const HandMath::Mat34 &frame = draw.frame;
 	if (!model || !renderable || !m_Game->m_ModelRender || m_BodyModelsBroken)
 		return;
 
@@ -822,7 +855,7 @@ void Hooks::DrawBodyModel(int flags, void *renderable, int entityIndex, const vo
 		return;
 
 	alignas(16) unsigned char bones[sizeof(HandMath::Mat34) * Studio::kMaxBones];
-	m_VR->BuildBodyModelBones(state.studioHeader, frame, bones);
+	m_VR->BuildBodyModelBones(state.studioHeader, draw, bones);
 	info.flags = flags;
 	hkDrawModelExecute.fOriginal(m_Game->m_ModelRender, &state, info, bones);
 
@@ -836,7 +869,7 @@ void Hooks::DrawModelForVR(void *ecx, void *state, const ModelRenderInfo_t &info
 	if (!m_VR->m_IsVREnabled || !info.pModel || !state)
 		return hkDrawModelExecute.fOriginal(ecx, state, info, pCustomBoneToWorld);
 
-	const ModelKind kind = GetModelKind(info.pModel);
+	ModelKind kind = GetModelKind(info.pModel);
 
 	if (kind == ModelKind::FirstPersonArms && !m_LoggedArmsDraw)
 	{
@@ -845,7 +878,14 @@ void Hooks::DrawModelForVR(void *ecx, void *state, const ModelRenderInfo_t &info
 	}
 
 	if (kind == ModelKind::Viewmodel || kind == ModelKind::DualPistolsViewmodel)
-		m_VR->m_ViewmodelHasTwoWeapons = kind == ModelKind::DualPistolsViewmodel;
+	{
+		const bool two = kind == ModelKind::DualPistolsViewmodel;
+		m_VR->m_DualAsOnePistol = two && m_VR->m_OnePistolDoubled;
+		m_VR->m_ViewmodelHasTwoWeapons = two && !m_VR->m_OnePistolDoubled;
+		// Treated like the single pistol from here on
+		if (m_VR->m_DualAsOnePistol)
+			kind = ModelKind::Viewmodel;
+	}
 
 	// The grenade has left the hand: the game is still playing the throw until it changes weapon
 	if (kind == ModelKind::Viewmodel && m_VR->ThrownGrenadeHasLeftTheHand())
@@ -1170,11 +1210,20 @@ void Hooks::initUseHooks()
 
 bool Hooks::GetServerHandAim(void *player, Vector &origin, QAngle &angles)
 {
-	if (!m_VR->m_InteractWithHand)
-		return false;
-
 	const int index = GetServerEntityIndex(player);
 	if (!m_Game->IsValidPlayerIndex(index))
+		return false;
+
+	// The hand just grabbed something: this use is for that
+	const Player &grabbing = m_Game->m_PlayersVRInfo[index];
+	if (GetTickCount64() < grabbing.useAimUntil)
+	{
+		origin = grabbing.useAimOrigin;
+		angles = grabbing.useAimAngles;
+		return true;
+	}
+
+	if (!m_VR->m_InteractWithHand)
 		return false;
 
 	if (m_VR->m_IsVREnabled && index == m_Game->m_EngineClient->GetLocalPlayer())
@@ -1240,6 +1289,14 @@ const QAngle *__fastcall Hooks::dServerPlayerEyeAngles(void *ecx, void *edx)
 
 void *__fastcall Hooks::dClientFindUseEntity(void *ecx, void *edx, float radius, float dotLimit, float defaultDotLimit, void *traceResult, void *extra)
 {
+	Vector grabOrigin;
+	QAngle grabAngles;
+	if (m_VR->m_IsVREnabled && ecx == m_Game->GetClientEntity(m_Game->m_EngineClient->GetLocalPlayer()) && m_VR->GetGrabUseAim(grabOrigin, grabAngles))
+	{
+		ScopedUseAim aim(g_ClientUseAim, ecx, grabOrigin, grabAngles);
+		return hkClientFindUseEntity.fOriginal(ecx, radius, dotLimit, defaultDotLimit, traceResult, extra);
+	}
+
 	if (m_VR->m_IsVREnabled && m_VR->m_InteractWithHand && ecx == m_Game->GetClientEntity(m_Game->m_EngineClient->GetLocalPlayer()))
 	{
 		ScopedUseAim aim(g_ClientUseAim, ecx, m_VR->GetRightControllerAbsPos(), m_VR->GetRightControllerAbsAngle());

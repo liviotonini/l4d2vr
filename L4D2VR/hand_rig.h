@@ -43,6 +43,9 @@ public:
 	// Moves the hand and its fingers rigidly, keeping their pose: `move` is applied in world space
 	void MoveHand(Side side, const HandMath::Mat34 &move, HandMath::Mat34 *bones) const;
 
+	// Along the knuckles, from the little finger to the index: the direction of what the hand is gripping
+	HandMath::Vec3 GripAxis(Side side, const HandMath::Mat34 *bones) const;
+
 	// Copies the transforms of a hand from `from` to `to`, gradually
 	void BlendHand(Side side, const HandMath::Mat34 *from, const HandMath::Mat34 *to, float amount, HandMath::Mat34 *bones) const;
 
@@ -64,6 +67,8 @@ private:
 		int hand = -1;
 		int forearm = -1;
 		int upperArm = -1;
+		int indexBase = -1;
+		int pinkyBase = -1;
 		HandMath::Mat34 restHand;
 		HandMath::Mat34 restFrame;  // fingers, thumb side, palm
 		std::vector<Joint> joints;  // parents always before their children

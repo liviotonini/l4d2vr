@@ -167,7 +167,7 @@ public:
 
 	// Models of what the player carries, drawn with the weapon (VR::DrawBodyModels): DrawModel is asked to draw them,
 	// and dDrawModelExecute gives them their place
-	static void DrawBodyModel(int flags, void *renderable, int entityIndex, const void *model, const HandMath::Mat34 &frame);
+	static void DrawBodyModel(int flags, void *renderable, int entityIndex, const void *bodyDraw); // a VR::BodyModelDraw
 	static void DrawModelForVR(void *ecx, void *state, const ModelRenderInfo_t &info, void *pCustomBoneToWorld);
 	static inline bool m_BodyModelChecked = false;
 	static inline bool m_BodyModelsBroken = false;

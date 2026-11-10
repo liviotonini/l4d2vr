@@ -81,6 +81,8 @@ void HandRig::Build(const std::vector<BoneData> &bones)
 		side.hand = hand;
 		side.forearm = forearm;
 		side.upperArm = upperArm;
+		side.indexBase = indexBase;
+		side.pinkyBase = pinkyBase;
 		side.restHand = rest[hand];
 		side.restFrame = FromAxes(fingers, thumbSide, palm);
 
@@ -266,6 +268,12 @@ void HandRig::PoseHand(Side s, const Mat34 &hand, const float curls[FingerCount]
 			bones[joint.bone] = Multiply(bones[joint.parent], joint.local);
 		}
 	}
+}
+
+Vec3 HandRig::GripAxis(Side s, const Mat34 *bones) const
+{
+	const SideData &side = m_Sides[s];
+	return side.hand < 0 ? Vec3(0.0f, 0.0f, 1.0f) : Normalized(Origin(bones[side.indexBase]) - Origin(bones[side.pinkyBase]));
 }
 
 void HandRig::MoveHand(Side s, const Mat34 &move, Mat34 *bones) const

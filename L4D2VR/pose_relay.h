@@ -96,6 +96,7 @@ private:
 	unsigned long long m_LastHelloMs = 0;
 	unsigned long long m_LastSendMs = 0;
 	uint16_t m_Sequence = 0;
+	int m_SentOnePistol = -1;
 	int m_SentManualReload = -1;
 
 	ServerClient m_Clients[kMaxPlayers];
@@ -103,5 +104,5 @@ private:
 	int m_RemoteCount = 0;
 
 	bool SendToClient(edict_t *edict, const char *command);
-	void ApplyReload(edict_t *player, int shell, int ammoType, int expectedReserve);
+	void ApplyReload(edict_t *player, int shell, int ammoType, int expectedReserve, int requestedCapacity);
 };

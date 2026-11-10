@@ -99,6 +99,8 @@ namespace
 	const int kClientAmmoArrayOffset = 0xF24; // known, checks the lookup
 	int g_MyWeaponsOffset = -1;
 	int g_MyWeaponsCount = 0;
+	int g_ModelIndexOffset = -1;
+	int g_OwnerOffset = -1;
 	bool g_NetvarsLookedUp = false;
 
 	bool HasPlayerClass(const ClientClass *clientClass)
@@ -149,6 +151,14 @@ namespace
 		const bool foundAmmo = classes && FindPlayerProp(classes, "m_iAmmo", ammoOffset, ammoCount);
 		const bool foundWeapons = classes && FindPlayerProp(classes, "m_hMyWeapons", weaponsOffset, weaponsCount);
 
+		int unused = 0;
+		if (classes)
+		{
+			FindPlayerProp(classes, "m_nModelIndex", g_ModelIndexOffset, unused);
+			FindPlayerProp(classes, "m_hOwnerEntity", g_OwnerOffset, unused);
+		}
+		Diagnostics::Log("body items: m_nModelIndex at 0x%X, m_hOwnerEntity at 0x%X", g_ModelIndexOffset, g_OwnerOffset);
+
 		if (foundAmmo && ammoOffset == kClientAmmoArrayOffset && foundWeapons && weaponsCount > 0 && weaponsCount <= 64)
 		{
 			g_MyWeaponsOffset = weaponsOffset;
@@ -167,20 +177,39 @@ namespace
 		const char *path;
 		const void *model;
 		bool lookedUp;
+		bool loadIt;  // not one the game has loaded for the map
 	};
 
-	// The bag is the game's ammo pack. Only models the game has loaded can be drawn.
 	BodyModel g_Models[] =
 	{
-		{ "models/w_models/weapons/w_eq_explosive_ammopack.mdl", nullptr, false },
-		{ "models/w_models/weapons/w_eq_incendiary_ammopack.mdl", nullptr, false },
-		{ "models/w_models/weapons/w_eq_painpills.mdl", nullptr, false },
-		{ "models/w_models/weapons/w_eq_adrenaline.mdl", nullptr, false },
-		{ "models/w_models/weapons/w_eq_molotov.mdl", nullptr, false },
-		{ "models/w_models/weapons/w_eq_pipebomb.mdl", nullptr, false },
-		{ "models/w_models/weapons/w_eq_bile_flask.mdl", nullptr, false },
+		{ "models/props_collectables/backpack.mdl", nullptr, false, true },
+		{ "models/w_models/weapons/w_eq_explosive_ammopack.mdl", nullptr, false, false },
+		{ "models/w_models/weapons/w_eq_incendiary_ammopack.mdl", nullptr, false, false },
+		{ "models/w_models/weapons/w_eq_painpills.mdl", nullptr, false, false },
+		{ "models/w_models/weapons/w_eq_adrenaline.mdl", nullptr, false, false },
+		{ "models/w_models/weapons/w_eq_molotov.mdl", nullptr, false, false },
+		{ "models/w_models/weapons/w_eq_pipebomb.mdl", nullptr, false, false },
+		{ "models/w_models/weapons/w_eq_bile_flask.mdl", nullptr, false, false },
 	};
-	enum { Model_Bag, Model_BagOther, Model_Pills, Model_Adrenaline, Model_Molotov, Model_PipeBomb, Model_BileJar };
+	enum { Model_Pouch, Model_Bag, Model_BagOther, Model_Pills, Model_Adrenaline, Model_Molotov, Model_PipeBomb, Model_BileJar };
+
+	// The game has no ammo pouch: its small backpack, reduced to the size of one, with its back against the hip
+	const float kPouchScale = 0.36f;
+	const Vec3 kPouchCenter(0.27f, 8.0f, 5.26f);
+	const float kChestItemSmallScale = 0.75f;
+
+	// IVModelInfoClient::FindOrLoadModel: gives a model the map didn't load, loading it
+	const int kFindOrLoadModelIndex = 41;
+	const unsigned char kFindOrLoadModelStart[] = { 0x55, 0x8B, 0xEC, 0x53, 0x8B, 0x5D, 0x08, 0x56, 0x57, 0x8B, 0xF1 };
+
+	const void *LoadModel(Game *game, const char *path)
+	{
+		void **vtable = *(void ***)game->m_ModelInfo;
+		if (memcmp(vtable[kFindOrLoadModelIndex], kFindOrLoadModelStart, sizeof(kFindOrLoadModelStart)) != 0)
+			return nullptr;
+		typedef const void *(__thiscall *tFindOrLoadModel)(void *thisptr, const char *name);
+		return ((tFindOrLoadModel)vtable[kFindOrLoadModelIndex])(game->m_ModelInfo, path);
+	}
 
 	const void *GetModel(Game *game, int which)
 	{
@@ -188,8 +217,15 @@ namespace
 		if (!entry.lookedUp)
 		{
 			entry.lookedUp = true;
-			const int index = game->m_ModelInfo->GetModelIndex(entry.path);
-			entry.model = index >= 0 ? game->m_ModelInfo->GetModel(index) : nullptr;
+			if (entry.loadIt)
+			{
+				entry.model = LoadModel(game, entry.path);
+			}
+			else
+			{
+				const int index = game->m_ModelInfo->GetModelIndex(entry.path);
+				entry.model = index >= 0 ? game->m_ModelInfo->GetModel(index) : nullptr;
+			}
 			Diagnostics::Log("body items: %s %s", entry.path, entry.model ? "loaded" : "not loaded by the game");
 		}
 		return entry.model;
@@ -227,7 +263,7 @@ namespace
 
 	// Meters from the eyes looking straight ahead, for a right handed player of 1.8 m: forward, to the left, up.
 	// Pills by the left shoulder, the grenade on the right one.
-	const Vec3 kChestSpots[2] = { Vec3(0.16f, 0.13f, -0.27f), Vec3(0.15f, -0.16f, -0.24f) };
+	const Vec3 kChestSpots[2] = { Vec3(0.11f, 0.13f, -0.37f), Vec3(0.10f, -0.16f, -0.34f) };
 	const float kChestGrabRadius = 0.12f; // meters
 	const float kChestViewCosine = 0.2f;
 
@@ -308,7 +344,10 @@ void VR::UpdateBodyItems()
 	// The bag
 	if (m_ManualReloadEnabled)
 	{
-		const void *bag = GetModel(m_Game, Model_Bag);
+		const void *pouch = GetModel(m_Game, Model_Pouch);
+		const void *bag = pouch;
+		if (!bag)
+			bag = GetModel(m_Game, Model_Bag);
 		if (!bag)
 			bag = GetModel(m_Game, Model_BagOther);
 		if (bag)
@@ -316,13 +355,25 @@ void VR::UpdateBodyItems()
 			m_AmmoBagDrawn = true;
 			if (m_ReloadPouchVisible)
 			{
-				// Against the hip: its thin side faces out
 				const Vec3 up(0.0f, 0.0f, 1.0f);
 				const Vec3 forward = Normalized(m_WaistForward);
 				const Vec3 outward = Cross(up, forward) * (m_LeftHanded ? -1.0f : 1.0f);
-				BodyModelDraw &draw = m_BodyDraws[m_BodyDrawCount++];
+				BodyModelDraw draw;
 				draw.model = bag;
-				draw.frame = FromAxes(outward, Cross(up, outward), up, m_WaistWorld);
+				if (pouch)
+				{
+					// Its y axis goes from the straps to the front
+					draw.frame = FromAxes(Cross(outward, up), outward, up, m_WaistWorld);
+					draw.scale = kPouchScale;
+					draw.hasCenter = true;
+					draw.center = kPouchCenter;
+				}
+				else
+				{
+					// The ammo pack's thin side faces out
+					draw.frame = FromAxes(outward, Cross(up, outward), up, m_WaistWorld);
+				}
+				m_BodyDraws[m_BodyDrawCount++] = draw;
 			}
 		}
 	}
@@ -361,9 +412,11 @@ void VR::UpdateBodyItems()
 		const bool inView = Dot(Normalized(Origin(frame) - ToVec3(m_HmdPosAbs)), ToVec3(m_HmdForward)) > kChestViewCosine;
 		if (model && inView && m_BodyDrawCount < kMaxBodyDraws)
 		{
-			BodyModelDraw &draw = m_BodyDraws[m_BodyDrawCount++];
+			BodyModelDraw draw;
 			draw.model = model;
 			draw.frame = frame;
+			draw.scale = m_SmallBodyItems ? kChestItemSmallScale : 1.0f;
+			m_BodyDraws[m_BodyDrawCount++] = draw;
 		}
 	}
 }
@@ -372,7 +425,7 @@ void VR::UpdateBodyItems()
 void VR::DrawBodyModels(int flags, void *renderable, int entityIndex)
 {
 	for (int i = 0; i < m_BodyDrawCount; ++i)
-		Hooks::DrawBodyModel(flags, renderable, entityIndex, m_BodyDraws[i].model, m_BodyDraws[i].frame);
+		Hooks::DrawBodyModel(flags, renderable, entityIndex, &m_BodyDraws[i]);
 }
 
 // The slot of the item on the chest where the hand is (slot3 grenade, slot5 pills or adrenaline), 0 if none
@@ -386,16 +439,20 @@ int VR::GetChestItemSlotAt(const Vec3 &handWorld) const
 	return 0;
 }
 
-// The bones of an item drawn on the body: the model as it was made, its center at `frame`
-void VR::BuildBodyModelBones(const void *studioHeader, const Mat34 &frame, void *outBones)
+// The bones of an item drawn on the body: the model as it was made, its center at the frame, at its scale
+void VR::BuildBodyModelBones(const void *studioHeader, const BodyModelDraw &draw, void *outBones)
 {
 	Mat34 *bones = (Mat34 *)outBones;
 	const int boneCount = std::clamp(Studio::BoneCount(studioHeader), 0, Studio::kMaxBones);
 
 	const Vec3 hullMin = *(const Vec3 *)((const uint8_t *)studioHeader + 104);
 	const Vec3 hullMax = *(const Vec3 *)((const uint8_t *)studioHeader + 116);
-	Mat34 placed = frame;
-	SetAxis(placed, 3, TransformPoint(frame, (hullMin + hullMax) * -0.5f));
+	const Vec3 center = draw.hasCenter ? draw.center : (hullMin + hullMax) * 0.5f;
+
+	Mat34 placed = draw.frame;
+	for (int axis = 0; axis < 3; ++axis)
+		SetAxis(placed, axis, Axis(draw.frame, axis) * draw.scale);
+	SetAxis(placed, 3, TransformPoint(placed, center * -1.0f));
 
 	for (int i = 0; i < boneCount; ++i)
 		bones[i] = Multiply(placed, InvertRigid(Studio::PoseToBone(studioHeader, i)));
@@ -438,8 +495,240 @@ bool VR::BuildRemoteItemBones(int entityIndex, const void *weapon, const void *s
 			return false;
 
 		const Mat34 body = BodyFrame(pose.head.position + m_RemoteHeadOffset[player], pose.head.forward, pose.head.up, m_VRScale);
-		BuildBodyModelBones(studioHeader, ChestItemFrame(body, spot, weaponId, false, 1.8f, m_VRScale), outBones);
+		BodyModelDraw draw;
+		draw.frame = ChestItemFrame(body, spot, weaponId, false, 1.8f, m_VRScale);
+		draw.scale = m_SmallBodyItems ? kChestItemSmallScale : 1.0f;
+		BuildBodyModelBones(studioHeader, draw, outBones);
 		return true;
 	}
 	return false;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Taking weapons and items and opening doors with the hand on them. A grab button pressed next to one of them does the
+// game's use, aimed at it for a moment (Hooks::GetServerHandAim). The host needs the mod.
+// ---------------------------------------------------------------------------------------------------------------
+
+namespace
+{
+	const float kWorldItemReach = 0.28f; // meters
+	const float kDoorHandleReach = 0.24f;
+
+	struct WorldTarget
+	{
+		bool found = false;
+		bool door = false;
+		Vec3 point;
+		float distance = 1e9f;
+		int modelIndex = 0;
+	};
+
+	bool IsPickable(const char *lowerName)
+	{
+		return strstr(lowerName, "w_models") || strstr(lowerName, "weapons/melee/w_") || strstr(lowerName, "terror/ammo_stack")
+			|| strstr(lowerName, "ammo_can") || strstr(lowerName, "coffeeammo") || strstr(lowerName, "exploding_ammo") || strstr(lowerName, "incendiary_ammo");
+	}
+
+	bool IsDoor(const char *lowerName)
+	{
+		return strstr(lowerName, "props_doors/") && !strstr(lowerName, "frame") && !strstr(lowerName, "reinforcement")
+			&& !strstr(lowerName, "gib") && !strstr(lowerName, "dummy") && !strstr(lowerName, "crossbar") && !strstr(lowerName, "damaged");
+	}
+
+	void Consider(WorldTarget &best, const Vec3 &hand, const Vec3 &point, float reach, bool door, int modelIndex)
+	{
+		const float distance = Length(point - hand);
+		if (distance < reach && distance < best.distance)
+		{
+			best.found = true;
+			best.door = door;
+			best.point = point;
+			best.distance = distance;
+			best.modelIndex = modelIndex;
+		}
+	}
+
+	// The handle of a door: on the free edge, a bit under the middle of its height. Doors turn around their origin, or
+	// around the middle of the model when it has two leaves: then either edge has one.
+	void ConsiderDoorHandles(WorldTarget &best, const Vec3 &hand, const Vec3 &origin, const QAngle &angles, const void *model, float reach, int modelIndex)
+	{
+		const Vec3 mins = *(const Vec3 *)((const uint8_t *)model + 0x118);
+		const Vec3 maxs = *(const Vec3 *)((const uint8_t *)model + 0x124);
+
+		Vector forwardV, rightV, upV;
+		QAngle::AngleVectors(angles, &forwardV, &rightV, &upV);
+		const Vec3 forward(forwardV.x, forwardV.y, forwardV.z), left(-rightV.x, -rightV.y, -rightV.z), up(upV.x, upV.y, upV.z);
+
+		const bool alongY = maxs.y - mins.y > maxs.x - mins.x;
+		const Vec3 axis = alongY ? left : forward;
+		const float low = alongY ? mins.y : mins.x, high = alongY ? maxs.y : maxs.x;
+		const float height = mins.z + (maxs.z - mins.z) * 0.40f;
+		const float fromEdge = 3.0f;
+
+		if (high > -low * 0.5f)
+			Consider(best, hand, origin + axis * (high - fromEdge) + up * height, reach, true, modelIndex);
+		if (-low > high * 0.5f)
+			Consider(best, hand, origin + axis * (low + fromEdge) + up * height, reach, true, modelIndex);
+	}
+
+	// A wrong guess about an entity must not take the game down
+	void FindWorldTarget(Game *game, const Vec3 &hand, float unitsPerMeter, WorldTarget &best)
+	{
+		__try
+		{
+			const int highest = game->m_ClientEntityList->GetHighestEntityIndex();
+			for (int i = 33; i <= highest; ++i)
+			{
+				const uint8_t *entity = (const uint8_t *)game->m_ClientEntityList->GetClientEntity(i);
+				if (!entity)
+					continue;
+
+				const int modelIndex = *(const int16_t *)(entity + g_ModelIndexOffset);
+				void *model = modelIndex != 0 ? game->m_ModelInfo->GetModel(modelIndex) : nullptr;
+				const char *name = model ? game->m_ModelInfo->GetModelName(model) : nullptr;
+				if (!name)
+					continue;
+
+				char lower[128];
+				strncpy_s(lower, name, _TRUNCATE);
+				_strlwr_s(lower);
+				const bool pickable = IsPickable(lower);
+				const bool door = !pickable && IsDoor(lower);
+				if (!pickable && !door)
+					continue;
+
+				// Carried by somebody
+				const int owner = *(const int *)(entity + g_OwnerOffset);
+				if (pickable && owner != 0 && owner != -1)
+					continue;
+
+				// IClientRenderable::GetRenderOrigin and GetRenderAngles
+				void *renderable = (uint8_t *)entity + 4;
+				void **vtable = *(void ***)renderable;
+				typedef const Vector &(__thiscall *tGetOrigin)(void *thisptr);
+				typedef const QAngle &(__thiscall *tGetAngles)(void *thisptr);
+				const Vector &originV = ((tGetOrigin)vtable[1])(renderable);
+				const Vec3 origin(originV.x, originV.y, originV.z);
+
+				if (pickable)
+					Consider(best, hand, origin, kWorldItemReach * unitsPerMeter, false, modelIndex);
+				else
+					ConsiderDoorHandles(best, hand, origin, ((tGetAngles)vtable[2])(renderable), model, kDoorHandleReach * unitsPerMeter, modelIndex);
+			}
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+		}
+	}
+}
+
+// A grab button pressed with the hand at `handWorld`. True if it took something or opened a door.
+bool VR::TryGrabWorld(const Vec3 &handWorld)
+{
+	if (g_ModelIndexOffset < 0 || g_OwnerOffset < 0 || !m_Game->m_PoseRelay->IsServerCapable())
+		return false;
+
+	WorldTarget target;
+	FindWorldTarget(m_Game, handWorld, m_VRScale, target);
+	if (!target.found)
+		return false;
+
+	// From a little behind the hand, straight at it
+	Vec3 direction = target.point - handWorld;
+	direction = Normalized(direction, ToVec3(m_RightControllerForward));
+	const Vec3 from = handWorld - direction * 10.0f;
+
+	m_GrabUseOrigin = Vector(from.x, from.y, from.z);
+	const Vector up = fabsf(direction.z) > 0.98f ? Vector(1.0f, 0.0f, 0.0f) : Vector(0.0f, 0.0f, 1.0f);
+	QAngle::VectorAngles(Vector(direction.x, direction.y, direction.z), up, m_GrabUseAngles);
+
+	const unsigned long long now = GetTickCount64();
+	m_GrabUseAimUntil = now + 500;
+	m_GrabUsePressAt = now + 60;     // after the aim has reached the server
+	m_GrabUsePressUntil = now + 220;
+
+	char command[128];
+	snprintf(command, sizeof(command), "l4d2vr_use_aim %.2f %.2f %.2f %.2f %.2f %.2f", m_GrabUseOrigin.x, m_GrabUseOrigin.y, m_GrabUseOrigin.z, m_GrabUseAngles.x, m_GrabUseAngles.y, m_GrabUseAngles.z);
+	m_Game->m_EngineClient->ServerCmd(command, true);
+
+	Diagnostics::Log("grab: %s, model %d, %.2f m from the hand", target.door ? "door" : "item", target.modelIndex, target.distance / m_VRScale);
+	return true;
+}
+
+bool VR::GetGrabUseAim(Vector &origin, QAngle &angles) const
+{
+	if (GetTickCount64() >= m_GrabUseAimUntil)
+		return false;
+	origin = m_GrabUseOrigin;
+	angles = m_GrabUseAngles;
+	return true;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Two pistols shown as one
+// ---------------------------------------------------------------------------------------------------------------
+
+namespace
+{
+	// The effects of the left pistol's shots come out of the right one: its attachments are replaced in the model
+	struct AttachmentPair { const char *right; const char *left; };
+	const AttachmentPair kPistolAttachments[3] = { { "muzzle_flash_r", "muzzle_flash_l" }, { "shell_r", "shell_l" }, { "muzzlesmoke_r", "muzzlesmoke_l" } };
+	const void *g_OnePistolHeader = nullptr;
+	bool g_OnePistolMoved = false;
+	unsigned char g_OnePistolSaved[3][Studio::kAttachmentPlacementSize];
+
+	// Where the dual pistols' right pistol has to go so it's where the single pistol is, measured from both models in
+	// the game: relative to the weapon's frame (x forward, y left, z up)
+	Mat34 MakeOnePistolCorrection()
+	{
+		Mat34 correction;
+		SetAxis(correction, 3, Vec3(-1.5879f, 0.6982f, -0.3613f));
+		return correction;
+	}
+	const Mat34 kOnePistolCorrection = MakeOnePistolCorrection();
+}
+
+void VR::UpdateOnePistolModel(const void *studioHeader, bool oneShown)
+{
+	if (!Studio::IsValid(studioHeader))
+		return;
+
+	if (g_OnePistolHeader != studioHeader)
+	{
+		g_OnePistolHeader = studioHeader;
+		g_OnePistolMoved = false;
+		for (int i = 0; i < 3; ++i)
+			memcpy(g_OnePistolSaved[i], Studio::AttachmentPlacement(studioHeader, Studio::FindAttachment(studioHeader, kPistolAttachments[i].left)), Studio::kAttachmentPlacementSize);
+	}
+
+	if (oneShown == g_OnePistolMoved)
+		return;
+	g_OnePistolMoved = oneShown;
+
+	for (int i = 0; i < 3; ++i)
+	{
+		void *left = Studio::AttachmentPlacement(studioHeader, Studio::FindAttachment(studioHeader, kPistolAttachments[i].left));
+		if (oneShown)
+			memcpy(left, Studio::AttachmentPlacement(studioHeader, Studio::FindAttachment(studioHeader, kPistolAttachments[i].right)), Studio::kAttachmentPlacementSize);
+		else
+			memcpy(left, g_OnePistolSaved[i], Studio::kAttachmentPlacementSize);
+	}
+}
+
+// Called at the end of the tracking: the dual pistols model is placed so its right pistol is where the single one is
+void VR::ApplyOnePistolPlacement()
+{
+	if (!m_DualAsOnePistol)
+		return;
+
+	const Mat34 frame = FromAxes(ToVec3(m_ViewmodelForward), ToVec3(m_ViewmodelRight) * -1.0f, ToVec3(m_ViewmodelUp), ToVec3(GetRecommendedViewmodelAbsPos()));
+	const Mat34 placed = Multiply(frame, kOnePistolCorrection);
+
+	auto toVector = [](const Vec3 &v) { return Vector(v.x, v.y, v.z); };
+	m_ViewmodelForward = toVector(Axis(placed, 0));
+	m_ViewmodelRight = toVector(Axis(placed, 1) * -1.0f);
+	m_ViewmodelUp = toVector(Axis(placed, 2));
+
+	const Vec3 fromController = Origin(placed) - ToVec3(GetRightControllerAbsPos());
+	m_ViewmodelPosOffset = Vector(-Dot(fromController, Axis(placed, 0)), Dot(fromController, Axis(placed, 1)), -Dot(fromController, Axis(placed, 2)));
 }
