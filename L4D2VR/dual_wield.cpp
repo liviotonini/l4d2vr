@@ -339,7 +339,7 @@ bool VR::GetLeftItemDraw(BodyModelDraw &draw)
 			draw.syringe = true;
 		}
 	}
-	if (!GetLeftGripFrame(draw.frame))
+	if (!GetLeftItemFrame(draw.frame))
 		return false;
 
 	// The game's animation holds the knife in the right hand with its blade leaning 20 degrees towards the fingers (the
@@ -978,6 +978,18 @@ void VR::DualWieldTest(const char *action)
 	if (strcmp(action, "shoulder") == 0)
 	{
 		Diagnostics::Log("dual wield test: left shoulder %s", LeftShoulderGrab() ? "did something" : "did nothing");
+		return;
+	}
+	// support: the right hand holds the left hand's gun too, as far as it can without controllers
+	if (strcmp(action, "support") == 0)
+	{
+		Vector before, after;
+		QAngle beforeAngles, afterAngles;
+		const bool had = GetLeftGunAim(before, beforeAngles);
+		m_RightHoldsLeftGun = m_RightHoldsLeftGunTest = m_RightHandEmpty && LeftGun::Find(m_LeftItemId) && LeftGun::Find(m_LeftItemId)->twoHanded;
+		const bool has = GetLeftGunAim(after, afterAngles);
+		Diagnostics::Log("dual wield test: the right hand %s the left hand's gun; aim %s %.0f %.0f, then %s %.0f %.0f", m_RightHoldsLeftGun ? "holds" : "can't hold",
+			had ? "" : "(none)", beforeAngles.x, beforeAngles.y, has ? "" : "(none)", afterAngles.x, afterAngles.y);
 		return;
 	}
 	// fireleft: a shot of the left hand's gun from the eyes, where they look (no controllers)

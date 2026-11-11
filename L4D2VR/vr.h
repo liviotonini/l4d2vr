@@ -482,6 +482,8 @@ public:
 	int m_LeftGunClip = 0;                 // the game's, less the shots it hasn't counted yet
 	int m_LeftGunClipSeen = 0;
 	int m_LeftGunClipIndex = 0;
+	bool m_RightHoldsLeftGun = false;      // the empty right hand holds the left hand's gun too (TryRightHoldLeftGun)
+	bool m_RightHoldsLeftGunTest = false;  // held so by l4d2vr_dual_test, without the grab
 	bool m_LeftSwinging = false;
 	QAngle m_LeftSwingPrevAim = { 0, 0, 0 }; // the aim sent for the swing, from the last update
 	bool m_LeftSwingAimValid = false;
@@ -628,6 +630,8 @@ public:
 	void UpdateLeftGun(unsigned long long now);
 	void FireLeftGun(const LeftGun::GunData &gun, const Vector &origin, const QAngle &angles);
 	bool GetLeftGunAim(Vector &origin, QAngle &angles) const;
+	bool GetLeftItemFrame(HandMath::Mat34 &frame) const;
+	bool TryRightHoldLeftGun();
 	void GiveToLeftHand(int activeIndex, int activeWeaponId, const InventoryItem *items, int count);
 	void GiveToRightHand(const InventoryItem *items, int count);
 	bool GetLeftItemDraw(BodyModelDraw &draw);

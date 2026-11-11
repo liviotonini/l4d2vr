@@ -9,6 +9,7 @@
 #include "hooks.h"
 #include "dual_wield.h"
 #include "diagnostics.h"
+#include "reload_logic.h"
 
 using namespace HandMath;
 
@@ -25,26 +26,26 @@ namespace
 {
 	const LeftGun::GunData kGuns[] =
 	{
-		{ C_WeaponCSBase::PISTOL, 0.15f, LeftGun::Semi, 1.5f, "Pistol.Fire", true },
-		{ C_WeaponCSBase::MAGNUM, 0.15f, LeftGun::Semi, 1.25f, "Magnum.Fire", true },
-		{ C_WeaponCSBase::UZI, 0.0625f, LeftGun::Auto, 1.0f, "SMG.Fire", false },
-		{ C_WeaponCSBase::MAC10, 0.0625f, LeftGun::Auto, 1.2f, "SMG_Silenced.Fire", false },
-		{ C_WeaponCSBase::MP5, 0.075f, LeftGun::Auto, 1.1f, "Weapon_MP5Navy.Single", false },
+		{ C_WeaponCSBase::PISTOL, 0.15f, LeftGun::Semi, 1.5f, "Pistol.Fire", true, false },
+		{ C_WeaponCSBase::MAGNUM, 0.15f, LeftGun::Semi, 1.25f, "Magnum.Fire", true, false },
+		{ C_WeaponCSBase::UZI, 0.0625f, LeftGun::Auto, 1.0f, "SMG.Fire", false, true },
+		{ C_WeaponCSBase::MAC10, 0.0625f, LeftGun::Auto, 1.2f, "SMG_Silenced.Fire", false, true },
+		{ C_WeaponCSBase::MP5, 0.075f, LeftGun::Auto, 1.1f, "Weapon_MP5Navy.Single", false, true },
 		// The pump shotguns are pumped between shots
-		{ C_WeaponCSBase::PUMPSHOTGUN, 0.8f, LeftGun::Semi, 0.8f, "Shotgun.Fire", false },
-		{ C_WeaponCSBase::SHOTGUN_CHROME, 0.8f, LeftGun::Semi, 0.8f, "Shotgun_Chrome.Fire", false },
-		{ C_WeaponCSBase::AUTOSHOTGUN, 0.15f, LeftGun::Semi, 0.8f, "AutoShotgun.Fire", false },
-		{ C_WeaponCSBase::SPAS, 0.15f, LeftGun::Semi, 0.75f, "AutoShotgun_Spas.Fire", false },
-		{ C_WeaponCSBase::M16A1, 0.0875f, LeftGun::Auto, 0.4f, "Rifle.Fire", false },
-		{ C_WeaponCSBase::SCAR, 0.07f, LeftGun::Burst, 0.35f, "Rifle_Desert.Fire", false },
-		{ C_WeaponCSBase::AK47, 0.13f, LeftGun::Auto, 1.0f, "AK47.Fire", false },
-		{ C_WeaponCSBase::SG552, 0.0825f, LeftGun::Auto, 0.4f, "Weapon_SG552.Single", false },
-		{ C_WeaponCSBase::M60, 0.11f, LeftGun::Auto, 1.0f, "M60.Fire", false },
-		{ C_WeaponCSBase::HUNTING_RIFLE, 0.25f, LeftGun::Semi, 0.1f, "HuntingRifle.Fire", false },
-		{ C_WeaponCSBase::SNIPER_MILITARY, 0.25f, LeftGun::Semi, 0.5f, "Sniper_Military.Fire", false },
+		{ C_WeaponCSBase::PUMPSHOTGUN, 0.8f, LeftGun::Semi, 0.8f, "Shotgun.Fire", false, true },
+		{ C_WeaponCSBase::SHOTGUN_CHROME, 0.8f, LeftGun::Semi, 0.8f, "Shotgun_Chrome.Fire", false, true },
+		{ C_WeaponCSBase::AUTOSHOTGUN, 0.15f, LeftGun::Semi, 0.8f, "AutoShotgun.Fire", false, true },
+		{ C_WeaponCSBase::SPAS, 0.15f, LeftGun::Semi, 0.75f, "AutoShotgun_Spas.Fire", false, true },
+		{ C_WeaponCSBase::M16A1, 0.0875f, LeftGun::Auto, 0.4f, "Rifle.Fire", false, true },
+		{ C_WeaponCSBase::SCAR, 0.07f, LeftGun::Burst, 0.35f, "Rifle_Desert.Fire", false, true },
+		{ C_WeaponCSBase::AK47, 0.13f, LeftGun::Auto, 1.0f, "AK47.Fire", false, true },
+		{ C_WeaponCSBase::SG552, 0.0825f, LeftGun::Auto, 0.4f, "Weapon_SG552.Single", false, true },
+		{ C_WeaponCSBase::M60, 0.11f, LeftGun::Auto, 1.0f, "M60.Fire", false, true },
+		{ C_WeaponCSBase::HUNTING_RIFLE, 0.25f, LeftGun::Semi, 0.1f, "HuntingRifle.Fire", false, true },
+		{ C_WeaponCSBase::SNIPER_MILITARY, 0.25f, LeftGun::Semi, 0.5f, "Sniper_Military.Fire", false, true },
 		// The bolt action rifles are worked between shots
-		{ C_WeaponCSBase::AWP, 1.05f, LeftGun::Semi, 0.1f, "Weapon_AWP.Single", false },
-		{ C_WeaponCSBase::SCOUT, 0.9f, LeftGun::Semi, 0.1f, "Weapon_Scout.Single", false },
+		{ C_WeaponCSBase::AWP, 1.05f, LeftGun::Semi, 0.1f, "Weapon_AWP.Single", false, true },
+		{ C_WeaponCSBase::SCOUT, 0.9f, LeftGun::Semi, 0.1f, "Weapon_Scout.Single", false, true },
 	};
 
 	const int kBurstShots = 3;
@@ -52,6 +53,13 @@ namespace
 	// From the middle of the fist to where the shot leaves, game units along the weapon bone: up the grip, along the barrel
 	const float kMuzzleUp = 2.5f;
 	const float kMuzzleForward = 6.0f;
+	// The empty right hand takes a long gun of the left hand within this of the barrel, from a little in front of the left
+	// hand to about where the guns end (units along it, meters from it)
+	const float kSupportFrom = 4.0f;
+	const float kSupportTo = 34.0f;
+	const float kSupportReach = 0.12f;
+	// Closer to the left hand than this, units, the right hand doesn't turn the gun
+	const float kSupportMinSpan = 3.0f;
 	// The server's checks: the shot leaves near the eyes, and not faster than the gun (with room for the network)
 	const float kMaxShotFromEyes = 120.0f;
 	const float kServerCycleShare = 0.7f;
@@ -85,12 +93,49 @@ const LeftGun::GunData *LeftGun::Find(int weaponId)
 // Client
 // ---------------------------------------------------------------------------------------------------------------
 
+// The frame the left hand's item is drawn in: its fist (y along the grip, z where the fingers point), turned to point at
+// the right hand while that one holds the gun too
+bool VR::GetLeftItemFrame(Mat34 &frame) const
+{
+	if (!GetLeftGripFrame(frame))
+		return false;
+	if (!m_RightHoldsLeftGun)
+		return true;
+
+	const Vec3 toRight = GetFistPoint(true) - Origin(frame);
+	if (Length(toRight) < kSupportMinSpan)
+		return true;
+	const Vec3 forward = Normalized(toRight);
+	const Vec3 grip = Axis(frame, 1);
+	const Vec3 up = Normalized(grip - forward * Dot(grip, forward), Cross(forward, Axis(frame, 0)));
+	frame = FromAxes(Cross(up, forward), up, forward, Origin(frame));
+	return true;
+}
+
+// The empty right hand takes the left hand's long gun with a grab on its barrel (UpdateTracking), and holds it while the
+// grab is held: the gun points from the left hand towards it. True if it took it.
+bool VR::TryRightHoldLeftGun()
+{
+	const LeftGun::GunData *gun = LeftHandHoldsItem() ? LeftGun::Find(m_LeftItemId) : nullptr;
+	Mat34 grip;
+	if (!m_RightHandEmpty || !gun || !gun->twoHanded || !GetLeftGripFrame(grip))
+		return false;
+	const Vec3 barrel = Normalized(Axis(grip, 2));
+	const float distance = Reload::DistanceToSegment(GetFistPoint(true), Origin(grip) + barrel * kSupportFrom, Origin(grip) + barrel * kSupportTo);
+	if (distance > kSupportReach * m_VRScale)
+		return false;
+	m_RightHoldsLeftGun = true;
+	m_Haptics.Play(Haptics::Hand::BothHands, HapticEffects::Take);
+	Diagnostics::Log("left gun: held with both hands, the right hand %.2f m from its barrel", distance / m_VRScale);
+	return true;
+}
+
 // Where the left hand's gun shoots from and towards: along its barrel as it's drawn (GetLeftItemDraw puts the weapon bone,
 // barrel along z, in the fist), or the controller's when the hand isn't drawn
 bool VR::GetLeftGunAim(Vector &origin, QAngle &angles) const
 {
 	Mat34 grip;
-	if (GetLeftGripFrame(grip))
+	if (GetLeftItemFrame(grip))
 	{
 		const Vec3 barrel = Normalized(Axis(grip, 2)), up = Normalized(Axis(grip, 1));
 		origin = ToVector(Origin(grip) + up * kMuzzleUp + barrel * kMuzzleForward);
@@ -109,6 +154,13 @@ bool VR::GetLeftGunAim(Vector &origin, QAngle &angles) const
 void VR::UpdateLeftGun(unsigned long long now)
 {
 	const LeftGun::GunData *gun = LeftHandHoldsItem() ? LeftGun::Find(m_LeftItemId) : nullptr;
+	// Held with both hands while the right grab is
+	if (m_RightHoldsLeftGun && (!gun || !gun->twoHanded || !m_RightHandEmpty || (!PressedDigitalAction(m_RightHandGrab) && !m_RightHoldsLeftGunTest)))
+	{
+		m_RightHoldsLeftGun = false;
+		m_RightHoldsLeftGunTest = false;
+		Diagnostics::Log("left gun: let go by the right hand");
+	}
 	const bool trigger = gun && PressedDigitalAction(m_ActionSecondaryAttack) && !m_ScopeZoomTookTrigger;
 	const bool pressed = trigger && !m_LeftGunTriggerDown;
 	m_LeftGunTriggerDown = trigger;
