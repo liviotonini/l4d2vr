@@ -276,7 +276,9 @@ void VR::UpdateWristHud()
 		state.ledge = Read<uint8_t>(local, kIsHangingFromLedgeOffset) != 0;
 		state.lastLife = Read<uint8_t>(local, kIsOnThirdStrikeOffset) != 0;
 
-		if (const C_BaseCombatWeapon *weapon = local->GetActiveWeapon())
+		// The weapon the empty right hand put away isn't shown
+		const C_BaseCombatWeapon *weapon = m_RightHandEmpty ? nullptr : local->GetActiveWeapon();
+		if (weapon)
 		{
 			const int slot = GetWeaponSlot(m_ActiveWeaponId);
 			const bool isGun = slot == 1 || m_ActiveWeaponId == C_WeaponCSBase::PISTOL || m_ActiveWeaponId == C_WeaponCSBase::MAGNUM;
@@ -306,6 +308,14 @@ void VR::UpdateWristHud()
 				state.clipLowAt = std::max(1, (m_WristHudMaxClip + 2) / 3);
 				state.reserveLowAt = std::max(1, (m_WristHudMaxReserve + 4) / 5);
 			}
+		}
+
+		// The left hand's gun (left_gun.cpp)
+		const void *leftGun = LeftGun::Find(m_LeftItemId) ? m_Game->GetClientEntity(m_LeftItemIndex) : nullptr;
+		if (leftGun)
+		{
+			state.leftClip = std::max(0, Read<int>(leftGun, kClipOffset));
+			state.leftClipLowAt = std::max(1, (GetReloadCapacity(m_LeftItemId) + 2) / 3);
 		}
 
 		// Grenade, medkit and pills

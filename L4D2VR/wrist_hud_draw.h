@@ -46,6 +46,8 @@ namespace WristHud
 		int reserve = -1;      // -1 for weapons with unlimited reserve ammo
 		int clipLowAt = 0;     // at or below this the number turns red
 		int reserveLowAt = 0;
+		int leftClip = -1;     // the left hand's gun, -1 without one
+		int leftClipLowAt = 0;
 		int teammateCount = 0;
 		Teammate teammates[kMaxTeammates];
 		int itemCount = 0;
@@ -57,6 +59,7 @@ namespace WristHud
 		{
 			if (health != o.health || temporary != o.temporary || incapacitated != o.incapacitated || ledge != o.ledge || lastLife != o.lastLife
 				|| hasAmmo != o.hasAmmo || clip != o.clip || reserve != o.reserve || clipLowAt != o.clipLowAt || reserveLowAt != o.reserveLowAt
+				|| leftClip != o.leftClip || leftClipLowAt != o.leftClipLowAt
 				|| teammateCount != o.teammateCount || itemCount != o.itemCount || commonKills != o.commonKills || specialKills != o.specialKills)
 				return false;
 			for (int i = 0; i < teammateCount; ++i)
@@ -393,12 +396,27 @@ namespace WristHud
 				DrawNumber(pixels, x, smallY, std::min(state.reserve, 999), kSmall, state.reserve <= state.reserveLowAt ? WithAlpha(kLow, 230) : kReserve);
 		}
 
-		const int itemsY = 97;
-		for (int i = 0; i < std::min(state.itemCount, kMaxItems); ++i)
-			DrawBlockText(pixels, 18 + i * 48, itemsY, state.items[i], 2, kText);
+		// The items, closer together with the left hand's gun after them. Block letters of 12 pixels at this size.
+		const int itemsY = 97, itemStep = state.leftClip >= 0 ? 42 : 48, letterW = 12;
+		const int itemCount = std::min(state.itemCount, kMaxItems);
+		int itemsEnd = 18;
+		for (int i = 0; i < itemCount; ++i)
+		{
+			DrawBlockText(pixels, 18 + i * itemStep, itemsY, state.items[i], 2, kText);
+			itemsEnd = 18 + i * itemStep + (int)strlen(state.items[i]) * letterW;
+		}
+		if (state.leftClip >= 0)
+		{
+			snprintf(text, sizeof(text), "L%d", std::min(state.leftClip, 999));
+			const int x = 18 + itemCount * itemStep;
+			DrawBlockText(pixels, x, itemsY, text, 2, state.leftClip <= state.leftClipLowAt ? kLow : kAmmo);
+			itemsEnd = x + (int)strlen(text) * letterW;
+		}
 
+		// The kills, if there's room left
 		snprintf(text, sizeof(text), "%d/%d", std::max(state.commonKills, 0), std::max(state.specialKills, 0));
 		const int estimatedW = (int)strlen(text) * 10 + 6;
-		DrawSmoothText(pixels, kWidth - 18 - estimatedW, itemsY - 4, estimatedW + 6, text, 16, kText);
+		if (kWidth - 18 - estimatedW >= itemsEnd)
+			DrawSmoothText(pixels, kWidth - 18 - estimatedW, itemsY - 4, estimatedW + 6, text, 16, kText);
 	}
 }
