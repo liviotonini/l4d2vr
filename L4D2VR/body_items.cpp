@@ -491,7 +491,9 @@ void VR::UpdateBodyItems()
 		if (!IsValidHandle(handle))
 			continue;
 		C_WeaponCSBase *weapon = (C_WeaponCSBase *)m_Game->m_ClientEntityList->GetClientEntityFromHandle(handle);
-		if (!weapon || weapon == active || (handle & kHandleIndexMask) == m_LeftItemIndex)
+		// The left hand's, in it or behind the left shoulder, isn't on the thigh
+		const int index = handle & kHandleIndexMask;
+		if (!weapon || weapon == active || index == m_LeftItemIndex || index == m_ExtraWeaponIndex)
 			continue;
 		const int weaponId = weapon->GetWeaponID();
 		if (weaponId != C_WeaponCSBase::PISTOL && weaponId != C_WeaponCSBase::MAGNUM)
@@ -975,11 +977,8 @@ namespace
 			|| strstr(lowerName, "exploding_ammo") || strstr(lowerName, "incendiary_ammo") || strstr(lowerName, "laser_sight")))
 			return true;
 
-		if (rule != LeftHandDualWield)
-			return false;
-		return (strstr(lowerName, "weapons/melee/w_") && !strstr(lowerName, "chainsaw")) || strstr(lowerName, "w_eq_painpills")
-			|| strstr(lowerName, "w_eq_adrenaline") || strstr(lowerName, "w_eq_molotov") || strstr(lowerName, "w_eq_pipebomb")
-			|| strstr(lowerName, "w_eq_bile_flask");
+		// Any weapon or item, but the cola bottles, carried in the arms
+		return rule == LeftHandDualWield && !strstr(lowerName, "w_cola");
 	}
 
 	// A door that opens, by its model: props_doors/, and others like c1m1's props_downtown/metal_door_112 (the class of the
@@ -1211,7 +1210,10 @@ bool VR::TryGrabWorld(const Vec3 &handWorld, bool leftHand)
 	snprintf(command, sizeof(command), "l4d2vr_use_aim %.2f %.2f %.2f %.2f %.2f %.2f %d", m_GrabUseOrigin.x, m_GrabUseOrigin.y, m_GrabUseOrigin.z, m_GrabUseAngles.x, m_GrabUseAngles.y, m_GrabUseAngles.z, toLeftHand ? 1 : 0);
 	m_Game->m_EngineClient->ServerCmd(command, true);
 
-	Diagnostics::Log("grab: %s, model %d, %.2f m from the hand", target.door ? "door" : "item", target.modelIndex, target.distance / m_VRScale);
+	void *model = m_Game->m_ModelInfo->GetModel(target.modelIndex);
+	const char *modelName = model ? m_Game->m_ModelInfo->GetModelName(model) : nullptr;
+	Diagnostics::Log("grab: %s, %s, %.2f m from the hand, with the %s hand", target.door ? "door" : "item", modelName ? modelName : "no model",
+		target.distance / m_VRScale, leftHand ? "left" : "right");
 	return true;
 }
 
@@ -1222,73 +1224,4 @@ bool VR::GetGrabUseAim(Vector &origin, QAngle &angles) const
 	origin = m_GrabUseOrigin;
 	angles = m_GrabUseAngles;
 	return true;
-}
-
-// ---------------------------------------------------------------------------------------------------------------
-// Two pistols shown as one
-// ---------------------------------------------------------------------------------------------------------------
-
-namespace
-{
-	// The effects of the left pistol's shots come out of the right one: its attachments are replaced in the model
-	struct AttachmentPair { const char *right; const char *left; };
-	const AttachmentPair kPistolAttachments[3] = { { "muzzle_flash_r", "muzzle_flash_l" }, { "shell_r", "shell_l" }, { "muzzlesmoke_r", "muzzlesmoke_l" } };
-	const void *g_OnePistolHeader = nullptr;
-	bool g_OnePistolMoved = false;
-	unsigned char g_OnePistolSaved[3][Studio::kAttachmentPlacementSize];
-
-	// Where the dual pistols' right pistol has to go so it's where the single pistol is, measured from both models in
-	// the game: relative to the weapon's frame (x forward, y left, z up)
-	Mat34 MakeOnePistolCorrection()
-	{
-		Mat34 correction;
-		SetAxis(correction, 3, Vec3(-1.5879f, 0.6982f, -0.3613f));
-		return correction;
-	}
-	const Mat34 kOnePistolCorrection = MakeOnePistolCorrection();
-}
-
-void VR::UpdateOnePistolModel(const void *studioHeader, bool oneShown)
-{
-	if (!Studio::IsValid(studioHeader))
-		return;
-
-	if (g_OnePistolHeader != studioHeader)
-	{
-		g_OnePistolHeader = studioHeader;
-		g_OnePistolMoved = false;
-		for (int i = 0; i < 3; ++i)
-			memcpy(g_OnePistolSaved[i], Studio::AttachmentPlacement(studioHeader, Studio::FindAttachment(studioHeader, kPistolAttachments[i].left)), Studio::kAttachmentPlacementSize);
-	}
-
-	if (oneShown == g_OnePistolMoved)
-		return;
-	g_OnePistolMoved = oneShown;
-
-	for (int i = 0; i < 3; ++i)
-	{
-		void *left = Studio::AttachmentPlacement(studioHeader, Studio::FindAttachment(studioHeader, kPistolAttachments[i].left));
-		if (oneShown)
-			memcpy(left, Studio::AttachmentPlacement(studioHeader, Studio::FindAttachment(studioHeader, kPistolAttachments[i].right)), Studio::kAttachmentPlacementSize);
-		else
-			memcpy(left, g_OnePistolSaved[i], Studio::kAttachmentPlacementSize);
-	}
-}
-
-// Called at the end of the tracking: the dual pistols model is placed so its right pistol is where the single one is
-void VR::ApplyOnePistolPlacement()
-{
-	if (!m_DualAsOnePistol)
-		return;
-
-	const Mat34 frame = FromAxes(ToVec3(m_ViewmodelForward), ToVec3(m_ViewmodelRight) * -1.0f, ToVec3(m_ViewmodelUp), ToVec3(GetRecommendedViewmodelAbsPos()));
-	const Mat34 placed = Multiply(frame, kOnePistolCorrection);
-
-	auto toVector = [](const Vec3 &v) { return Vector(v.x, v.y, v.z); };
-	m_ViewmodelForward = toVector(Axis(placed, 0));
-	m_ViewmodelRight = toVector(Axis(placed, 1) * -1.0f);
-	m_ViewmodelUp = toVector(Axis(placed, 2));
-
-	const Vec3 fromController = Origin(placed) - ToVec3(GetRightControllerAbsPos());
-	m_ViewmodelPosOffset = Vector(-Dot(fromController, Axis(placed, 0)), Dot(fromController, Axis(placed, 1)), -Dot(fromController, Axis(placed, 2)));
 }

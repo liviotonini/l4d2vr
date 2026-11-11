@@ -19,12 +19,14 @@ using namespace HandMath;
 // Dual wield, see dual_wield.h.
 //
 // The left hand takes an item:
-// - grabbing the chest where the grenade or the pills are (body_items.cpp), and puts it back the same way,
-// - grabbing one in the world (TryGrabWorld): the server is told it's for the left hand,
-// - holding the hands together with the item in the right hand, and the left grab for 2 seconds. The right grab does
-//   the opposite.
+// - grabbing the chest where the grenade or the pills are (body_items.cpp), the back where the kit is, or behind the left
+//   shoulder where its weapon is, and puts it back the same way,
+// - grabbing one in the world (TryGrabWorld): the server is told it's for the left hand. A weapon taken that way takes
+//   the place of the one it had, which goes to the ground.
+// - holding the hands together with the item in the right hand, and the left grab for 2 seconds: the right hand is left
+//   empty. The right grab does the opposite.
 // While the left hand works the weapon (magazine, shell, bolt, two handed grip) its item is put away for a moment.
-// Its trigger uses a grenade, pills or adrenaline: they become the active weapon in the left hand until used.
+// Its trigger uses a grenade or a kit: they become the active weapon in the left hand until used.
 // ---------------------------------------------------------------------------------------------------------------
 
 namespace
@@ -55,77 +57,76 @@ namespace
 
 	unsigned long long NowMs() { return GetTickCount64(); }
 
-	int g_ClientExtraMelee = 0;
+	int g_ClientExtraWeapon = 0;
 }
 
-bool DualWield::IsLeftHandItem(int weaponId)
+bool DualWield::UsesExtraSlot(int weaponId)
 {
 	switch (weaponId)
 	{
+	case C_WeaponCSBase::PISTOL:
+	case C_WeaponCSBase::MAGNUM:
 	case C_WeaponCSBase::MELEE:
-	case C_WeaponCSBase::MOLOTOV:
-	case C_WeaponCSBase::PIPE_BOMB:
-	case C_WeaponCSBase::VOMITJAR:
-	case C_WeaponCSBase::PAIN_PILLS:
-	case C_WeaponCSBase::ADRENALINE:
+	case C_WeaponCSBase::CHAINSAW:
+	case C_WeaponCSBase::UZI:
+	case C_WeaponCSBase::MAC10:
+	case C_WeaponCSBase::MP5:
+	case C_WeaponCSBase::PUMPSHOTGUN:
+	case C_WeaponCSBase::SHOTGUN_CHROME:
+	case C_WeaponCSBase::AUTOSHOTGUN:
+	case C_WeaponCSBase::SPAS:
+	case C_WeaponCSBase::M16A1:
+	case C_WeaponCSBase::SCAR:
+	case C_WeaponCSBase::AK47:
+	case C_WeaponCSBase::SG552:
+	case C_WeaponCSBase::M60:
+	case C_WeaponCSBase::HUNTING_RIFLE:
+	case C_WeaponCSBase::SNIPER_MILITARY:
+	case C_WeaponCSBase::AWP:
+	case C_WeaponCSBase::SCOUT:
+	case C_WeaponCSBase::GRENADE_LAUNCHER:
 		return true;
 	default:
 		return false;
 	}
 }
 
-const char *DualWield::ClassName(int weaponId)
+bool DualWield::IsLeftUseItem(int weaponId)
 {
 	switch (weaponId)
 	{
-	case C_WeaponCSBase::PISTOL: return "weapon_pistol";
-	case C_WeaponCSBase::MAGNUM: return "weapon_pistol_magnum";
-	case C_WeaponCSBase::MELEE: return "weapon_melee";
-	case C_WeaponCSBase::CHAINSAW: return "weapon_chainsaw";
-	case C_WeaponCSBase::UZI: return "weapon_smg";
-	case C_WeaponCSBase::MAC10: return "weapon_smg_silenced";
-	case C_WeaponCSBase::MP5: return "weapon_smg_mp5";
-	case C_WeaponCSBase::PUMPSHOTGUN: return "weapon_pumpshotgun";
-	case C_WeaponCSBase::SHOTGUN_CHROME: return "weapon_shotgun_chrome";
-	case C_WeaponCSBase::AUTOSHOTGUN: return "weapon_autoshotgun";
-	case C_WeaponCSBase::SPAS: return "weapon_shotgun_spas";
-	case C_WeaponCSBase::M16A1: return "weapon_rifle";
-	case C_WeaponCSBase::SCAR: return "weapon_rifle_desert";
-	case C_WeaponCSBase::AK47: return "weapon_rifle_ak47";
-	case C_WeaponCSBase::SG552: return "weapon_rifle_sg552";
-	case C_WeaponCSBase::M60: return "weapon_rifle_m60";
-	case C_WeaponCSBase::HUNTING_RIFLE: return "weapon_hunting_rifle";
-	case C_WeaponCSBase::SNIPER_MILITARY: return "weapon_sniper_military";
-	case C_WeaponCSBase::AWP: return "weapon_sniper_awp";
-	case C_WeaponCSBase::SCOUT: return "weapon_sniper_scout";
-	case C_WeaponCSBase::GRENADE_LAUNCHER: return "weapon_grenade_launcher";
-	case C_WeaponCSBase::MOLOTOV: return "weapon_molotov";
-	case C_WeaponCSBase::PIPE_BOMB: return "weapon_pipe_bomb";
-	case C_WeaponCSBase::VOMITJAR: return "weapon_vomitjar";
-	case C_WeaponCSBase::PAIN_PILLS: return "weapon_pain_pills";
-	case C_WeaponCSBase::ADRENALINE: return "weapon_adrenaline";
-	case C_WeaponCSBase::FIRST_AID_KIT: return "weapon_first_aid_kit";
-	case C_WeaponCSBase::DEFIBRILLATOR: return "weapon_defibrillator";
-	case C_WeaponCSBase::INCENDIARY_AMMO: return "weapon_upgradepack_incendiary";
-	case C_WeaponCSBase::FRAG_AMMO: return "weapon_upgradepack_explosive";
-	default: return "";
+	case C_WeaponCSBase::MOLOTOV:
+	case C_WeaponCSBase::PIPE_BOMB:
+	case C_WeaponCSBase::VOMITJAR:
+	case C_WeaponCSBase::FIRST_AID_KIT:
+	case C_WeaponCSBase::DEFIBRILLATOR:
+	case C_WeaponCSBase::INCENDIARY_AMMO:
+	case C_WeaponCSBase::FRAG_AMMO:
+		return true;
+	default:
+		return false;
 	}
+}
+
+bool DualWield::IsLeftHandItem(int weaponId)
+{
+	return UsesExtraSlot(weaponId) || IsLeftUseItem(weaponId) || weaponId == C_WeaponCSBase::PAIN_PILLS || weaponId == C_WeaponCSBase::ADRENALINE;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
 // Client
 // ---------------------------------------------------------------------------------------------------------------
 
-void DualWield::ClientSetExtraMelee(int entityIndex)
+void DualWield::ClientSetExtraWeapon(int entityIndex)
 {
-	g_ClientExtraMelee = entityIndex;
+	g_ClientExtraWeapon = entityIndex;
 }
 
 bool DualWield::ClientGetSlot(void *weapon, int &slot)
 {
-	if (!g_ClientExtraMelee || !weapon || !g_Game || !g_Game->m_ClientEntityList)
+	if (!g_ClientExtraWeapon || !weapon || !g_Game || !g_Game->m_ClientEntityList)
 		return false;
-	if ((void *)g_Game->GetClientEntity(g_ClientExtraMelee) != weapon)
+	if ((void *)g_Game->GetClientEntity(g_ClientExtraWeapon) != weapon)
 		return false;
 	slot = kExtraSlot;
 	return true;
@@ -149,17 +150,18 @@ bool VR::LeftHandShowsItem() const
 	return LeftHandHoldsItem();
 }
 
-void VR::SelectWeapon(int weaponId)
+// The game takes out that weapon entity (DualWield::ServerSelectWeapon): of two pistols, the one meant, where "use
+// weapon_pistol" would take the first one
+void VR::SelectWeapon(int entityIndex)
 {
-	const char *name = DualWield::ClassName(weaponId);
-	if (!*name)
+	if (!entityIndex)
 		return;
 	// The right hand stays empty with the weapon the mod takes out for it (UpdateEmptyHand)
 	if (m_RightHandEmpty)
 		m_EmptyHandSelectMs = NowMs();
-	char command[64];
-	snprintf(command, sizeof(command), "use %s", name);
-	m_Game->ClientCmd_Unrestricted(command);
+	char command[48];
+	snprintf(command, sizeof(command), "l4d2vr_select %d", entityIndex);
+	m_Game->m_EngineClient->ServerCmd(command, true);
 }
 
 void VR::TakeIntoLeftHand(int entityIndex, int weaponId)
@@ -169,13 +171,13 @@ void VR::TakeIntoLeftHand(int entityIndex, int weaponId)
 	m_LeftItemIndex = entityIndex;
 	m_LeftItemId = weaponId;
 	m_LeftGripValid = false;
-	if (weaponId == C_WeaponCSBase::MELEE)
+	if (DualWield::UsesExtraSlot(weaponId))
 	{
-		// One melee weapon for the left hand: the one it had, in it or behind the shoulder, goes to the ground. Otherwise
-		// it would lose the slot of its own and stay as the right hand's.
-		if (m_ExtraMeleeIndex && m_ExtraMeleeIndex != entityIndex)
-			SendDrop(m_ExtraMeleeIndex);
-		m_ExtraMeleeIndex = entityIndex;
+		// One weapon for the left hand: the one it had, in it or behind the shoulder, goes to the ground. Otherwise it
+		// would lose the slot of its own and take the place of one of the right hand's.
+		if (m_ExtraWeaponIndex && m_ExtraWeaponIndex != entityIndex)
+			SendDrop(m_ExtraWeaponIndex);
+		m_ExtraWeaponIndex = entityIndex;
 	}
 	Diagnostics::Log("dual wield: entity %d (weapon %d) in the left hand", entityIndex, weaponId);
 }
@@ -201,7 +203,7 @@ bool VR::LeftHandChestGrab(const Vec3 &handWorld)
 		return false;
 
 	// Putting it back where it was taken
-	if (m_LeftItemIndex && m_LeftItemId != C_WeaponCSBase::MELEE)
+	if (m_LeftItemIndex && !DualWield::UsesExtraSlot(m_LeftItemId))
 	{
 		const int spot = GetChestSpotAt(handWorld);
 		const bool pills = m_LeftItemId == C_WeaponCSBase::PAIN_PILLS || m_LeftItemId == C_WeaponCSBase::ADRENALINE;
@@ -217,8 +219,8 @@ bool VR::LeftHandChestGrab(const Vec3 &handWorld)
 	if (!chestSlot)
 		return false;
 
-	// A melee weapon in the hand has nowhere to go
-	if (m_LeftItemId == C_WeaponCSBase::MELEE)
+	// A weapon in the hand has nowhere to go here
+	if (m_LeftItemIndex && DualWield::UsesExtraSlot(m_LeftItemId))
 	{
 		m_Haptics.Play(Haptics::Hand::OtherHand, HapticEffects::Cancel);
 		return true;
@@ -240,8 +242,8 @@ bool VR::LeftHandChestGrab(const Vec3 &handWorld)
 	return false;
 }
 
-// A grab with the left hand behind the left shoulder: the melee weapon in it goes there, or the one there comes to it.
-// True if it did something.
+// A grab with the left hand behind the left shoulder: the weapon in it goes there, or the one there comes to it. True if
+// it did something.
 bool VR::LeftShoulderGrab()
 {
 	if (!m_DualWieldEnabled)
@@ -249,32 +251,63 @@ bool VR::LeftShoulderGrab()
 
 	if (m_LeftItemIndex)
 	{
-		if (m_LeftItemId != C_WeaponCSBase::MELEE)
+		// Items have places of their own
+		if (m_LeftItemIndex != m_ExtraWeaponIndex)
 			return false;
 		ClearLeftItem();
 		m_Haptics.Play(Haptics::Hand::OtherHand, HapticEffects::Confirm);
 		return true;
 	}
 
-	// One that isn't in the right hand, the one that was in this hand first
+	// The weapon of the extra slot, unless the right hand holds it
+	C_BasePlayer *local = (C_BasePlayer *)m_Game->GetClientEntity(m_Game->m_EngineClient->GetLocalPlayer());
+	if (!local || !m_ExtraWeaponIndex)
+		return false;
+	InventoryItem items[64];
+	const int count = GetInventory(local, items, 64);
+	const void *active = local->GetActiveWeapon();
+	for (int i = 0; i < count; ++i)
+	{
+		if (items[i].index != m_ExtraWeaponIndex || (items[i].weapon == active && !m_RightHandEmpty))
+			continue;
+		TakeIntoLeftHand(items[i].index, items[i].id);
+		m_Haptics.Play(Haptics::Hand::OtherHand, HapticEffects::Take);
+		return true;
+	}
+	return false;
+}
+
+// A grab with the left hand on the back, where the kit is carried: the kit, defibrillator or upgrade pack there goes to
+// the left hand, or the one in it goes back. True if it did something.
+bool VR::LeftHandKitGrab()
+{
+	if (!m_DualWieldEnabled)
+		return false;
+
+	if (m_LeftItemIndex)
+	{
+		if (GetWeaponSlot(m_LeftItemId) != 4)
+			return false;
+		ClearLeftItem();
+		m_Haptics.Play(Haptics::Hand::OtherHand, HapticEffects::Confirm);
+		return true;
+	}
+
 	C_BasePlayer *local = (C_BasePlayer *)m_Game->GetClientEntity(m_Game->m_EngineClient->GetLocalPlayer());
 	if (!local)
 		return false;
 	InventoryItem items[64];
 	const int count = GetInventory(local, items, 64);
 	const void *active = local->GetActiveWeapon();
-	int melee = 0;
 	for (int i = 0; i < count; ++i)
 	{
-		if (items[i].id == C_WeaponCSBase::MELEE && items[i].weapon != active && (!melee || items[i].index == m_ExtraMeleeIndex))
-			melee = items[i].index;
+		if (GetWeaponSlot(items[i].id) != 4 || (items[i].weapon == active && !m_RightHandEmpty))
+			continue;
+		TakeIntoLeftHand(items[i].index, items[i].id);
+		m_Haptics.Play(Haptics::Hand::OtherHand, HapticEffects::Take);
+		return true;
 	}
-	if (!melee)
-		return false;
-
-	TakeIntoLeftHand(melee, C_WeaponCSBase::MELEE);
-	m_Haptics.Play(Haptics::Hand::OtherHand, HapticEffects::Take);
-	return true;
+	return false;
 }
 
 // What the left hand holds is drawn in it: the item's own model, with its "weapon_bone" in the fist like in the third
@@ -391,16 +424,18 @@ void VR::ApplyLeftUseHand(const Vector &leftForwardRaw, const Vector &leftRightR
 	m_RightControllerUpRaw = leftUpRaw;
 }
 
-// The best weapon for the right hand other than `exceptIndex`: `preferredId`, a primary weapon, a pistol
-int VR::PickRightWeapon(const InventoryItem *items, int count, int exceptIndex, int preferredId) const
+// The best weapon for the right hand other than `exceptIndex` (entity index, 0 if none): `preferredIndex`, a primary
+// weapon, a pistol. Not the left hand's, and not the one behind the left shoulder unless it's the preferred one.
+int VR::PickRightWeapon(const InventoryItem *items, int count, int exceptIndex, int preferredIndex) const
 {
 	int best = 0, bestRank = 0;
 	for (int i = 0; i < count; ++i)
 	{
-		if (items[i].index == exceptIndex || items[i].index == m_LeftItemIndex)
+		const int index = items[i].index;
+		if (index == exceptIndex || index == m_LeftItemIndex || (index == m_ExtraWeaponIndex && index != preferredIndex))
 			continue;
 		int rank = 0;
-		if (preferredId && items[i].id == preferredId)
+		if (preferredIndex && index == preferredIndex)
 			rank = 4;
 		else if (GetWeaponSlot(items[i].id) == 1)
 			rank = 3;
@@ -409,7 +444,7 @@ int VR::PickRightWeapon(const InventoryItem *items, int count, int exceptIndex, 
 		if (rank > bestRank)
 		{
 			bestRank = rank;
-			best = items[i].id;
+			best = index;
 		}
 	}
 	return best;
@@ -423,8 +458,8 @@ void VR::UpdateDualWield(C_BasePlayer *local, int activeWeaponId, float deltaSec
 	{
 		if (m_LeftItemIndex)
 			ClearLeftItem();
-		m_ExtraMeleeIndex = 0;
-		DualWield::ClientSetExtraMelee(0);
+		m_ExtraWeaponIndex = 0;
+		DualWield::ClientSetExtraWeapon(0);
 		return;
 	}
 
@@ -447,15 +482,16 @@ void VR::UpdateDualWield(C_BasePlayer *local, int activeWeaponId, float deltaSec
 			activeIndex = items[i].index;
 	}
 
-	if (m_ExtraMeleeIndex && !carried(m_ExtraMeleeIndex, C_WeaponCSBase::MELEE))
-		m_ExtraMeleeIndex = 0;
+	if (m_ExtraWeaponIndex && !carried(m_ExtraWeaponIndex, 0))
+		m_ExtraWeaponIndex = 0;
 	if (m_LeftItemIndex && !carried(m_LeftItemIndex, m_LeftItemId))
 		ClearLeftItem();
 
-	// Just grabbed something in the world with the left hand: what's new in the inventory goes to it
+	// Just grabbed something in the world with the left hand: what's new in the inventory goes to it, in place of what it
+	// held (a weapon taken that way took the extra slot from the one it had, which the game dropped)
 	if (m_LeftGrabUntil)
 	{
-		for (int i = 0; i < count && !m_LeftItemIndex; ++i)
+		for (int i = 0; i < count; ++i)
 		{
 			bool before = false;
 			for (int j = 0; j < m_InventoryBeforeCount; ++j)
@@ -464,6 +500,7 @@ void VR::UpdateDualWield(C_BasePlayer *local, int activeWeaponId, float deltaSec
 			{
 				TakeIntoLeftHand(items[i].index, items[i].id);
 				m_LeftGrabUntil = 0;
+				break;
 			}
 		}
 		if (now > m_LeftGrabUntil)
@@ -471,43 +508,42 @@ void VR::UpdateDualWield(C_BasePlayer *local, int activeWeaponId, float deltaSec
 	}
 
 	// What the right hand holds, to go back to it
-	if (activeIndex && activeIndex != m_LeftItemIndex && activeWeaponId != m_RightWeaponId)
+	if (activeIndex && activeIndex != m_LeftItemIndex && !m_RightHandEmpty && activeIndex != m_RightWeaponIndex)
 	{
-		m_PrevRightWeaponId = m_RightWeaponId;
-		m_RightWeaponId = activeWeaponId;
+		m_PrevRightWeaponIndex = m_RightWeaponIndex;
+		m_RightWeaponIndex = activeIndex;
 	}
 
 	UpdateLeftUse(now, activeIndex, items, count);
 
 	// The left hand's item became the active weapon without being used (the game takes a weapon picked up in its hand):
-	// back to the right hand's
-	if (m_LeftItemIndex && activeIndex == m_LeftItemIndex && !m_LeftUseActive && now - m_LastSwitchBackMs > kSwitchBackIntervalMs)
+	// back to the right hand's. Not while the right hand is empty: what the game has out then isn't seen.
+	if (m_LeftItemIndex && activeIndex == m_LeftItemIndex && !m_LeftUseActive && !m_RightHandEmpty && now - m_LastSwitchBackMs > kSwitchBackIntervalMs)
 	{
 		m_LastSwitchBackMs = now;
-		const int right = PickRightWeapon(items, count, m_LeftItemIndex, m_RightWeaponId);
-		if (right)
-			SelectWeapon(right);
+		SelectWeapon(PickRightWeapon(items, count, m_LeftItemIndex, m_RightWeaponIndex));
 	}
 
 	UpdateLeftSwing(now);
 	UpdateHandSwap(now, deltaSeconds, activeIndex, activeWeaponId, items, count);
 
-	DualWield::ClientSetExtraMelee(m_ExtraMeleeIndex);
+	DualWield::ClientSetExtraWeapon(m_ExtraWeaponIndex);
 
-	// The server has to know, for the melee hits, the slot and the other players
-	if (m_LeftItemIndex != m_SentLeftItemIndex || now - m_LeftItemSentMs > kLeftItemResendMs)
+	// The server has to know, for the melee hits, the slots and the other players
+	if (m_LeftItemIndex != m_SentLeftItemIndex || m_ExtraWeaponIndex != m_SentExtraWeaponIndex || now - m_LeftItemSentMs > kLeftItemResendMs)
 	{
 		m_SentLeftItemIndex = m_LeftItemIndex;
+		m_SentExtraWeaponIndex = m_ExtraWeaponIndex;
 		m_LeftItemSentMs = now;
 		char command[48];
-		snprintf(command, sizeof(command), "l4d2vr_left %d", m_LeftItemIndex);
+		snprintf(command, sizeof(command), "l4d2vr_left %d %d", m_LeftItemIndex, m_ExtraWeaponIndex);
 		m_Game->m_EngineClient->ServerCmd(command, true);
 	}
 }
 
-// The trigger of the left hand throws its grenade: it's taken as the active weapon, and the trigger is the attack until
-// it's thrown (UpdateGrenadeThrow, ProcessInput). Pills and adrenaline are used without that, at the mouth or against
-// the body (VR::UpdateItemUse).
+// The trigger of the left hand throws its grenade or uses its kit, defibrillator or upgrade pack: it's taken as the
+// active weapon, and the trigger is the attack until it's used (UpdateGrenadeThrow, ProcessInput). Pills and adrenaline
+// are used without that, at the mouth or against the body (VR::UpdateItemUse).
 void VR::UpdateLeftUse(unsigned long long now, int activeIndex, const InventoryItem *items, int count)
 {
 	const bool trigger = PressedDigitalAction(m_ActionSecondaryAttack);
@@ -516,13 +552,13 @@ void VR::UpdateLeftUse(unsigned long long now, int activeIndex, const InventoryI
 
 	if (!m_LeftUseActive)
 	{
-		if (pressed && LeftHandHoldsItem() && IsThrowableWeapon(m_LeftItemId) && !m_ScopeZoomTookTrigger && activeIndex != m_LeftItemIndex)
+		if (pressed && LeftHandHoldsItem() && DualWield::IsLeftUseItem(m_LeftItemId) && !m_ScopeZoomTookTrigger && activeIndex != m_LeftItemIndex)
 		{
 			m_LeftUseActive = true;
 			m_LeftUseWasActive = false;
 			m_LeftUseStartMs = now;
 			m_LeftUseReleaseMs = 0;
-			SelectWeapon(m_LeftItemId);
+			SelectWeapon(m_LeftItemIndex);
 			m_Haptics.Play(Haptics::Hand::OtherHand, HapticEffects::Confirm);
 			Diagnostics::Log("dual wield: using the left hand's item (weapon %d)", m_LeftItemId);
 		}
@@ -551,11 +587,7 @@ void VR::UpdateLeftUse(unsigned long long now, int activeIndex, const InventoryI
 	m_LeftUseActive = false;
 	Diagnostics::Log("dual wield: end of the left hand's use (%s)", reason);
 	if (activeIndex == 0 || activeIndex == m_LeftItemIndex || !m_LeftItemIndex)
-	{
-		const int right = PickRightWeapon(items, count, m_LeftItemIndex, m_RightWeaponId);
-		if (right)
-			SelectWeapon(right);
-	}
+		SelectWeapon(PickRightWeapon(items, count, m_LeftItemIndex, m_RightWeaponIndex));
 }
 
 // The left hand's melee weapon hits what it swings through, the same way as the right hand's (Hooks::dWriteUsercmd,
@@ -809,23 +841,41 @@ void VR::UpdateHandSwap(unsigned long long now, float deltaSeconds, int activeIn
 		return;
 
 	if (direction == 1)
-	{
-		const int right = PickRightWeapon(items, count, activeIndex, m_PrevRightWeaponId);
-		TakeIntoLeftHand(activeIndex, activeWeaponId);
-		if (right)
-			SelectWeapon(right);
-		Diagnostics::Log("dual wield: the item went from the right hand to the left");
-	}
+		GiveToLeftHand(activeIndex, activeWeaponId, items, count);
 	else
-	{
-		const int id = m_LeftItemId;
-		ClearLeftItem();
-		m_RightHandEmpty = false;
-		SelectWeapon(id);
-		Diagnostics::Log("dual wield: the item went from the left hand to the right");
-	}
+		GiveToRightHand(items, count);
 	m_Haptics.Play(Haptics::Hand::BothHands, HapticEffects::Click);
 	m_HandSwapDirection = 2;
+}
+
+// What the right hand holds goes to the empty left hand, and the right hand is left empty. The game takes out another
+// weapon unseen if the player has one, so the left hand's item isn't the game's (its use takes it out).
+void VR::GiveToLeftHand(int activeIndex, int activeWeaponId, const InventoryItem *items, int count)
+{
+	const int other = PickRightWeapon(items, count, activeIndex, m_PrevRightWeaponIndex);
+	TakeIntoLeftHand(activeIndex, activeWeaponId);
+	EmptyRightHand("gave what it held to the left hand");
+	SelectWeapon(other);
+	Diagnostics::Log("dual wield: the item went from the right hand to the left");
+}
+
+// What the left hand holds goes to the right hand. A weapon of the extra slot goes back to its own slot, unless the
+// player has another weapon there: then it keeps the extra slot while the right hand has it.
+void VR::GiveToRightHand(const InventoryItem *items, int count)
+{
+	const int index = m_LeftItemIndex, id = m_LeftItemId;
+	ClearLeftItem();
+	if (index == m_ExtraWeaponIndex)
+	{
+		bool slotTaken = false;
+		for (int i = 0; i < count; ++i)
+			slotTaken |= items[i].index != index && GetWeaponSlot(items[i].id) == GetWeaponSlot(id);
+		if (!slotTaken)
+			m_ExtraWeaponIndex = 0;
+	}
+	m_RightHandEmpty = false;
+	SelectWeapon(index);
+	Diagnostics::Log("dual wield: the item went from the left hand to the right%s", index == m_ExtraWeaponIndex ? ", in the extra slot" : "");
 }
 
 // Another player says what their left hand holds (relayed by the server)
@@ -899,7 +949,8 @@ void VR::DualWieldTest(const char *action)
 				items[i].weapon == active ? " (active)" : "", items[i].index == m_LeftItemIndex ? " (left hand)" : "",
 				model ? m_Game->m_ModelInfo->GetModelName((void *)model) : "no model", worldModel ? m_Game->m_ModelInfo->GetModelName((void *)worldModel) : "no model");
 		}
-		Diagnostics::Log("dual wield test: left item %d, extra melee %d, right weapon %d", m_LeftItemIndex, m_ExtraMeleeIndex, m_RightWeaponId);
+		Diagnostics::Log("dual wield test: left item %d, extra weapon %d, right weapon %d, right hand %s", m_LeftItemIndex, m_ExtraWeaponIndex, m_RightWeaponIndex,
+			m_RightHandEmpty ? "empty" : "holding it");
 		return;
 	}
 
@@ -916,25 +967,21 @@ void VR::DualWieldTest(const char *action)
 				activeId = items[i].id;
 			}
 		}
-		if (!m_LeftItemIndex && DualWield::IsLeftHandItem(activeId))
-		{
-			const int right = PickRightWeapon(items, count, activeIndex, m_PrevRightWeaponId);
-			TakeIntoLeftHand(activeIndex, activeId);
-			if (right)
-				SelectWeapon(right);
-		}
+		if (!m_LeftItemIndex && !m_RightHandEmpty && DualWield::IsLeftHandItem(activeId))
+			GiveToLeftHand(activeIndex, activeId, items, count);
 		else if (m_LeftItemIndex)
-		{
-			const int id = m_LeftItemId;
-			ClearLeftItem();
-			SelectWeapon(id);
-		}
+			GiveToRightHand(items, count);
 		return;
 	}
 
 	if (strcmp(action, "shoulder") == 0)
 	{
 		Diagnostics::Log("dual wield test: left shoulder %s", LeftShoulderGrab() ? "did something" : "did nothing");
+		return;
+	}
+	if (strcmp(action, "kit") == 0)
+	{
+		Diagnostics::Log("dual wield test: left hand at the kit %s", LeftHandKitGrab() ? "did something" : "did nothing");
 		return;
 	}
 
@@ -1049,13 +1096,13 @@ void VR::DualWieldTest(const char *action)
 		return;
 	}
 
-	if (strcmp(action, "use") == 0 && m_LeftItemIndex && m_LeftItemId != C_WeaponCSBase::MELEE)
+	if (strcmp(action, "use") == 0 && m_LeftItemIndex && DualWield::IsLeftUseItem(m_LeftItemId))
 	{
 		m_LeftUseActive = true;
 		m_LeftUseWasActive = false;
 		m_LeftUseStartMs = NowMs();
 		m_LeftUseReleaseMs = NowMs();
-		SelectWeapon(m_LeftItemId);
+		SelectWeapon(m_LeftItemIndex);
 	}
 }
 
@@ -1075,9 +1122,11 @@ namespace
 	ExtraSlot g_ExtraSlots[DualWield::kMaxPlayers];
 	int g_ExtraSlotCount = 0;
 
-	// While a player uses something with the left hand: the melee weapon the game asks the slot of, unowned
+	// While a player uses something with the left hand: the weapon the game asks the slot of, unowned
 	void *g_LeftPickupPlayer = nullptr;
 	void *g_LeftPickupWeapon = nullptr;
+	// The client's word on the extra slot waits this long after the server gave it a weapon taken with the left hand
+	const unsigned long long kExtraTakenMs = 1000;
 
 	bool g_LoggedEdicts = false;
 
@@ -1151,20 +1200,28 @@ namespace
 		for (int i = 0; i < DualWield::kMaxPlayers && i < (int)g_ServerGame->m_PlayersVRInfo.size(); ++i)
 		{
 			const Player &player = g_ServerGame->m_PlayersVRInfo[i];
-			if (player.extraMelee)
-				g_ExtraSlots[g_ExtraSlotCount++] = { player.extraMeleeIndex, player.extraMelee };
+			if (player.extraWeapon)
+				g_ExtraSlots[g_ExtraSlotCount++] = { player.extraWeaponIndex, player.extraWeapon };
 		}
 	}
 
-	void SetExtraMelee(int playerIndex, void *weapon, int index)
+	int WeaponIdOf(void *weapon)
+	{
+		return weapon ? ((Server_WeaponCSBase *)weapon)->GetWeaponID() : 0;
+	}
+
+	void SetExtraWeapon(int playerIndex, void *weapon, int index)
 	{
 		Player &player = g_ServerGame->m_PlayersVRInfo[playerIndex];
-		if (player.extraMelee == weapon && player.extraMeleeIndex == index)
+		if (player.extraWeapon == weapon && player.extraWeaponIndex == index)
 			return;
-		player.extraMelee = weapon;
-		player.extraMeleeIndex = weapon ? index : 0;
+		player.extraWeapon = weapon;
+		player.extraWeaponIndex = weapon ? index : 0;
 		RebuildExtraSlots();
-		Diagnostics::Log("dual wield: player %d %s", playerIndex, weapon ? "carries a melee weapon in the extra slot" : "has no melee weapon in the extra slot");
+		if (weapon)
+			Diagnostics::Log("dual wield: player %d carries weapon %d (entity %d) in the extra slot", playerIndex, WeaponIdOf(weapon), index);
+		else
+			Diagnostics::Log("dual wield: player %d has nothing in the extra slot", playerIndex);
 	}
 
 	// The end of the game's use of pills and adrenaline, once their animation is over (the item's frame, Offsets::
@@ -1307,8 +1364,9 @@ void DualWield::ServerReset()
 		player.leftItemIndex = 0;
 		player.leftItem = nullptr;
 		player.leftItemId = 0;
-		player.extraMeleeIndex = 0;
-		player.extraMelee = nullptr;
+		player.extraWeaponIndex = 0;
+		player.extraWeapon = nullptr;
+		player.extraTakenMs = 0;
 		player.leftHandUntil = 0;
 		player.leftSwingUntil = 0;
 	}
@@ -1326,7 +1384,7 @@ bool DualWield::ServerGetSlot(void *weapon, int &slot)
 	}
 
 	// Being taken with the left hand: the game looks for what it replaces in this slot
-	if (g_LeftPickupPlayer && weapon && ((Server_WeaponCSBase *)weapon)->GetWeaponID() == C_WeaponCSBase::MELEE && OwnerOf(weapon) == nullptr)
+	if (g_LeftPickupPlayer && weapon && UsesExtraSlot(WeaponIdOf(weapon)) && OwnerOf(weapon) == nullptr)
 	{
 		g_LeftPickupWeapon = weapon;
 		slot = kExtraSlot;
@@ -1362,15 +1420,16 @@ void DualWield::ServerEndUse(void *player, int playerIndex)
 	void *weapon = g_LeftPickupWeapon;
 	g_LeftPickupWeapon = nullptr;
 	if (weapon)
-		Diagnostics::Log("dual wield: the game asked the slot of melee weapon %d, %s", EntIndex(weapon), OwnerOf(weapon) == player ? "now the player's" : "not taken");
+		Diagnostics::Log("dual wield: the game asked the slot of weapon %d (entity %d), %s", WeaponIdOf(weapon), EntIndex(weapon), OwnerOf(weapon) == player ? "now the player's" : "not taken");
 	if (weapon && OwnerOf(weapon) == player)
 	{
-		SetExtraMelee(playerIndex, weapon, EntIndex(weapon));
-		Diagnostics::Log("dual wield: player %d took melee weapon %d with the left hand", playerIndex, EntIndex(weapon));
+		SetExtraWeapon(playerIndex, weapon, EntIndex(weapon));
+		g_ServerGame->m_PlayersVRInfo[playerIndex].extraTakenMs = GetTickCount64();
+		Diagnostics::Log("dual wield: player %d took weapon %d with the left hand", playerIndex, EntIndex(weapon));
 	}
 }
 
-void DualWield::ServerSetLeftItem(edict_t *edict, int playerIndex, int itemIndex)
+void DualWield::ServerSetLeftItem(edict_t *edict, int playerIndex, int itemIndex, int extraIndex)
 {
 	if (!g_ServerGame || !g_ServerGame->IsValidPlayerIndex(playerIndex) || !edict || !edict->m_pUnk)
 		return;
@@ -1379,11 +1438,58 @@ void DualWield::ServerSetLeftItem(edict_t *edict, int playerIndex, int itemIndex
 	void *playerEntity = edict->m_pUnk->GetBaseEntity();
 	vrPlayer.leftItemIndex = itemIndex;
 	vrPlayer.leftItem = itemIndex ? PlayersWeapon(playerEntity, itemIndex) : nullptr;
-	vrPlayer.leftItemId = vrPlayer.leftItem ? ((Server_WeaponCSBase *)vrPlayer.leftItem)->GetWeaponID() : 0;
+	vrPlayer.leftItemId = WeaponIdOf(vrPlayer.leftItem);
 
-	// A melee weapon in the left hand keeps a slot of its own while the player has it
-	if (vrPlayer.leftItem && vrPlayer.leftItemId == C_WeaponCSBase::MELEE)
-		SetExtraMelee(playerIndex, vrPlayer.leftItem, itemIndex);
+	// The weapon in the extra slot, as the player says: the one in the left hand or behind the shoulder, none once the
+	// right hand took it to a free slot of its own. One just taken with the left hand isn't known by the player yet.
+	if (extraIndex >= 0)
+	{
+		void *extra = extraIndex ? PlayersWeapon(playerEntity, extraIndex) : nullptr;
+		if (extra && !UsesExtraSlot(WeaponIdOf(extra)))
+			extra = nullptr;
+		if (extra != vrPlayer.extraWeapon && GetTickCount64() - vrPlayer.extraTakenMs < kExtraTakenMs)
+			return;
+		SetExtraWeapon(playerIndex, extra, extra ? extraIndex : 0);
+	}
+	else if (vrPlayer.leftItem && UsesExtraSlot(vrPlayer.leftItemId))
+	{
+		SetExtraWeapon(playerIndex, vrPlayer.leftItem, itemIndex);
+	}
+}
+
+// One weapon of the player taken out the way the game's "use" does it (CBasePlayer::SelectItem with the weapon: the
+// checks, then Weapon_Switch)
+bool DualWield::ServerTakeOut(void *player, void *weapon)
+{
+	typedef void(__thiscall *tSelectItem)(void *player, void *weapon);
+	typedef void *(__thiscall *tGetActiveWeapon)(void *player);
+	const tSelectItem selectItem = g_ServerGame ? (tSelectItem)g_ServerGame->m_Offsets->ServerSelectItem.address : nullptr;
+	const tGetActiveWeapon getActiveWeapon = g_ServerGame ? (tGetActiveWeapon)g_ServerGame->m_Offsets->GetActiveWeapon.address : nullptr;
+	if (!selectItem || !getActiveWeapon || !player || !weapon)
+		return false;
+	__try
+	{
+		if (getActiveWeapon(player) != weapon)
+			selectItem(player, weapon);
+		return true;
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		return false;
+	}
+}
+
+void DualWield::ServerSelectWeapon(edict_t *edict, int playerIndex, int weaponIndex)
+{
+	if (!g_ServerGame || !edict || !edict->m_pUnk)
+		return;
+	void *player = edict->m_pUnk->GetBaseEntity();
+	void *weapon = PlayersWeapon(player, weaponIndex);
+	typedef void *(__thiscall *tGetActiveWeapon)(void *player);
+	const tGetActiveWeapon getActiveWeapon = (tGetActiveWeapon)g_ServerGame->m_Offsets->GetActiveWeapon.address;
+	const bool done = weapon && ServerTakeOut(player, weapon);
+	Diagnostics::Log("dual wield: player %d takes out entity %d: %s", playerIndex, weaponIndex, !weapon ? "not theirs" : !done ? "failed"
+		: getActiveWeapon && getActiveWeapon(player) == weapon ? "out" : "the game refused");
 }
 
 void DualWield::ServerSetLeftHand(int playerIndex, const Vector &position, const QAngle &angles, int flags, const QAngle *from)
@@ -1435,8 +1541,8 @@ void DualWield::ServerAfterUsercmds(edict_t *edict, void *player, int playerInde
 		vrPlayer.leftItemId = 0;
 	}
 
-	if (vrPlayer.extraMelee && PlayersWeapon(player, vrPlayer.extraMeleeIndex) != vrPlayer.extraMelee)
-		SetExtraMelee(playerIndex, nullptr, 0);
+	if (vrPlayer.extraWeapon && PlayersWeapon(player, vrPlayer.extraWeaponIndex) != vrPlayer.extraWeapon)
+		SetExtraWeapon(playerIndex, nullptr, 0);
 
 	// The left hand's melee weapon hits what it went through since the last pose
 	const unsigned long long now = GetTickCount64();

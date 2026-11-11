@@ -106,6 +106,10 @@ Hooks::Hooks(Game *game)
 		hkClientGetSlot.enableHook();
 	if (hkServerGetSlot.pTarget)
 		hkServerGetSlot.enableHook();
+	if (hkServerAddDualWeapon.pTarget)
+		hkServerAddDualWeapon.enableHook();
+	if (hkServerGunUse.pTarget)
+		hkServerGunUse.enableHook();
 	if (hkGrenadeLauncherCreate.pTarget)
 		hkGrenadeLauncherCreate.enableHook();
 }
@@ -405,13 +409,7 @@ int Hooks::dServerFireTerrorBullets(int playerId, const Vector &vecOrigin, const
 		vecNewAngles = m_Game->m_PlayersVRInfo[playerId].controllerAngle;
 	}
 
-	const int result = hkServerFireTerrorBullets.fOriginal(playerId, vecNewOrigin, vecNewAngles, a4, a5, a6, a7);
-
-	// Two pistols shown as one: every shot is two. a4 is the weapon.
-	if (m_Game->IsValidPlayerIndex(playerId) && m_Game->m_PlayersVRInfo[playerId].onePistolDoubled && a4 == C_WeaponCSBase::PISTOL)
-		hkServerFireTerrorBullets.fOriginal(playerId, vecNewOrigin, vecNewAngles, a4, a5, a6, a7);
-
-	return result;
+	return hkServerFireTerrorBullets.fOriginal(playerId, vecNewOrigin, vecNewAngles, a4, a5, a6, a7);
 }
 
 int Hooks::dClientFireTerrorBullets(int playerId, const Vector &vecOrigin, const QAngle &vecAngles, int a4, int a5, int a6, float a7)
@@ -776,29 +774,7 @@ void Hooks::dDrawModelExecute(void *ecx, void *edx, void *state, const ModelRend
 {
 	const ModelKind kind = (m_VR->m_IsVREnabled && info.pModel && state) ? GetModelKind(info.pModel) : ModelKind::Other;
 
-	// Two pistols shown as one have a golden tint: the mark that it's the stronger one. In the colour the engine
-	// draws models with (IVRenderView::SetColorModulation and GetColorModulation).
-	float savedColor[3];
-	typedef void(__thiscall *tSetColor)(void *thisptr, const float *color);
-	typedef void(__thiscall *tGetColor)(void *thisptr, float *color);
-	void **renderView = m_Game->m_EngineViewRender ? *(void ***)m_Game->m_EngineViewRender : nullptr;
-	bool tinted = false;
-	if (kind == ModelKind::DualPistolsViewmodel)
-	{
-		m_VR->UpdateOnePistolModel(*(const void **)state, m_VR->m_OnePistolDoubled);
-		if (m_VR->m_OnePistolDoubled && renderView)
-		{
-			static const float kOnePistolTint[3] = { 1.0f, 0.78f, 0.38f };
-			((tGetColor)renderView[7])(m_Game->m_EngineViewRender, savedColor);
-			((tSetColor)renderView[6])(m_Game->m_EngineViewRender, kOnePistolTint);
-			tinted = true;
-		}
-	}
-
 	DrawModelForVR(ecx, state, info, pCustomBoneToWorld);
-
-	if (tinted)
-		((tSetColor)renderView[6])(m_Game->m_EngineViewRender, savedColor);
 
 	// What the player carries is drawn with the weapon, in the same pass
 	if (kind == ModelKind::Viewmodel || kind == ModelKind::DualPistolsViewmodel)
@@ -902,14 +878,7 @@ void Hooks::DrawModelForVR(void *ecx, void *state, const ModelRenderInfo_t &info
 	}
 
 	if (kind == ModelKind::Viewmodel || kind == ModelKind::DualPistolsViewmodel)
-	{
-		const bool two = kind == ModelKind::DualPistolsViewmodel;
-		m_VR->m_DualAsOnePistol = two && m_VR->m_OnePistolDoubled;
-		m_VR->m_ViewmodelHasTwoWeapons = two && !m_VR->m_OnePistolDoubled;
-		// Treated like the single pistol from here on
-		if (m_VR->m_DualAsOnePistol)
-			kind = ModelKind::Viewmodel;
-	}
+		m_VR->m_ViewmodelHasTwoWeapons = kind == ModelKind::DualPistolsViewmodel;
 
 	// The grenade has left the hand: the game is still playing the throw until it changes weapon
 	if (kind == ModelKind::Viewmodel && m_VR->ThrownGrenadeHasLeftTheHand())
@@ -1178,8 +1147,29 @@ void Hooks::initWeaponStateHooks()
 	}
 	else
 	{
-		Diagnostics::Log("dual wield: GetSlot not found in this game version, a melee weapon in the left hand replaces the pistol");
+		Diagnostics::Log("dual wield: GetSlot not found in this game version, a weapon in the left hand replaces the right hand's of its slot");
 	}
+	if (offsets->ServerAddDualWeapon.address && offsets->ServerGunUse.address)
+	{
+		hkServerAddDualWeapon.createHook((LPVOID)offsets->ServerAddDualWeapon.address, &dServerAddDualWeapon);
+		hkServerGunUse.createHook((LPVOID)offsets->ServerGunUse.address, &dServerGunUse);
+	}
+	else
+	{
+		Diagnostics::Log("dual wield: the pair of pistols wasn't found in this game version, a second pistol makes one");
+	}
+	if (!offsets->ServerSelectItem.address)
+		Diagnostics::Log("dual wield: SelectItem not found in this game version, the hands can't change weapons");
+	// CanBeDualWielded: its offset in the vtable, from the gun's Use (+0x40  mov edx, [eax + offset])
+	if (offsets->ServerGunUse.address)
+	{
+		const uint8_t *code = (const uint8_t *)offsets->ServerGunUse.address;
+		const int offset = *(const int32_t *)(code + 0x42);
+		if (code[0x40] == 0x8B && code[0x41] == 0x90 && offset > 0 && offset < 0x2000 && offset % 4 == 0)
+			m_CanBeDualVtableOffset = offset;
+	}
+	if (!m_CanBeDualVtableOffset)
+		Diagnostics::Log("dual wield: CanBeDualWielded wasn't found in this game version, a second pistol does nothing");
 
 	// The grenade launcher's grenade from the weapon in the hand: the target of the call found by its signature
 	const uintptr_t createCall = offsets->GrenadeLauncherCreateCall.address;
@@ -1245,6 +1235,90 @@ int __fastcall Hooks::dServerGetSlot(void *ecx, void *edx)
 	if (DualWield::ServerGetSlot(ecx, slot))
 		return slot;
 	return hkServerGetSlot.fOriginal(ecx);
+}
+
+namespace
+{
+	// A VR player taking a gun (dServerGunUse)
+	void *g_GunUsePlayer = nullptr;
+
+	// Gun classes whose CanBeDualWielded was replaced, with the original function
+	struct CanBeDualHook
+	{
+		void **vtable;
+		tAddDualWeapon original;
+	};
+	CanBeDualHook g_CanBeDualHooks[32];
+	int g_CanBeDualHookCount = 0;
+}
+
+// A player who has a pistol and takes another one gets a pair of pistols. VR players hold the second one in the other
+// hand, as a weapon of its own (dual_wield.cpp), and the left hand's slot can have any gun: theirs is never made a pair.
+// Taking a pistol, they take it like any other weapon (dServerGunUse, dCanBeDual): it takes the place of the weapon of its
+// slot, which goes to the ground. Other ways to a pair (the "give" command, a pair carried to the next map) do nothing.
+bool __fastcall Hooks::dServerAddDualWeapon(void *ecx, void *edx)
+{
+	const int playerIndex = m_GetGrenadeOwner ? GetServerEntityIndex(m_GetGrenadeOwner(ecx)) : -1;
+	bool isLocalPlayer;
+	if (playerIndex < 1 || !IsVRThrower(playerIndex, isLocalPlayer))
+		return hkServerAddDualWeapon.fOriginal(ecx);
+	Diagnostics::Log("dual wield: player %d would have had a pair of pistols, not made", playerIndex);
+	return false;
+}
+
+void __fastcall Hooks::dServerGunUse(void *ecx, void *edx, void *activator, void *caller, int useType, float value)
+{
+	bool isLocalPlayer;
+	const int playerIndex = GetServerEntityIndex(activator);
+	if (g_GunUsePlayer || playerIndex < 1 || playerIndex >= DualWield::kMaxPlayers || !IsVRThrower(playerIndex, isLocalPlayer))
+	{
+		hkServerGunUse.fOriginal(ecx, activator, caller, useType, value);
+		return;
+	}
+
+	HookCanBeDual(ecx);
+	g_GunUsePlayer = activator;
+	hkServerGunUse.fOriginal(ecx, activator, caller, useType, value);
+	g_GunUsePlayer = nullptr;
+	Diagnostics::Log("dual wield: player %d used gun %d, %s", playerIndex, GetServerEntityIndex(ecx),
+		m_GetGrenadeOwner && m_GetGrenadeOwner(ecx) == activator ? "taken" : "not taken");
+}
+
+// The pistol says it can't be made a pair while a VR player takes it (dServerGunUse): the game takes it like any other
+// gun. Replaced in the vtable of each gun class taken, like HookEmitGrenade. Only called from the server (game thread).
+void Hooks::HookCanBeDual(void *gun)
+{
+	if (!gun || !m_CanBeDualVtableOffset)
+		return;
+	void **vtable = *(void ***)gun;
+	for (int i = 0; i < g_CanBeDualHookCount; ++i)
+	{
+		if (g_CanBeDualHooks[i].vtable == vtable)
+			return;
+	}
+	if (g_CanBeDualHookCount == ARRAYSIZE(g_CanBeDualHooks))
+		return;
+
+	void **slot = (void **)((uintptr_t)vtable + m_CanBeDualVtableOffset);
+	DWORD oldProtect;
+	if (!VirtualProtect(slot, sizeof(void *), PAGE_READWRITE, &oldProtect))
+		return;
+	g_CanBeDualHooks[g_CanBeDualHookCount++] = { vtable, (tAddDualWeapon)*slot };
+	*slot = (void *)&dCanBeDual;
+	VirtualProtect(slot, sizeof(void *), oldProtect, &oldProtect);
+}
+
+bool __fastcall Hooks::dCanBeDual(void *ecx, void *edx)
+{
+	if (g_GunUsePlayer)
+		return false;
+	void **vtable = *(void ***)ecx;
+	for (int i = 0; i < g_CanBeDualHookCount; ++i)
+	{
+		if (g_CanBeDualHooks[i].vtable == vtable)
+			return g_CanBeDualHooks[i].original(ecx);
+	}
+	return false;
 }
 
 bool Hooks::IsLocalPlayerWeapon(void *weapon)

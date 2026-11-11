@@ -93,6 +93,16 @@ public:
     // offsets of those virtuals are read from it (DualWield::ServerUseItem).
     Offset ItemUseFinish =               { "server.dll", 0x3C26E5, "8B 17 8B 82 ? ? ? ? 8B CF FF D0 84 C0 75 ? 8B 17 8B 82 ? ? ? ? 8B CF FF D0 84 C0 74 ? 8B 16 8B 82 ? ? ? ? 57 8B CE FF D0 8B 4D FC 8B 17 8B 82 ? ? ? ? 6A 00 6A 00 89 8F ? ? ? ? 56 8B CF FF D0 56 E8", 0, true };
 
+    // CTerrorGun::Use, a player taking the gun. A pistol is made a pair with the pistol the player has (below) when it
+    // can be: this->CanBeDualWielded(), the virtual at +0x42 in it (Hooks::HookCanBeDual).
+    Offset ServerGunUse =                { "server.dll", 0x3E8700, "55 8B EC 83 EC 08 56 57 8B 7D 08 8B F1 85 FF 0F 84 ? ? ? ? 8B 07 8B 90 ? ? ? ? 8B CF FF D2 84 C0 0F 84 ? ? ? ? 8B 07 8B 90 ? ? ? ? 56 8B CF FF D2 84 C0 0F 84 ? ? ? ? 8B 06 8B 90 ? ? ? ? 8B CE FF D2 84 C0 74", 0, true };
+    // CTerrorGun's virtual that makes a pair of the pistol a player has when they take another one (m_hasDualWeapons):
+    // VR players hold the second one in the other hand instead (Hooks::dServerAddDualWeapon)
+    Offset ServerAddDualWeapon =         { "server.dll", 0x3E8350, "55 8B EC 83 EC 20 56 8B F1 80 BE ? ? ? ? 00 74 07 32 C0 5E 8B E5 5D C3 80 BE ? ? ? ? 00 75 F0 80 BE ? ? ? ? 01", 0, true };
+    // CBasePlayer::SelectItem(weapon): the checks of a weapon change, then Weapon_Switch. Takes out one weapon entity,
+    // where "use <class>" takes the first one of two of the same kind (DualWield::ServerSelectWeapon).
+    Offset ServerSelectItem =            { "server.dll", 0x7A960, "55 8B EC 56 8B F1 8B 06 8B 90 ? ? ? ? FF D2 85 C0 75 ? 8B 06 8B 90 ? ? ? ? 57 8B 7D 08 57 8B CE FF D2 84 C0 74 ? 8B CE E8 ? ? ? ? 85 C0 74 ? 8B CE E8 ? ? ? ? 8B 10 8B C8 8B 82 ? ? ? ? FF D0 84 C0 74 ? 8B CE E8 ? ? ? ? 8B 16 8B 82 ? ? ? ? 6A 00 57 8B CE FF D0 5F 5E 5D C2 04 00", 0, true };
+
     Offset ServerFireTerrorBullets =     { "server.dll", 0x3C78B0, "55 8B EC 81 EC ? ? ? ? A1 ? ? ? ? 33 C5 89 45 FC 8B 45 08 8B 4D 10" };
     Offset ReadUserCmd =                 { "server.dll", 0x205710, "55 8B EC 53 8B 5D 10 56 57 8B 7D 0C 53" };
     // CBaseCSGrenade::StartGrenadeThrow, called when the trigger is let go: m_fThrowTime = curtime + 0.2

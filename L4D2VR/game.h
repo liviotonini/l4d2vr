@@ -40,7 +40,6 @@ struct Player
 
     bool manualReload = false;  // reloads with the hands: the game doesn't reload this player's weapon by itself
     bool reloadButton = false;  // has the reload button pressed in the last usercmd
-    bool onePistolDoubled = false; // holds two pistols shown as one, which does double damage
 
     // Where this player's hand aims the use for a moment, after grabbing something in the world
     Vector useAimOrigin = { 0,0,0 };
@@ -48,13 +47,14 @@ struct Player
     unsigned long long useAimUntil = 0;
     bool useAimLeft = false;    // grabbed with the left hand: what it takes goes to the left hand
 
-    // Dual wield (dual_wield.cpp). What the left hand holds, as the player says, and the melee weapon carried beside a
-    // pistol. Both are checked after every batch of usercmds: the entity has to belong to this player.
+    // Dual wield (dual_wield.cpp). What the left hand holds, as the player says, and the weapon in the extra slot. Both
+    // are checked after every batch of usercmds: the entity has to belong to this player.
     int leftItemIndex = 0;
     void *leftItem = nullptr;
     int leftItemId = 0;
-    int extraMeleeIndex = 0;
-    void *extraMelee = nullptr;
+    int extraWeaponIndex = 0;
+    void *extraWeapon = nullptr;
+    unsigned long long extraTakenMs = 0;    // taken with the left hand, before the player knows it
     // The left hand, sent while it swings a melee weapon or uses its item
     Vector leftHandPos = { 0,0,0 };
     QAngle leftHandAngle = { 0,0,0 };

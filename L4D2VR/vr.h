@@ -372,8 +372,6 @@ public:
 	unsigned long long m_ShoveHoldUntil = 0;
 	bool m_ShoveDown = false;
 	bool m_ViewmodelHasTwoWeapons = false;  // dual pistols shown as such, both hands are holding one
-	bool m_OnePistolDoubled = true;         // the second pistol isn't shown: one pistol that does double damage, with a mark
-	bool m_DualAsOnePistol = false;         // holding two pistols now, shown as one
 	bool m_SmallBodyItems = true;           // the pills and grenades on the chest are a bit smaller
 	// Where the wrist is from the controller and how the hand is turned, see DefaultHandOffset. Not in the menu.
 	Vector m_HandOffsetMeters = { -0.10f, 0.0f, -0.08f }; // forward, right, up
@@ -455,16 +453,16 @@ public:
 	HandMath::Vec3 m_HolsterBarrel;        // where the barrel points from it
 	bool m_HolsterValid = false;
 
-	// Dual wield (dual_wield.cpp): the left hand holds a melee weapon, a grenade, pills or adrenaline. DualWield in
-	// config.txt.
+	// Dual wield (dual_wield.cpp): the left hand holds any weapon or item. DualWield in config.txt.
 	bool m_DualWieldEnabled = true;
 	int m_LeftItemIndex = 0;               // entity index, 0 when the hand is empty
 	int m_LeftItemId = 0;
-	int m_ExtraMeleeIndex = 0;             // the melee weapon in the slot of its own (DualWield::kExtraSlot)
+	int m_ExtraWeaponIndex = 0;            // the weapon in the slot of its own (DualWield::kExtraSlot), the left shoulder's
 	int m_SentLeftItemIndex = -1;
+	int m_SentExtraWeaponIndex = -1;
 	unsigned long long m_LeftItemSentMs = 0;
-	int m_RightWeaponId = 0;               // what the right hand holds, to go back to it
-	int m_PrevRightWeaponId = 0;
+	int m_RightWeaponIndex = 0;            // what the right hand holds, to go back to it (entity index)
+	int m_PrevRightWeaponIndex = 0;
 	unsigned long long m_LeftGrabUntil = 0; // grabbed something in the world with the left hand: it goes there
 	int m_InventoryBefore[64] = {};
 	int m_InventoryBeforeCount = 0;
@@ -616,6 +614,9 @@ public:
 	void ClearLeftItem();
 	bool LeftHandChestGrab(const HandMath::Vec3 &handWorld);
 	bool LeftShoulderGrab();
+	bool LeftHandKitGrab();
+	void GiveToLeftHand(int activeIndex, int activeWeaponId, const InventoryItem *items, int count);
+	void GiveToRightHand(const InventoryItem *items, int count);
 	bool GetLeftItemDraw(BodyModelDraw &draw);
 	bool LeftHandShowsItem() const;
 	QAngle GetLeftSwingAim() const;
@@ -624,13 +625,11 @@ public:
 	void HoldLeftItem(const HandRig &rig, float curls[HandRig::FingerCount]);
 	void KeepLeftGrip(const HandRig &rig, const HandMath::Mat34 *bones);
 	void ApplyLeftUseHand(const Vector &leftForwardRaw, const Vector &leftRightRaw, const Vector &leftUpRaw);
-	int PickRightWeapon(const InventoryItem *items, int count, int exceptIndex, int preferredId) const;
-	void SelectWeapon(int weaponId);
+	int PickRightWeapon(const InventoryItem *items, int count, int exceptIndex, int preferredIndex) const;
+	void SelectWeapon(int entityIndex);
 	void OnRemoteLeftItem(int playerIndex, int itemIndex);
 	void DualWieldTest(const char *action);
 	bool GetGrabUseAim(Vector &origin, QAngle &angles) const;
-	void UpdateOnePistolModel(const void *studioHeader, bool oneShown);
-	void ApplyOnePistolPlacement();
 	bool BuildRemoteItemBones(int entityIndex, const void *weapon, const void *studioHeader, void *outBones);
 	static bool IsHeldInTheHand(int weaponId);
 	bool GetRightHandTarget(const HandRig &rig, HandMath::Mat34 &hand, float backMeters = 0.0f) const;

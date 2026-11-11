@@ -24,14 +24,11 @@ namespace
 	// animation has it on the weapon (closer than this to the right hand)
 	const float kTwoHandGrabMeters = 0.12f;
 	const float kTwoHandSpanMeters = 0.6f;
-	const float kTwoHandOnePistolMeters = 0.15f; // between the wrists
 
 	// The pose of the weapon and the hand before the throw started, relative to the weapon's frame, per model
 	std::unordered_map<const void *, std::vector<Mat34>> g_ThrowPoses;
 	// The right hand bone of each weapon model in first person (-1 if it has none)
 	std::unordered_map<const void *, int> g_ViewmodelRightHands;
-	// The bones of the left pistol in the dual pistols model
-	std::unordered_map<const void *, std::vector<int>> g_SecondPistolBones;
 	// The syringe of the adrenaline's first person model ("weapon_clip") and the pieces of its cap, -1 if none
 	struct ViewmodelSyringe
 	{
@@ -74,7 +71,6 @@ void VR::ClearModelCaches()
 	m_ArmsRig = nullptr;
 	g_ThrowPoses.clear();
 	g_ViewmodelRightHands.clear();
-	g_SecondPistolBones.clear();
 	g_ViewmodelSyringes.clear();
 	ClearBodyModels();
 	Hooks::m_ModelKinds.clear();
@@ -133,35 +129,6 @@ Vec3 VR::GetFistPoint(bool weaponHand) const
 // for the hand itself). Returns the bones to draw with.
 const void *VR::ApplyItemInHand(const void *studioHeader, const void *customBones, void *storage)
 {
-	// Two pistols shown as one: the left pistol is folded away
-	if (m_DualAsOnePistol && Studio::IsValid(studioHeader))
-	{
-		const int count = Studio::BoneCount(studioHeader);
-		if (count <= 0 || count > Studio::kMaxBones)
-			return customBones;
-
-		auto cached = g_SecondPistolBones.find(studioHeader);
-		if (cached == g_SecondPistolBones.end())
-		{
-			std::vector<int> left;
-			for (int i = 0; i < count; ++i)
-			{
-				const char *name = Studio::BoneName(studioHeader, i);
-				const size_t length = strlen(name);
-				if (length > 2 && _stricmp(name + length - 2, "_l") == 0 && strstr(name, "weapon"))
-					left.push_back(i);
-			}
-			Diagnostics::Log("two pistols shown as one: %d bones of the left pistol in %s", (int)left.size(), Studio::ModelName(studioHeader));
-			cached = g_SecondPistolBones.emplace(studioHeader, std::move(left)).first;
-		}
-
-		Mat34 *folded = (Mat34 *)storage;
-		memcpy(folded, customBones, count * sizeof(Mat34));
-		for (int bone : cached->second)
-			folded[bone] = CollapsedAt(Origin(folded[bone]));
-		return folded;
-	}
-
 	if (!IsHeldInTheHand(m_ActiveWeaponId) || !m_ArmsRig || !Studio::IsValid(studioHeader))
 		return customBones;
 
@@ -242,11 +209,6 @@ bool VR::WantsLeftHandOnController() const
 	if (m_RightHandEmpty)
 		return true;
 
-	// Two pistols shown as one held with both hands: the animation's left hand is on the hidden pistol, so the hand stays
-	// where it is, around the one seen
-	if (isHoldingWeapon2Handed && m_DualAsOnePistol)
-		return true;
-
 	if (isHoldingWeapon2Handed || m_ViewmodelHasTwoWeapons || NeedsBothHands(m_ActiveWeaponId))
 		return false;
 
@@ -260,13 +222,6 @@ bool VR::IsAtTwoHandSpot(bool &known) const
 	known = false;
 	if (GetTickCount64() - m_AnimatedHandsMs > 250)
 		return false;
-	// Two pistols shown as one: the animation's left hand holds the hidden one. The left hand takes the one seen around
-	// the right hand, like a single pistol.
-	if (m_DualAsOnePistol)
-	{
-		known = true;
-		return Length(m_LeftHandWrist - m_AnimatedHand[HandRig::Right]) < kTwoHandOnePistolMeters * m_VRScale;
-	}
 	const Vec3 &spot = m_AnimatedHand[HandRig::Left];
 	if (Length(spot - m_AnimatedHand[HandRig::Right]) > kTwoHandSpanMeters * m_VRScale)
 		return false;

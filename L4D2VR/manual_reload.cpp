@@ -486,7 +486,7 @@ void VR::UpdateManualReload()
 	// With a host that doesn't have the mod the game works the bolt
 	const bool serverCommits = m_Game->m_PoseRelay->IsServerCapable();
 	inputs.clip = Read<int>(weapon, kClientClipOffset);
-	inputs.capacity = std::max(m_DualAsOnePistol ? profile->capacity * 2 : profile->capacity, inputs.clip);
+	inputs.capacity = std::max(profile->capacity, inputs.clip);
 	// Pistols never run out of magazines, and the game reports their reserve as 0
 	inputs.reserve = ReloadHasUnlimitedReserve(m_ActiveWeaponId) ? 999 : Read<int>(local, kClientAmmoArrayOffset + ammoType * 4);
 	inputs.shells = profile->shells;

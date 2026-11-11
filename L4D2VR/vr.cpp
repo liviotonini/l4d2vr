@@ -2133,10 +2133,21 @@ void VR::UpdateBodyGrab(bool weaponHand, const Vector &handPosLocalInWorld, int 
 
     for (const BodyGrabPlace &place : kBodyGrabPlaces)
     {
-        // With items in the left hand, a grab only changes what its own hand holds: the left hand takes nothing for the
-        // right one
-        if (place.weaponHand != weaponHand || !place.isAt(hand, m_PlayerHeightInMeters) || (!weaponHand && m_DualWieldEnabled))
+        if (place.weaponHand != weaponHand || !place.isAt(hand, m_PlayerHeightInMeters))
             continue;
+
+        // With items in the left hand, a grab only changes what its own hand holds: the left hand takes nothing for the
+        // right one, and takes the kit there for itself, or puts its own back
+        if (!weaponHand && m_DualWieldEnabled)
+        {
+            if (place.slot == 4 && LeftHandKitGrab())
+            {
+                WriteBodyGrabLog("%s: %.2f m away, side %.2f, forward %.2f, %.2f m below: %s, left hand (dual wield), holds entity %d",
+                    handName, hand.distance, hand.side, hand.forward, hand.drop, place.name, m_LeftItemIndex);
+                return;
+            }
+            continue;
+        }
 
         if (weaponHand)
         {
@@ -2543,7 +2554,6 @@ void VR::UpdateTracking()
     // Viewmodel roll offset
     m_ViewmodelRight = VectorRotate(m_ViewmodelRight, m_ViewmodelForward, m_ViewmodelAngOffset.z);
     m_ViewmodelUp = VectorRotate(m_ViewmodelUp, m_ViewmodelForward, m_ViewmodelAngOffset.z);
-    ApplyOnePistolPlacement();
 
     UpdateDualWield(localPlayer, weaponId, deltaTime * 0.001f);
     UpdateHands(deltaTime * 0.001f);
@@ -2642,7 +2652,6 @@ void VR::ParseConfigFile()
         return text.empty() ? fallback : std::clamp(std::stof(text), minimum, maximum);
     };
     m_ShowReloadMark = userConfig["ShowReloadMark"] != "false"; // enabled if missing from config
-    m_OnePistolDoubled = userConfig["OnePistolDoubled"] != "false"; // enabled if missing from config
     m_SmallBodyItems = userConfig["SmallBodyItems"] != "false"; // enabled if missing from config
     m_DualWieldEnabled = userConfig["DualWield"] != "false"; // enabled if missing from config
     m_ScopeMagnificationHigh = readFloat("ScopeMagnificationHigh", m_ScopeMagnificationHigh, 1.0f, 20.0f);
@@ -2739,7 +2748,6 @@ bool VR::SaveConfigFile()
         { "WristHudEnabled", ConfigBoolString(m_WristHudEnabled) },
         { "ManualReload", ConfigBoolString(m_ManualReloadEnabled) },
         { "ShowReloadMark", ConfigBoolString(m_ShowReloadMark) },
-        { "OnePistolDoubled", ConfigBoolString(m_OnePistolDoubled) },
         { "SmallBodyItems", ConfigBoolString(m_SmallBodyItems) },
         { "DualWield", ConfigBoolString(m_DualWieldEnabled) },
         { "MagazinePouchSide", ConfigFloatString(m_MagazinePouchSide) },

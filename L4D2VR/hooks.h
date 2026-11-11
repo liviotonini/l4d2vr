@@ -95,6 +95,8 @@ typedef void(__thiscall *tServerClientCommand)(void *thisptr, edict_t *player, c
 typedef const QAngle *(__thiscall *tServerEyeAngles)(void *thisptr);
 typedef void(__thiscall *tEyeVectors)(void *thisptr, Vector *forward, Vector *right, Vector *up);
 typedef int(__thiscall *tGetSlot)(void *thisptr);
+typedef bool(__thiscall *tAddDualWeapon)(void *thisptr);
+typedef void(__thiscall *tGunUse)(void *thisptr, void *activator, void *caller, int useType, float value);
 typedef void *(__cdecl *tGrenadeLauncherCreate)(const Vector &origin, const QAngle &angles, const Vector &velocity, const Vector &angularVelocity, void *owner, int flags);
 
 // A Vector passed by value (CBaseCSGrenade::EmitGrenade takes its vectors by value)
@@ -157,12 +159,15 @@ public:
 	static inline Hook<tEyeVectors> hkClientPlayerEyeVectors;
 	static inline Hook<tGetSlot> hkClientGetSlot;
 	static inline Hook<tGetSlot> hkServerGetSlot;
+	static inline Hook<tAddDualWeapon> hkServerAddDualWeapon;
+	static inline Hook<tGunUse> hkServerGunUse;
 	static inline Hook<tGrenadeLauncherCreate> hkGrenadeLauncherCreate;
 
 	// Read from the code of CBaseCSGrenade::ThrowGrenade by initGrenadeThrowHooks (null / 0 if it doesn't look as expected)
 	static inline tThrowGrenade m_ThrowGrenade = nullptr;
 	static inline tGetPlayerOwner m_GetGrenadeOwner = nullptr;
 	static inline int m_EmitGrenadeVtableOffset = 0;
+	static inline int m_CanBeDualVtableOffset = 0;    // CTerrorGun::CanBeDualWielded (HookCanBeDual), 0 if not found
 	static inline int m_AbsVelocityOffset = 0; // CBaseEntity::m_vecAbsVelocity
 
 	enum class ModelKind { Other, FirstPersonArms, Viewmodel, DualPistolsViewmodel, Survivor, WorldWeapon };
@@ -223,6 +228,8 @@ public:
 	static void __fastcall dStartGrenadeThrow(void *ecx, void *edx);
 	static void *__fastcall dEmitGrenade(void *ecx, void *edx, VectorValue origin, VectorValue angles, VectorValue velocity, VectorValue angularImpulse, void *owner);
 	static void HookEmitGrenade(void *grenade);
+	static void HookCanBeDual(void *gun);
+	static bool __fastcall dCanBeDual(void *ecx, void *edx);
 	static void *__fastcall dFindUseEntity(void *ecx, void *edx, float radius, float dotLimit, float defaultDotLimit, void *traceResult, void *extra);
 	static void *__fastcall dClientFindUseEntity(void *ecx, void *edx, float radius, float dotLimit, float defaultDotLimit, void *traceResult, void *extra);
 	static void __fastcall dPlayerUse(void *ecx, void *edx, void *useEntity);
@@ -242,6 +249,8 @@ public:
 	static void __fastcall dClientPlayerEyeVectors(void *ecx, void *edx, Vector *forward, Vector *right, Vector *up);
 	static int __fastcall dClientGetSlot(void *ecx, void *edx);
 	static int __fastcall dServerGetSlot(void *ecx, void *edx);
+	static bool __fastcall dServerAddDualWeapon(void *ecx, void *edx);
+	static void __fastcall dServerGunUse(void *ecx, void *edx, void *activator, void *caller, int useType, float value);
 	static void *__cdecl dGrenadeLauncherCreate(const Vector &origin, const QAngle &angles, const Vector &velocity, const Vector &angularVelocity, void *owner, int flags);
 	static void TraceMeleeSwing(void *weapon, const QAngle &from, const QAngle &to, const Vector *hand, bool newSwing);
 	static bool GetServerHandAim(void *player, Vector &origin, QAngle &angles);

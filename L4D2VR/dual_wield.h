@@ -5,24 +5,27 @@ class Vector;
 class QAngle;
 struct edict_t;
 
-// Dual wield: the left hand holds a melee weapon, a grenade, pills or adrenaline while the right hand holds the weapon
-// (dual_wield.cpp).
+// Dual wield: the left hand holds any weapon or item while the right hand holds its own (dual_wield.cpp).
 //
 // The game has one active weapon: the right hand's. The left hand's item stays in the inventory, drawn in the hand by
-// the mod. Its melee hits are traced by the server from the left hand; grenades, pills and adrenaline become the
-// active weapon only while they're used. The host needs the mod.
+// the mod. Its melee hits are traced by the server from the left hand; grenades, kits and the like become the active
+// weapon only while they're used, pills and adrenaline are used at the mouth or the body. The host needs the mod.
 //
-// A pistol and a melee weapon share a slot, so taking one drops the other. A melee weapon taken with the left hand is
-// given a slot the game doesn't use instead (GetSlot), on the server and on the client, and keeps it while the player
-// has it.
+// The game carries one weapon per slot, so taking one drops the other of its slot. A weapon of the primary or secondary
+// slot in the left hand is given a slot the game doesn't use instead (GetSlot), on the server and on the client: the
+// extra slot, the left shoulder's. It keeps it while the player has it, unless the right hand takes it to a slot of its
+// own that is free. Two pistols stay two weapons for VR players: the game doesn't make a pair of them.
 namespace DualWield
 {
 	constexpr int kExtraSlot = 6;
 	constexpr int kMaxPlayers = 65;
 
+	// Weapons and items the left hand can hold (the ones carried in the arms, like the gas can, aside)
 	bool IsLeftHandItem(int weaponId);
-	// The class name to select a weapon with "use" (empty if the mod doesn't know it)
-	const char *ClassName(int weaponId);
+	// Weapons of the primary and secondary slots: in the extra slot while the left hand has them
+	bool UsesExtraSlot(int weaponId);
+	// Items the left trigger uses by taking them out for a moment: grenades, kits, the defibrillator, upgrade packs
+	bool IsLeftUseItem(int weaponId);
 
 	// --- Server
 	void ServerInit(Game *game);
@@ -34,14 +37,19 @@ namespace DualWield
 	void ServerEndUse(void *player, int playerIndex);
 	// After the usercmds of a player: checks what the left hand holds, and traces its melee swing
 	void ServerAfterUsercmds(edict_t *edict, void *player, int playerIndex);
-	// Commands from the player (PoseRelay::HandleServerCommand)
-	void ServerSetLeftItem(edict_t *edict, int playerIndex, int itemIndex);
+	// Commands from the player (PoseRelay::HandleServerCommand). `extraIndex` is the weapon in the extra slot, -1 if the
+	// player didn't say.
+	void ServerSetLeftItem(edict_t *edict, int playerIndex, int itemIndex, int extraIndex);
+	// The player takes out one weapon entity (where "use <class>" takes the first one of two of the same kind)
+	void ServerSelectWeapon(edict_t *edict, int playerIndex, int weaponIndex);
 	// `from`: where the swing started, with kLeftHandNewSwing
 	void ServerSetLeftHand(int playerIndex, const Vector &position, const QAngle &angles, int flags, const QAngle *from);
 	// Pills or adrenaline used at once, without the game's animation, from either hand
 	void ServerUseItem(edict_t *edict, int playerIndex, int itemIndex);
 	// A weapon or item dropped from a hand
 	void ServerDropItem(edict_t *edict, int playerIndex, int weaponIndex, const Vector &velocity);
+	// The player's weapon is taken out. False if it failed.
+	bool ServerTakeOut(void *player, void *weapon);
 
 	// Flags of l4d2vr_left_hand
 	constexpr int kLeftHandSwinging = 1;
@@ -51,7 +59,7 @@ namespace DualWield
 	constexpr int kLeftHandNewSwing = 4;
 
 	// --- Client
-	// The local player's melee weapon in the extra slot (entity index, 0 if none), kept by VR::UpdateDualWield
-	void ClientSetExtraMelee(int entityIndex);
+	// The local player's weapon in the extra slot (entity index, 0 if none), kept by VR::UpdateDualWield
+	void ClientSetExtraWeapon(int entityIndex);
 	bool ClientGetSlot(void *weapon, int &slot);
 }

@@ -342,13 +342,11 @@ void PoseRelay::Reset()
 	m_HelloAttempts = 0;
 	m_LastHelloMs = 0;
 	m_SentManualReload = -1;
-	m_SentOnePistol = -1;
 	for (ServerClient &client : m_Clients)
 		client = ServerClient();
 	for (Player &player : m_Game->m_PlayersVRInfo)
 	{
 		player.manualReload = false;
-		player.onePistolDoubled = false;
 		player.useAimUntil = 0;
 	}
 	for (Remote &remote : m_Remotes)
@@ -391,16 +389,6 @@ void PoseRelay::Update(VR *vr, C_BasePlayer *localPlayer)
 		m_SentManualReload = manualReload;
 		char command[40];
 		snprintf(command, sizeof(command), "l4d2vr_manual_reload %d", manualReload);
-		m_Game->m_EngineClient->ServerCmd(command, true);
-	}
-
-	// And that the two pistols it holds count as one with double damage
-	const int onePistol = vr->m_DualAsOnePistol ? 1 : 0;
-	if (onePistol != m_SentOnePistol)
-	{
-		m_SentOnePistol = onePistol;
-		char command[40];
-		snprintf(command, sizeof(command), "l4d2vr_one_pistol %d", onePistol);
 		m_Game->m_EngineClient->ServerCmd(command, true);
 	}
 
@@ -501,15 +489,7 @@ bool PoseRelay::HandleServerCommand(edict_t *player, const void *commandObject)
 	if (strcmp(name, "l4d2vr_reload") == 0)
 	{
 		if (args.Count() >= 4)
-			ApplyReload(player, atoi(args.Arg(1)), atoi(args.Arg(2)), atoi(args.Arg(3)), args.Count() > 4 ? atoi(args.Arg(4)) : 0);
-		return true;
-	}
-
-	if (strcmp(name, "l4d2vr_one_pistol") == 0)
-	{
-		const int index = ServerPlayerIndex(m_Game, player);
-		if (m_Game->IsValidPlayerIndex(index) && args.Count() == 2)
-			m_Game->m_PlayersVRInfo[index].onePistolDoubled = atoi(args.Arg(1)) != 0;
+			ApplyReload(player, atoi(args.Arg(1)), atoi(args.Arg(2)), atoi(args.Arg(3)));
 		return true;
 	}
 
@@ -534,10 +514,11 @@ bool PoseRelay::HandleServerCommand(edict_t *player, const void *commandObject)
 	if (strcmp(name, "l4d2vr_left") == 0)
 	{
 		const int index = ServerPlayerIndex(m_Game, player);
-		if (m_Game->IsValidPlayerIndex(index) && args.Count() == 2)
+		if (m_Game->IsValidPlayerIndex(index) && (args.Count() == 2 || args.Count() == 3))
 		{
 			const int item = std::clamp(atoi(args.Arg(1)), 0, 4095);
-			DualWield::ServerSetLeftItem(player, index, item);
+			const int extra = args.Count() == 3 ? std::clamp(atoi(args.Arg(2)), 0, 4095) : -1;
+			DualWield::ServerSetLeftItem(player, index, item, extra);
 
 			char relayed[64];
 			snprintf(relayed, sizeof(relayed), "l4d2vr_left_receive %d %d\n", index, item);
@@ -571,6 +552,15 @@ bool PoseRelay::HandleServerCommand(edict_t *player, const void *commandObject)
 				DualWield::ServerDropItem(player, index, item, velocity);
 			}
 		}
+		return true;
+	}
+
+	// One weapon entity taken out by the player's hand (dual wield): of two pistols, the one meant
+	if (strcmp(name, "l4d2vr_select") == 0)
+	{
+		const int index = ServerPlayerIndex(m_Game, player);
+		if (m_Game->IsValidPlayerIndex(index) && args.Count() == 2)
+			DualWield::ServerSelectWeapon(player, index, std::clamp(atoi(args.Arg(1)), 0, 4095));
 		return true;
 	}
 
@@ -683,7 +673,7 @@ bool PoseRelay::HandleServerCommand(edict_t *player, const void *commandObject)
 
 // On the server: finishes a reload done with the hands, for the weapon the player is holding. The ammo is worked out
 // here, the client only says what it did.
-void PoseRelay::ApplyReload(edict_t *player, int shell, int ammoType, int expectedReserve, int requestedCapacity)
+void PoseRelay::ApplyReload(edict_t *player, int shell, int ammoType, int expectedReserve)
 {
 	const int kClipOffset = 0x1414;
 	const int kInReloadOffset = 0x144D;
@@ -714,10 +704,8 @@ void PoseRelay::ApplyReload(edict_t *player, int shell, int ammoType, int expect
 
 	if (VR::ReloadHasUnlimitedReserve(weaponId))
 	{
-		// Two pistols shown as one hold what two pistols hold
-		const int fullClip = weaponId == C_WeaponCSBase::PISTOL ? std::clamp(requestedCapacity, capacity, capacity * 2) : capacity;
 		if (clip >= 0 && clip <= 1000)
-			clip = std::max(fullClip, clip);
+			clip = std::max(capacity, clip);
 		*((uint8_t *)weapon + kInReloadOffset) = 0;
 		return;
 	}
