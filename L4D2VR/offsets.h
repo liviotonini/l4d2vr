@@ -80,6 +80,10 @@ public:
     Offset ServerShotgunReload =         { "server.dll", 0x3C2F80, "55 8B EC 83 EC 08 56 57 8B F1 E8 ? ? ? ? 8B F8 85 FF 0F 84 ? ? ? ? 8B 87 ? ? ? ? A8 01 0F 85 ? ? ? ? A9 00 08 00 00", 0, true };
     Offset ServerSetHelpingHandState =   { "server.dll", 0x3D0A30, "55 8B EC 51 53 8B 5D 08 56 8B F1 57 8D BE ? ? ? ? 89 7D FC 39 9E ? ? ? ? 74 2A", 0, true };
 
+    // CBaseCombatWeapon::GetSlot, the bucket of the weapon's script: a melee weapon in the left hand gets one of its own
+    Offset ClientGetSlot =               { "client.dll", 0x15390, "0F B7 81 ? ? ? ? 50 E8 ? ? ? ? 8B 80 58 01 00 00 83 C4 04 C3", 0, true };
+    Offset ServerGetSlot =               { "server.dll", 0x4A960, "0F B7 81 ? ? ? ? 50 E8 ? ? ? ? 8B 80 58 01 00 00 83 C4 04 C3", 0, true };
+
     Offset ServerFireTerrorBullets =     { "server.dll", 0x3C78B0, "55 8B EC 81 EC ? ? ? ? A1 ? ? ? ? 33 C5 89 45 FC 8B 45 08 8B 4D 10" };
     Offset ReadUserCmd =                 { "server.dll", 0x205710, "55 8B EC 53 8B 5D 10 56 57 8B 7D 0C 53" };
     // CBaseCSGrenade::StartGrenadeThrow, called when the trigger is let go: m_fThrowTime = curtime + 0.2

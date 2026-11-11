@@ -11,6 +11,7 @@
 #include "offsets.h"
 #include "vr_pose_protocol.h"
 #include "diagnostics.h"
+#include "dual_wield.h"
 
 using namespace HandMath;
 
@@ -189,8 +190,24 @@ namespace
 			g_Relay->OnPoseReceived(atoi(args.Arg(1)), (uint16_t)atoi(args.Arg(2)), args.Arg(3));
 	}
 
+	// What another player holds in the left hand (dual wield)
+	void __cdecl OnLeftItemReceive(const CommandArgs &args)
+	{
+		if (g_Relay && args.Count() == 3)
+			g_Relay->OnLeftItemReceived(atoi(args.Arg(1)), atoi(args.Arg(2)));
+	}
+
+	// Testing the dual wield without the headset (VR::DualWieldTest)
+	void __cdecl OnDualTest(const CommandArgs &args)
+	{
+		if (g_Relay && args.Count() == 2)
+			g_Relay->OnDualTest(args.Arg(1));
+	}
+
 	Command g_AckCommand("l4d2vr_pose_ack", &OnPoseAck, "L4D2VR: the server relays poses.", kFcvarServerCanExecute);
 	Command g_ReceiveCommand("l4d2vr_pose_receive", &OnPoseReceive, "L4D2VR: the pose of another player.", kFcvarServerCanExecute);
+	Command g_LeftItemCommand("l4d2vr_left_receive", &OnLeftItemReceive, "L4D2VR: what another player holds in the left hand.", kFcvarServerCanExecute);
+	Command g_DualTestCommand("l4d2vr_dual_test", &OnDualTest, "L4D2VR: test of the left hand's items (grab, status, swap, use).", 0);
 
 	void *TryInterface(const char *module, const char *name)
 	{
@@ -304,6 +321,19 @@ void PoseRelay::Init(Game *game)
 
 	((ICvarRegister *)cvar)->RegisterConCommand(&g_AckCommand);
 	((ICvarRegister *)cvar)->RegisterConCommand(&g_ReceiveCommand);
+	((ICvarRegister *)cvar)->RegisterConCommand(&g_LeftItemCommand);
+	((ICvarRegister *)cvar)->RegisterConCommand(&g_DualTestCommand);
+}
+
+void PoseRelay::OnLeftItemReceived(int playerIndex, int itemIndex)
+{
+	if (playerIndex != m_Game->m_EngineClient->GetLocalPlayer())
+		m_Game->m_VR->OnRemoteLeftItem(playerIndex, itemIndex);
+}
+
+void PoseRelay::OnDualTest(const char *action)
+{
+	m_Game->m_VR->DualWieldTest(action);
 }
 
 void PoseRelay::Reset()
@@ -324,6 +354,7 @@ void PoseRelay::Reset()
 	for (Remote &remote : m_Remotes)
 		remote.valid = false;
 	m_RemoteCount = 0;
+	DualWield::ServerReset();
 }
 
 void PoseRelay::OnAcknowledged()
@@ -482,16 +513,54 @@ bool PoseRelay::HandleServerCommand(edict_t *player, const void *commandObject)
 		return true;
 	}
 
-	// The hand grabbed something in the world: the use that comes next is aimed from there
+	// The hand grabbed something in the world: the use that comes next is aimed from there. With "1" after the angles
+	// it was the left hand, which keeps what it takes (dual wield).
 	if (strcmp(name, "l4d2vr_use_aim") == 0)
 	{
 		const int index = ServerPlayerIndex(m_Game, player);
-		if (m_Game->IsValidPlayerIndex(index) && args.Count() == 7)
+		if (m_Game->IsValidPlayerIndex(index) && (args.Count() == 7 || args.Count() == 8))
 		{
 			Player &vrPlayer = m_Game->m_PlayersVRInfo[index];
 			vrPlayer.useAimOrigin = Vector((float)atof(args.Arg(1)), (float)atof(args.Arg(2)), (float)atof(args.Arg(3)));
 			vrPlayer.useAimAngles = QAngle((float)atof(args.Arg(4)), (float)atof(args.Arg(5)), (float)atof(args.Arg(6)));
 			vrPlayer.useAimUntil = NowMs() + 500;
+			vrPlayer.useAimLeft = args.Count() == 8 && atoi(args.Arg(7)) != 0;
+		}
+		return true;
+	}
+
+	// What the left hand holds (an entity index, 0 for nothing): the server checks it's the player's, and tells the
+	// other players
+	if (strcmp(name, "l4d2vr_left") == 0)
+	{
+		const int index = ServerPlayerIndex(m_Game, player);
+		if (m_Game->IsValidPlayerIndex(index) && args.Count() == 2)
+		{
+			const int item = std::clamp(atoi(args.Arg(1)), 0, 4095);
+			DualWield::ServerSetLeftItem(player, index, item);
+
+			char relayed[64];
+			snprintf(relayed, sizeof(relayed), "l4d2vr_left_receive %d %d\n", index, item);
+			for (int i = 1; i < kMaxPlayers; ++i)
+			{
+				const ServerClient &recipient = m_Clients[i];
+				if (i != index && recipient.introduced && recipient.edict && ServerPlayerIndex(m_Game, recipient.edict) == i)
+					SendToClient(recipient.edict, relayed);
+			}
+		}
+		return true;
+	}
+
+	// The left hand while it swings a melee weapon: x y z pitch yaw roll flags
+	if (strcmp(name, "l4d2vr_left_hand") == 0)
+	{
+		const int index = ServerPlayerIndex(m_Game, player);
+		if (m_Game->IsValidPlayerIndex(index) && args.Count() == 8)
+		{
+			const Vector position((float)atof(args.Arg(1)), (float)atof(args.Arg(2)), (float)atof(args.Arg(3)));
+			const QAngle angles((float)atof(args.Arg(4)), (float)atof(args.Arg(5)), (float)atof(args.Arg(6)));
+			if (std::isfinite(position.x) && std::isfinite(position.y) && std::isfinite(position.z) && std::isfinite(angles.x) && std::isfinite(angles.y) && std::isfinite(angles.z))
+				DualWield::ServerSetLeftHand(index, position, angles, atoi(args.Arg(7)));
 		}
 		return true;
 	}

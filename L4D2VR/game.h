@@ -46,6 +46,23 @@ struct Player
     Vector useAimOrigin = { 0,0,0 };
     QAngle useAimAngles = { 0,0,0 };
     unsigned long long useAimUntil = 0;
+    bool useAimLeft = false;    // grabbed with the left hand: what it takes goes to the left hand
+
+    // Dual wield (dual_wield.cpp). What the left hand holds, as the player says, and the melee weapon carried beside a
+    // pistol. Both are checked after every batch of usercmds: the entity has to belong to this player.
+    int leftItemIndex = 0;
+    void *leftItem = nullptr;
+    int leftItemId = 0;
+    int extraMeleeIndex = 0;
+    void *extraMelee = nullptr;
+    // The left hand, sent while it swings a melee weapon or uses its item
+    Vector leftHandPos = { 0,0,0 };
+    QAngle leftHandAngle = { 0,0,0 };
+    QAngle leftSwingPrevAngle = { 0,0,0 };
+    unsigned long long leftHandUntil = 0;   // the pose is recent
+    unsigned long long leftSwingUntil = 0;  // swinging
+    bool leftSwingNew = true;
+    bool leftSwingTraced = true;            // the last pose received has been used
 
     // Last grenade throw received from the player (VR::EncodeGrenadeThrow, decoded in Hooks::dReadUsercmd)
     int throwSequence = 0;
@@ -97,6 +114,7 @@ public:
     int m_CurrentUsercmdID = -1;
     bool IsValidPlayerIndex(int index) const { return index >= 0 && index < (int)m_PlayersVRInfo.size(); }
     bool m_PerformingMelee = false;
+    const Vector *m_MeleeEyeOverride = nullptr; // the hand the melee traces start from, when not the right one
 
     bool m_IsMeleeWeaponActive = false;
     bool m_SwitchedWeapons = false;

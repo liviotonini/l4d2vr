@@ -62,6 +62,8 @@ public:
 	// Received from the server through console commands
 	void OnAcknowledged();
 	void OnPoseReceived(int playerIndex, uint16_t sequence, const char *payload);
+	void OnLeftItemReceived(int playerIndex, int itemIndex);
+	void OnDualTest(const char *action);
 
 private:
 	struct ServerClient

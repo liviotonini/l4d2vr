@@ -46,6 +46,14 @@ public:
 	// Along the knuckles, from the little finger to the index: the direction of what the hand is gripping
 	HandMath::Vec3 GripAxis(Side side, const HandMath::Mat34 *bones) const;
 
+	// Where a handle held in the fist is: x towards where the fingers point, y along the grip (out by the thumb), z the
+	// rest. Its origin is between the knuckles of the index and the little finger, moved `palmOffset` towards the palm.
+	// The same axes as the "weapon_bone" of the game's models in the third person.
+	HandMath::Mat34 GripFrame(Side side, const HandMath::Mat34 *bones, float palmOffset) const;
+
+	// The hand and its fingers fold into the wrist, so it isn't seen
+	void CollapseHand(Side side, HandMath::Mat34 *bones) const;
+
 	// Copies the transforms of a hand from `from` to `to`, gradually
 	void BlendHand(Side side, const HandMath::Mat34 *from, const HandMath::Mat34 *to, float amount, HandMath::Mat34 *bones) const;
 

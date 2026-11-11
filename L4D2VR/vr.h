@@ -17,6 +17,7 @@ class IDirect3DTexture9;
 class IDirect3DSurface9;
 class ITexture;
 class SettingsMenu;
+class C_BasePlayer;
 struct ConVarData;
 
 
@@ -387,6 +388,14 @@ public:
 		float scale = 1.0f;
 		bool hasCenter = false;      // otherwise the middle of the model's hull is at the frame
 		HandMath::Vec3 center;
+		bool alignWeaponBone = false; // the model's "weapon_bone" is at the frame instead, like in a hand
+	};
+	// A weapon the player carries
+	struct InventoryItem
+	{
+		int index;       // entity index
+		int id;          // C_WeaponCSBase::WeaponID
+		void *weapon;
 	};
 	// Using something in the world with the hand on it (the grab buttons): the game's use, aimed at it for a moment
 	Vector m_GrabUseOrigin = { 0, 0, 0 };
@@ -394,12 +403,49 @@ public:
 	unsigned long long m_GrabUseAimUntil = 0;
 	unsigned long long m_GrabUsePressAt = 0;
 	unsigned long long m_GrabUsePressUntil = 0;
-	static constexpr int kMaxBodyDraws = 3;
+	static constexpr int kMaxBodyDraws = 4;
 	BodyModelDraw m_BodyDraws[kMaxBodyDraws];
 	int m_BodyDrawCount = 0;
 	bool m_AmmoBagDrawn = false;           // the game has the bag's model: the magazines don't hang at the waist themselves
 	int m_ChestItemIds[2] = { 0, 0 };      // carried and not in the hand: pills or adrenaline, a grenade
 	HandMath::Vec3 m_ChestItemPoints[2];
+	HandMath::Vec3 m_ChestSpotPoints[2];   // where they go, with or without them
+	bool m_ChestSpotsValid = false;
+
+	// Dual wield (dual_wield.cpp): the left hand holds a melee weapon, a grenade, pills or adrenaline. DualWield in
+	// config.txt.
+	bool m_DualWieldEnabled = true;
+	int m_LeftItemIndex = 0;               // entity index, 0 when the hand is empty
+	int m_LeftItemId = 0;
+	int m_ExtraMeleeIndex = 0;             // the melee weapon in the slot of its own (DualWield::kExtraSlot)
+	int m_SentLeftItemIndex = -1;
+	unsigned long long m_LeftItemSentMs = 0;
+	int m_RightWeaponId = 0;               // what the right hand holds, to go back to it
+	int m_PrevRightWeaponId = 0;
+	unsigned long long m_LeftGrabUntil = 0; // grabbed something in the world with the left hand: it goes there
+	int m_InventoryBefore[64] = {};
+	int m_InventoryBeforeCount = 0;
+	unsigned long long m_LastSwitchBackMs = 0;
+	// Using the left hand's grenade, pills or adrenaline: the active weapon for a moment, in the left hand
+	bool m_LeftUseActive = false;
+	bool m_LeftUseWasActive = false;
+	unsigned long long m_LeftUseStartMs = 0;
+	unsigned long long m_LeftUseReleaseMs = 0;
+	bool m_LeftTriggerDown = false;
+	bool m_LeftSwinging = false;
+	unsigned long long m_LeftHandSentMs = 0;
+	// Changing hands: 1 right to left, -1 left to right, 2 done and waiting for the grab to be let go
+	int m_HandSwapDirection = 0;
+	float m_HandSwapSeconds = 0.0f;
+	unsigned long long m_HandSwapPulseMs = 0;
+	// The fist of the left hand relative to its hand bone, from the last time the hands were drawn
+	HandMath::Mat34 m_LeftGripInHand;
+	bool m_LeftGripValid = false;
+	// The left controller before the angle adjustment
+	Vector m_LeftControllerForwardRaw = { 1,0,0 };
+	Vector m_LeftControllerRightRaw = { 0,-1,0 };
+	Vector m_LeftControllerUpRaw = { 0,0,1 };
+	int m_RemoteLeftItem[33] = {};          // what other VR players hold in the left hand
 	// From the head of other VR players' poses to the head of their models, from the last time they were drawn
 	HandMath::Vec3 m_RemoteHeadOffset[33];
 	bool m_RemoteHeadOffsetValid[33] = {};
@@ -489,7 +535,30 @@ public:
 	void DrawBodyModels(int flags, void *renderable, int entityIndex);
 	int GetChestItemSlotAt(const HandMath::Vec3 &handWorld) const;
 	void BuildBodyModelBones(const void *studioHeader, const BodyModelDraw &draw, void *outBones);
-	bool TryGrabWorld(const HandMath::Vec3 &handWorld);
+	bool TryGrabWorld(const HandMath::Vec3 &handWorld, bool leftHand = false);
+	bool FindNearestPickable(const HandMath::Vec3 &from, float radiusUnits, HandMath::Vec3 &point, const char *filter = nullptr);
+	int GetInventory(C_BasePlayer *player, InventoryItem *items, int max);
+	const void *GetEntityModel(const void *entity);
+	int GetChestSpotAt(const HandMath::Vec3 &handWorld) const;
+	// Dual wield (dual_wield.cpp)
+	void UpdateDualWield(C_BasePlayer *local, int activeWeaponId, float deltaSeconds);
+	void UpdateLeftUse(unsigned long long now, int activeIndex, const InventoryItem *items, int count);
+	void UpdateLeftSwing(unsigned long long now);
+	void UpdateHandSwap(unsigned long long now, float deltaSeconds, int activeIndex, int activeWeaponId, const InventoryItem *items, int count);
+	bool LeftHandHoldsItem() const;
+	bool LeftHandHoldsMelee() const;
+	void TakeIntoLeftHand(int entityIndex, int weaponId);
+	void ClearLeftItem();
+	bool LeftHandChestGrab(const HandMath::Vec3 &handWorld);
+	bool GetLeftItemDraw(BodyModelDraw &draw);
+	HandMath::Mat34 GetLeftHandBone(const HandRig &rig) const;
+	void HoldLeftItem(const HandRig &rig, float curls[HandRig::FingerCount]);
+	void KeepLeftGrip(const HandRig &rig, const HandMath::Mat34 *bones);
+	void ApplyLeftUseHand(const Vector &leftForwardRaw, const Vector &leftRightRaw, const Vector &leftUpRaw);
+	int PickRightWeapon(const InventoryItem *items, int count, int exceptIndex, int preferredId) const;
+	void SelectWeapon(int weaponId);
+	void OnRemoteLeftItem(int playerIndex, int itemIndex);
+	void DualWieldTest(const char *action);
 	bool GetGrabUseAim(Vector &origin, QAngle &angles) const;
 	void UpdateOnePistolModel(const void *studioHeader, bool oneShown);
 	void ApplyOnePistolPlacement();

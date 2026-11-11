@@ -663,7 +663,10 @@ void VR::ProcessInput()
 
     UpdateGrenadeThrow();
 
-    SetGameButton(GameButton_Attack, GetAttackButton(PressedDigitalAction(m_ActionPrimaryAttack)));
+    // While the left hand's item is used, its trigger is the attack, once the item is out (dual wield)
+    const bool attackTrigger = m_LeftUseActive ? PressedDigitalAction(m_ActionSecondaryAttack) && m_LeftUseWasActive && m_ActiveWeaponId == m_LeftItemId
+        : PressedDigitalAction(m_ActionPrimaryAttack);
+    SetGameButton(GameButton_Attack, GetAttackButton(attackTrigger));
     SetGameButton(GameButton_Jump, PressedDigitalAction(m_ActionJump));
     // A grab next to something in the world presses use for a moment (TryGrabWorld)
     const unsigned long long useTick = GetTickCount64();
@@ -676,7 +679,9 @@ void VR::ProcessInput()
     //if (PressedDigitalAction(m_ActionSecondaryAttack) || (m_IsTrackingManualPush && VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 5.0))
     // The swing gestures don't shove while throwing a grenade with the arm (both arms move fast, and holding the shove
     // button stops the game from throwing). Neither does the shove button press that cancelled a throw.
-    SetGameButton(GameButton_Attack2, m_IsTrackingManualPush && !IsGrenadeThrowInProgress() && ((VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 4.0 && !ManualReloadUsesLeftHand()) || (!m_Game->m_IsMeleeWeaponActive && VectorLength(m_RightControllerPose.TrackedDeviceVel) > 4.0)));
+    // A melee weapon in the left hand hits instead of shoving, and its item being used doesn't shove (dual wield)
+    const bool leftShoves = !ManualReloadUsesLeftHand() && !LeftHandHoldsMelee() && !m_LeftUseActive;
+    SetGameButton(GameButton_Attack2, m_IsTrackingManualPush && !IsGrenadeThrowInProgress() && ((VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 4.0 && leftShoves) || (!m_Game->m_IsMeleeWeaponActive && VectorLength(m_RightControllerPose.TrackedDeviceVel) > 4.0)));
 
     if (PressedDigitalAction(m_ActionPrevItem, true))
     {
@@ -1639,9 +1644,11 @@ bool VR::IsThrowableWeapon(int weaponId)
 void VR::UpdateGrenadeThrow()
 {
     const auto now = std::chrono::steady_clock::now();
-    const bool trigger = PressedDigitalAction(m_ActionPrimaryAttack);
+    // A grenade in the left hand (dual wield) is thrown with that hand and its trigger
+    const bool leftHand = m_LeftUseActive;
+    const bool trigger = PressedDigitalAction(leftHand ? m_ActionSecondaryAttack : m_ActionPrimaryAttack);
 
-    const bool shoveButton = PressedDigitalAction(m_ActionSecondaryAttack);
+    const bool shoveButton = !leftHand && PressedDigitalAction(m_ActionSecondaryAttack);
     const bool shoveButtonPressed = shoveButton && !m_ShoveButtonDown;
     m_ShoveButtonDown = shoveButton;
     if (!shoveButton)
@@ -1672,7 +1679,7 @@ void VR::UpdateGrenadeThrow()
     }
 
     // Hand velocity in game axes: the tracking space turned by the thumbstick turning
-    Vector handVelocity = m_RightControllerPose.TrackedDeviceVel;
+    Vector handVelocity = leftHand ? m_LeftControllerPose.TrackedDeviceVel : m_RightControllerPose.TrackedDeviceVel;
     VectorPivotXY(handVelocity, Vector(0, 0, 0), m_RotationOffset);
     m_HandVelocityHistory.push_back({ now, handVelocity });
     while (!m_HandVelocityHistory.empty() && now - m_HandVelocityHistory.front().time > kHandVelocityHistory)
@@ -2046,8 +2053,13 @@ void VR::UpdateBodyGrab(bool weaponHand, const Vector &handPosLocalInWorld, int 
     const float headPitchDown = RAD2DEG(asinf(std::clamp(-m_HmdForward.z, -1.0f, 1.0f)));
     const char *handName = weaponHand ? "weapon hand" : "other hand";
 
-    // The pills or the grenade on the chest
+    // The pills or the grenade on the chest. The left hand takes them into itself (dual wield), and puts them back.
     const Vector handWorld = m_CameraAnchor - Vector(0, 0, 64) + handPosLocalInWorld;
+    if (!weaponHand && LeftHandChestGrab(HandMath::Vec3(handWorld.x, handWorld.y, handWorld.z)))
+    {
+        WriteBodyGrabLog("%s: chest, left hand (dual wield), holds entity %d", handName, m_LeftItemIndex);
+        return;
+    }
     const int chestSlot = GetChestItemSlotAt(HandMath::Vec3(handWorld.x, handWorld.y, handWorld.z));
     if (chestSlot)
     {
@@ -2077,7 +2089,7 @@ void VR::UpdateBodyGrab(bool weaponHand, const Vector &handPosLocalInWorld, int 
     }
 
     // Nothing on the body here: a weapon, an item or a door handle in the world, if the hand is on one
-    if (TryGrabWorld(HandMath::Vec3(handWorld.x, handWorld.y, handWorld.z)))
+    if (TryGrabWorld(HandMath::Vec3(handWorld.x, handWorld.y, handWorld.z), !weaponHand))
     {
         m_Haptics.Play(weaponHand ? Haptics::Hand::WeaponHand : Haptics::Hand::OtherHand, HapticEffects::Take);
         return;
@@ -2281,8 +2293,11 @@ void VR::UpdateTracking()
     // Wrap angle from -180 to 180
     leftControllerAngLocal.y -= 360 * std::floor((leftControllerAngLocal.y + 180) / 360);
 
-    QAngle::AngleVectors(leftControllerAngLocal, &m_LeftControllerForward, &m_LeftControllerRight, &m_LeftControllerUp);			
+    QAngle::AngleVectors(leftControllerAngLocal, &m_LeftControllerForward, &m_LeftControllerRight, &m_LeftControllerUp);
     QAngle::AngleVectors(rightControllerAngLocal, &m_RightControllerForward, &m_RightControllerRight, &m_RightControllerUp);
+    m_LeftControllerForwardRaw = m_LeftControllerForward;
+    m_LeftControllerRightRaw = m_LeftControllerRight;
+    m_LeftControllerUpRaw = m_LeftControllerUp;
 
     // The hand holds the controller at a fixed angle, whatever the aim is set to
     {
@@ -2308,6 +2323,9 @@ void VR::UpdateTracking()
     {
         m_RightControllerPosAbs = m_RightControllerPosAbs + (m_RightControllerRight * m_WeaponHorizontalPositionAdjustment);
     }
+
+    // Using the left hand's item: the game's weapon is in the left hand (dual wield)
+    ApplyLeftUseHand(m_LeftControllerForwardRaw, m_LeftControllerRightRaw, m_LeftControllerUpRaw);
 
     // Weapon orientation. Same as the right controller, unless the weapon is being held with 2 hands.
     Vector rightControllerForward_2handAdjust = m_RightControllerForward;
@@ -2350,7 +2368,7 @@ void VR::UpdateTracking()
             float handsDistanceFor2HandWeaponOffset = 5.0f;
 
             float angleLimitFor2HandWeapon = 15.0f;
-            if (ManualReloadHandIsBusy())
+            if (ManualReloadHandIsBusy() || m_LeftUseActive)
             {
                 isHoldingWeapon2Handed = false;
             }
@@ -2451,6 +2469,7 @@ void VR::UpdateTracking()
     m_ViewmodelUp = VectorRotate(m_ViewmodelUp, m_ViewmodelForward, m_ViewmodelAngOffset.z);
     ApplyOnePistolPlacement();
 
+    UpdateDualWield(localPlayer, weaponId, deltaTime * 0.001f);
     UpdateHands(deltaTime * 0.001f);
     m_Game->m_PoseRelay->Update(this, localPlayer);
 }
@@ -2549,6 +2568,7 @@ void VR::ParseConfigFile()
     m_ShowReloadMark = userConfig["ShowReloadMark"] != "false"; // enabled if missing from config
     m_OnePistolDoubled = userConfig["OnePistolDoubled"] != "false"; // enabled if missing from config
     m_SmallBodyItems = userConfig["SmallBodyItems"] != "false"; // enabled if missing from config
+    m_DualWieldEnabled = userConfig["DualWield"] != "false"; // enabled if missing from config
     m_ScopeMagnificationHigh = readFloat("ScopeMagnificationHigh", m_ScopeMagnificationHigh, 1.0f, 20.0f);
     m_MeleeHandBackMeters = readFloat("MeleeHandBackMeters", m_MeleeHandBackMeters, -0.2f, 0.2f); // only by editing config.txt
     m_MagazinePouchSide = readFloat("MagazinePouchSide", m_MagazinePouchSide, 0.0f, 0.6f);
@@ -2630,6 +2650,7 @@ bool VR::SaveConfigFile()
         { "ShowReloadMark", ConfigBoolString(m_ShowReloadMark) },
         { "OnePistolDoubled", ConfigBoolString(m_OnePistolDoubled) },
         { "SmallBodyItems", ConfigBoolString(m_SmallBodyItems) },
+        { "DualWield", ConfigBoolString(m_DualWieldEnabled) },
         { "MagazinePouchSide", ConfigFloatString(m_MagazinePouchSide) },
         { "MagazinePouchForward", ConfigFloatString(m_MagazinePouchForward) },
         { "MagazinePouchBelowEyes", ConfigFloatString(m_MagazinePouchBelowEyes) },

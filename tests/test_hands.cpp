@@ -177,6 +177,42 @@ namespace
 			CHECK_NEAR(Length(grip), 1.0f, 0.001f);
 			CHECK(fabsf(Dot(grip, Axis(rightPose, 0))) < 0.6f);
 		}
+
+		// The left fist holding an item (dual wield): a rotation, along the grip, forward where the fingers point, in
+		// front of the palm, and it stays where it is on the hand when the hand moves
+		{
+			std::vector<Mat34> held = rest;
+			float fist[5] = { 0.6f, 0.85f, 0.85f, 0.85f, 0.85f };
+			rig.PoseHand(HandRig::Left, hand, fist, held.data());
+			const float palmOffset = 1.0f;
+			const Mat34 grip = rig.GripFrame(HandRig::Left, held.data(), palmOffset);
+			CHECK(IsFinite(grip));
+			CHECK_NEAR(Length(Axis(grip, 0)), 1.0f, 0.001f);
+			CHECK_NEAR(Length(Axis(grip, 1)), 1.0f, 0.001f);
+			CHECK_NEAR(Dot(Axis(grip, 0), Axis(grip, 1)), 0.0f, 0.001f);
+			CHECK_NEAR(Dot(Cross(Axis(grip, 0), Axis(grip, 1)), Axis(grip, 2)), 1.0f, 0.001f); // not mirrored
+			CHECK_NEAR(Dot(Axis(grip, 1), rig.GripAxis(HandRig::Left, held.data())), 1.0f, 0.001f);
+			CHECK(Dot(Axis(grip, 0), forward) > 0.7f);
+			CHECK(Dot(Axis(grip, 1), up) > 0.8f);
+			const Vec3 knuckles = (Origin(held[leftIndex]) + Origin(held[leftPinky])) * 0.5f;
+			CHECK_NEAR(Length(Origin(grip) - knuckles), palmOffset, 0.001f);
+			CHECK(Dot(Origin(grip) - knuckles, right) > 0.9f * palmOffset); // the left palm faces the right
+
+			const Mat34 inHand = Multiply(InvertRigid(held[leftHand]), grip);
+			const Mat34 hand2 = rig.HandFromFrame(HandRig::Left, up, forward * -1.0f, Vec3(-50.0f, 20.0f, 10.0f));
+			std::vector<Mat34> held2 = rest;
+			rig.PoseHand(HandRig::Left, hand2, fist, held2.data());
+			const Mat34 expected = Multiply(hand2, inHand);
+			const Mat34 grip2 = rig.GripFrame(HandRig::Left, held2.data(), palmOffset);
+			CHECK_NEAR(Length(Origin(grip2) - Origin(expected)), 0.0f, 0.01f);
+			CHECK_NEAR(Dot(Axis(grip2, 1), Axis(expected, 1)), 1.0f, 0.001f);
+
+			// Hidden: the hand and the fingers fold into the wrist, the other hand doesn't
+			rig.CollapseHand(HandRig::Left, held.data());
+			CHECK_NEAR(Length(Axis(held[leftHand], 0)), 0.0f, 0.0001f);
+			CHECK_NEAR(Length(Origin(held[leftIndexTip]) - Origin(held[leftHand])), 0.0f, 0.0001f);
+			CHECK(Length(Axis(held[rightHand], 0)) > 0.99f);
+		}
 	}
 }
 

@@ -614,6 +614,7 @@
     <ClCompile Include="haptics.cpp" />
     <ClCompile Include="manual_reload.cpp" />
     <ClCompile Include="body_items.cpp" />
+    <ClCompile Include="dual_wield.cpp" />
     <ClCompile Include="pose_relay.cpp" />
     <ClCompile Include="settings_menu.cpp" />
     <ClCompile Include="stability.cpp" />

@@ -276,6 +276,36 @@ Vec3 HandRig::GripAxis(Side s, const Mat34 *bones) const
 	return side.hand < 0 ? Vec3(0.0f, 0.0f, 1.0f) : Normalized(Origin(bones[side.indexBase]) - Origin(bones[side.pinkyBase]));
 }
 
+Mat34 HandRig::GripFrame(Side s, const Mat34 *bones, float palmOffset) const
+{
+	const SideData &side = m_Sides[s];
+	if (side.hand < 0)
+		return Mat34();
+
+	// The directions of the hand now: its rest frame, turned like the hand bone
+	const Mat34 &hand = bones[side.hand];
+	const Mat34 restToLocal = TransposeRotation(side.restHand);
+	const Vec3 fingers = RotateVector(hand, RotateVector(restToLocal, Axis(side.restFrame, 0)));
+	const Vec3 palm = RotateVector(hand, RotateVector(restToLocal, Axis(side.restFrame, 2)));
+
+	const Vec3 grip = GripAxis(s, bones);
+	const Vec3 forward = Normalized(fingers - grip * Dot(fingers, grip), palm);
+	const Vec3 knuckles = (Origin(bones[side.indexBase]) + Origin(bones[side.pinkyBase])) * 0.5f;
+	return FromAxes(forward, grip, Cross(forward, grip), knuckles + palm * palmOffset);
+}
+
+void HandRig::CollapseHand(Side s, Mat34 *bones) const
+{
+	const SideData &side = m_Sides[s];
+	if (side.hand < 0)
+		return;
+
+	const Vec3 wrist = Origin(bones[side.hand]);
+	bones[side.hand] = CollapsedAt(wrist);
+	for (const Joint &joint : side.joints)
+		bones[joint.bone] = CollapsedAt(wrist);
+}
+
 void HandRig::MoveHand(Side s, const Mat34 &move, Mat34 *bones) const
 {
 	const SideData &side = m_Sides[s];

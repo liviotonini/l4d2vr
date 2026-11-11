@@ -2,6 +2,8 @@
 #include <Windows.h>
 #include <algorithm>
 #include <cstring>
+#include <unordered_map>
+#include "dual_wield.h"
 #include "sdk.h"
 #include "game.h"
 #include "hooks.h"
@@ -266,6 +268,9 @@ namespace
 	const Vec3 kChestSpots[2] = { Vec3(0.11f, 0.13f, -0.37f), Vec3(0.10f, -0.16f, -0.34f) };
 	const float kChestGrabRadius = 0.12f; // meters
 	const float kChestViewCosine = 0.2f;
+	// The fist of another player's left hand from the wrist they send, meters: along the fingers, towards the palm
+	const float kRemoteFistForward = 0.075f;
+	const float kRemoteFistPalm = 0.025f;
 
 	// The place the body items are measured from: where the eyes would be with the head looking straight ahead (the
 	// head turns around the neck), facing where the head faces horizontally. x forward, y left, z up.
@@ -391,7 +396,8 @@ void VR::UpdateBodyItems()
 		if (!IsValidHandle(handle))
 			continue;
 		C_WeaponCSBase *weapon = (C_WeaponCSBase *)m_Game->m_ClientEntityList->GetClientEntityFromHandle(handle);
-		if (!weapon || weapon == active)
+		// In a hand: the active weapon, or the left hand's item
+		if (!weapon || weapon == active || (handle & kHandleIndexMask) == m_LeftItemIndex)
 			continue;
 		const int weaponId = weapon->GetWeaponID();
 		const int spot = ChestSpotOf(weaponId);
@@ -400,6 +406,15 @@ void VR::UpdateBodyItems()
 	}
 
 	const Mat34 body = BodyFrame(ToVec3(m_HmdPosAbs), ToVec3(m_HmdForward), ToVec3(m_HmdUp), m_VRScale);
+	for (int spot = 0; spot < 2; ++spot)
+		m_ChestSpotPoints[spot] = Origin(ChestItemFrame(body, spot, C_WeaponCSBase::PAIN_PILLS, m_LeftHanded, m_PlayerHeightInMeters, m_VRScale));
+	m_ChestSpotsValid = true;
+
+	// The left hand's item
+	BodyModelDraw leftItem;
+	if (m_BodyDrawCount < kMaxBodyDraws && GetLeftItemDraw(leftItem))
+		m_BodyDraws[m_BodyDrawCount++] = leftItem;
+
 	for (int spot = 0; spot < 2; ++spot)
 	{
 		const int weaponId = m_ChestItemIds[spot];
@@ -439,11 +454,90 @@ int VR::GetChestItemSlotAt(const Vec3 &handWorld) const
 	return 0;
 }
 
+// Where a pills or grenade spot of the chest is at the hand, with or without the item: 0 pills, 1 grenade, -1 none
+int VR::GetChestSpotAt(const Vec3 &handWorld) const
+{
+	if (!m_ChestSpotsValid)
+		return -1;
+	for (int spot = 0; spot < 2; ++spot)
+	{
+		if (Length(handWorld - m_ChestSpotPoints[spot]) < kChestGrabRadius * m_VRScale)
+			return spot;
+	}
+	return -1;
+}
+
+// The weapons a player carries. Returns how many were written.
+int VR::GetInventory(C_BasePlayer *player, InventoryItem *items, int max)
+{
+	if (!g_NetvarsLookedUp)
+		LookUpNetvars(m_Game);
+	if (g_MyWeaponsOffset < 0 || !player)
+		return 0;
+
+	int count = 0;
+	for (int i = 0; i < g_MyWeaponsCount && count < max; ++i)
+	{
+		const int handle = Read<int>(player, g_MyWeaponsOffset + i * 4);
+		if (!IsValidHandle(handle))
+			continue;
+		C_WeaponCSBase *weapon = (C_WeaponCSBase *)m_Game->m_ClientEntityList->GetClientEntityFromHandle(handle);
+		if (!weapon)
+			continue;
+		items[count].index = handle & kHandleIndexMask;
+		items[count].id = weapon->GetWeaponID();
+		items[count].weapon = weapon;
+		++count;
+	}
+	return count;
+}
+
+// The model an entity is drawn with
+const void *VR::GetEntityModel(const void *entity)
+{
+	if (!entity || g_ModelIndexOffset < 0)
+		return nullptr;
+	const int modelIndex = Read<int16_t>(entity, g_ModelIndexOffset);
+	return modelIndex > 0 ? m_Game->m_ModelInfo->GetModel(modelIndex) : nullptr;
+}
+
+namespace
+{
+	// The bone a model is held by in the third person ("ValveBiped.weapon_bone", "L_weapon_bone"), -1 if none
+	int WeaponBoneOf(const void *studioHeader)
+	{
+		static std::unordered_map<const void *, int> s_Found;
+		auto found = s_Found.find(studioHeader);
+		if (found != s_Found.end())
+			return found->second;
+
+		int bone = -1;
+		const int count = Studio::BoneCount(studioHeader);
+		for (int i = 0; i < count && bone < 0; ++i)
+		{
+			if (strstr(Studio::BoneName(studioHeader, i), "weapon_bone"))
+				bone = i;
+		}
+		s_Found[studioHeader] = bone;
+		return bone;
+	}
+}
+
 // The bones of an item drawn on the body: the model as it was made, its center at the frame, at its scale
 void VR::BuildBodyModelBones(const void *studioHeader, const BodyModelDraw &draw, void *outBones)
 {
 	Mat34 *bones = (Mat34 *)outBones;
 	const int boneCount = std::clamp(Studio::BoneCount(studioHeader), 0, Studio::kMaxBones);
+
+	// Held: the bone the model is held by goes where the hand holds it
+	const int weaponBone = draw.alignWeaponBone ? WeaponBoneOf(studioHeader) : -1;
+	if (weaponBone >= 0 && weaponBone < boneCount)
+	{
+		const Mat34 placed = Multiply(draw.frame, Studio::PoseToBone(studioHeader, weaponBone));
+		for (int i = 0; i < boneCount; ++i)
+			bones[i] = Multiply(placed, InvertRigid(Studio::PoseToBone(studioHeader, i)));
+		return;
+	}
 
 	const Vec3 hullMin = *(const Vec3 *)((const uint8_t *)studioHeader + 104);
 	const Vec3 hullMax = *(const Vec3 *)((const uint8_t *)studioHeader + 116);
@@ -484,6 +578,24 @@ bool VR::BuildRemoteItemBones(int entityIndex, const void *weapon, const void *s
 		}
 		if (!carries)
 			continue;
+
+		// In their left hand (dual wield): held like in the local player's, from where the hand is
+		if (m_RemoteLeftItem[player] == entityIndex)
+		{
+			PoseRelay::Frame pose;
+			if (!m_Game->m_PoseRelay->GetPose(player, pose) || !pose.hasLeftHand)
+				return false;
+
+			const Vec3 fingers = Normalized(pose.leftWrist.forward);
+			const Vec3 thumb = Normalized(pose.leftWrist.up - fingers * Dot(fingers, pose.leftWrist.up), Vec3(0.0f, 0.0f, 1.0f));
+			const Vec3 palm = Cross(fingers, thumb);
+			const Vec3 wrist = pose.leftWrist.position + m_RemoteHeadOffset[player];
+			BodyModelDraw draw;
+			draw.frame = FromAxes(fingers, thumb, palm, wrist + (fingers * kRemoteFistForward + palm * kRemoteFistPalm) * m_VRScale);
+			draw.alignWeaponBone = true;
+			BuildBodyModelBones(studioHeader, draw, outBones);
+			return true;
+		}
 
 		const int weaponId = ((C_WeaponCSBase *)weapon)->GetWeaponID();
 		const int spot = ChestSpotOf(weaponId);
@@ -571,8 +683,9 @@ namespace
 			Consider(best, hand, origin + axis * (low + fromEdge) + up * height, reach, true, modelIndex);
 	}
 
-	// A wrong guess about an entity must not take the game down
-	void FindWorldTarget(Game *game, const Vec3 &hand, float unitsPerMeter, WorldTarget &best)
+	// A wrong guess about an entity must not take the game down. itemReach: game units, or the hand's reach if 0.
+	// filter: only models whose path has it.
+	void FindWorldTarget(Game *game, const Vec3 &hand, float unitsPerMeter, WorldTarget &best, float itemReach = 0.0f, const char *filter = nullptr)
 	{
 		__try
 		{
@@ -594,7 +707,7 @@ namespace
 				_strlwr_s(lower);
 				const bool pickable = IsPickable(lower);
 				const bool door = !pickable && IsDoor(lower);
-				if (!pickable && !door)
+				if ((!pickable && !door) || (filter && !strstr(lower, filter)))
 					continue;
 
 				// Carried by somebody
@@ -611,8 +724,8 @@ namespace
 				const Vec3 origin(originV.x, originV.y, originV.z);
 
 				if (pickable)
-					Consider(best, hand, origin, kWorldItemReach * unitsPerMeter, false, modelIndex);
-				else
+					Consider(best, hand, origin, itemReach > 0.0f ? itemReach : kWorldItemReach * unitsPerMeter, false, modelIndex);
+				else if (itemReach <= 0.0f)
 					ConsiderDoorHandles(best, hand, origin, ((tGetAngles)vtable[2])(renderable), model, kDoorHandleReach * unitsPerMeter, modelIndex);
 			}
 		}
@@ -622,8 +735,23 @@ namespace
 	}
 }
 
-// A grab button pressed with the hand at `handWorld`. True if it took something or opened a door.
-bool VR::TryGrabWorld(const Vec3 &handWorld)
+// The weapon or item lying nearest to `from`, within radiusUnits (the test of the dual wield)
+bool VR::FindNearestPickable(const Vec3 &from, float radiusUnits, Vec3 &point, const char *filter)
+{
+	if (!g_NetvarsLookedUp)
+		LookUpNetvars(m_Game);
+	if (g_ModelIndexOffset < 0 || g_OwnerOffset < 0)
+		return false;
+
+	WorldTarget target;
+	FindWorldTarget(m_Game, from, m_VRScale, target, radiusUnits, filter);
+	point = target.point;
+	return target.found;
+}
+
+// A grab button pressed with the hand at `handWorld`. True if it took something or opened a door. With the left hand,
+// a weapon or an item it takes goes to that hand (dual wield).
+bool VR::TryGrabWorld(const Vec3 &handWorld, bool leftHand)
 {
 	if (g_ModelIndexOffset < 0 || g_OwnerOffset < 0 || !m_Game->m_PoseRelay->IsServerCapable())
 		return false;
@@ -647,8 +775,21 @@ bool VR::TryGrabWorld(const Vec3 &handWorld)
 	m_GrabUsePressAt = now + 60;     // after the aim has reached the server
 	m_GrabUsePressUntil = now + 220;
 
+	// For the left hand: what's carried now, to know what's new
+	const bool toLeftHand = leftHand && m_DualWieldEnabled && !target.door;
+	if (toLeftHand)
+	{
+		C_BasePlayer *local = (C_BasePlayer *)m_Game->GetClientEntity(m_Game->m_EngineClient->GetLocalPlayer());
+		InventoryItem items[64];
+		const int count = GetInventory(local, items, 64);
+		m_InventoryBeforeCount = 0;
+		for (int i = 0; i < count; ++i)
+			m_InventoryBefore[m_InventoryBeforeCount++] = items[i].index;
+		m_LeftGrabUntil = now + 1500;
+	}
+
 	char command[128];
-	snprintf(command, sizeof(command), "l4d2vr_use_aim %.2f %.2f %.2f %.2f %.2f %.2f", m_GrabUseOrigin.x, m_GrabUseOrigin.y, m_GrabUseOrigin.z, m_GrabUseAngles.x, m_GrabUseAngles.y, m_GrabUseAngles.z);
+	snprintf(command, sizeof(command), "l4d2vr_use_aim %.2f %.2f %.2f %.2f %.2f %.2f %d", m_GrabUseOrigin.x, m_GrabUseOrigin.y, m_GrabUseOrigin.z, m_GrabUseAngles.x, m_GrabUseAngles.y, m_GrabUseAngles.z, toLeftHand ? 1 : 0);
 	m_Game->m_EngineClient->ServerCmd(command, true);
 
 	Diagnostics::Log("grab: %s, model %d, %.2f m from the hand", target.door ? "door" : "item", target.modelIndex, target.distance / m_VRScale);

@@ -8,6 +8,7 @@
 #include "diagnostics.h"
 #include "studio.h"
 #include "pose_relay.h"
+#include "dual_wield.h"
 #include <algorithm>
 #include <iostream>
 
@@ -101,6 +102,10 @@ Hooks::Hooks(Game *game)
 		hkServerSetHelpingHandState.enableHook();
 	if (hkClientSetHelpingHandState.pTarget)
 		hkClientSetHelpingHandState.enableHook();
+	if (hkClientGetSlot.pTarget)
+		hkClientGetSlot.enableHook();
+	if (hkServerGetSlot.pTarget)
+		hkServerGetSlot.enableHook();
 }
 
 Hooks::~Hooks()
@@ -451,46 +456,9 @@ float __fastcall Hooks::dProcessUsercmds(void *ecx, void *edx, edict_t *player, 
 			int wepID = curWep->GetWeaponID();
 			if (wepID == 19) // melee weapon
 			{
-				if (m_Game->m_PlayersVRInfo[index].isNewSwing)
-				{
-					m_Game->m_PlayersVRInfo[index].isNewSwing = false;
-					curWep->entitiesHitThisSwing = 0;
-				}
-
-				typedef void *(__thiscall *tGetMeleeWepInfo)(void *thisptr);
-				static tGetMeleeWepInfo oGetMeleeWepInfo = (tGetMeleeWepInfo)(m_Game->m_Offsets->GetMeleeWeaponInfo.address);
-				void *meleeWepInfo = oGetMeleeWepInfo(curWep);
-
-				Vector initialForward, initialRight, initialUp;
-				QAngle::AngleVectors(m_Game->m_PlayersVRInfo[index].prevControllerAngle, &initialForward, &initialRight, &initialUp);
-				Vector initialMeleeDirection = VectorRotate(initialForward, initialRight, 50.0);
-				VectorNormalize(initialMeleeDirection);
-
-				Vector finalForward, finalRight, finalUp;
-				QAngle::AngleVectors(m_Game->m_PlayersVRInfo[index].controllerAngle, &finalForward, &finalRight, &finalUp);
-				Vector finalMeleeDirection = VectorRotate(finalForward, finalRight, 50.0);
-				VectorNormalize(finalMeleeDirection);
-
-				Vector pivot;
-				CrossProduct(initialMeleeDirection, finalMeleeDirection, pivot);
-				VectorNormalize(pivot);
-
-				float swingAngle = acos(DotProduct(initialMeleeDirection, finalMeleeDirection)) * 180 / 3.14159265;
-
-				m_Game->m_Hooks->hkGetPrimaryAttackActivity.fOriginal(curWep, meleeWepInfo); // Needed to call TestMeleeSwingCollision
-
-				m_Game->m_PerformingMelee = true;
-
-				Vector traceDirection = initialMeleeDirection;
-				int numTraces = 10;
-				float traceAngle = swingAngle / numTraces;
-				for (int i = 0; i < numTraces; ++i)
-				{
-					traceDirection = VectorRotate(traceDirection, pivot, traceAngle);
-					m_Game->m_Hooks->hkTestMeleeSwingCollisionServer.fOriginal(curWep, traceDirection);
-				}
-
-				m_Game->m_PerformingMelee = false;
+				Player &vrPlayer = m_Game->m_PlayersVRInfo[index];
+				TraceMeleeSwing(curWep, vrPlayer.prevControllerAngle, vrPlayer.controllerAngle, nullptr, vrPlayer.isNewSwing);
+				vrPlayer.isNewSwing = false;
 			}
 		}
 	}
@@ -501,7 +469,58 @@ float __fastcall Hooks::dProcessUsercmds(void *ecx, void *edx, edict_t *player, 
 
 	m_Game->m_PlayersVRInfo[index].prevControllerAngle = m_Game->m_PlayersVRInfo[index].controllerAngle;
 
+	// What the left hand holds, and its melee hits (dual wield)
+	DualWield::ServerAfterUsercmds(player, pPlayer, index);
+
 	return result;
+}
+
+// A melee weapon swung from one angle of the hand to another: 10 traces from the hand (dEyePosition), the right one
+// when `hand` is null
+void Hooks::TraceMeleeSwing(void *weapon, const QAngle &from, const QAngle &to, const Vector *hand, bool newSwing)
+{
+	Server_WeaponCSBase *curWep = (Server_WeaponCSBase *)weapon;
+	if (newSwing)
+		curWep->entitiesHitThisSwing = 0;
+
+	typedef void *(__thiscall *tGetMeleeWepInfo)(void *thisptr);
+	static tGetMeleeWepInfo oGetMeleeWepInfo = (tGetMeleeWepInfo)(m_Game->m_Offsets->GetMeleeWeaponInfo.address);
+	void *meleeWepInfo = oGetMeleeWepInfo(curWep);
+
+	Vector initialForward, initialRight, initialUp;
+	QAngle::AngleVectors(from, &initialForward, &initialRight, &initialUp);
+	Vector initialMeleeDirection = VectorRotate(initialForward, initialRight, 50.0);
+	VectorNormalize(initialMeleeDirection);
+
+	Vector finalForward, finalRight, finalUp;
+	QAngle::AngleVectors(to, &finalForward, &finalRight, &finalUp);
+	Vector finalMeleeDirection = VectorRotate(finalForward, finalRight, 50.0);
+	VectorNormalize(finalMeleeDirection);
+
+	Vector pivot;
+	CrossProduct(initialMeleeDirection, finalMeleeDirection, pivot);
+	VectorNormalize(pivot);
+
+	// The same direction twice would be acos of a little more than 1
+	const float cosine = std::clamp(DotProduct(initialMeleeDirection, finalMeleeDirection), -1.0f, 1.0f);
+	float swingAngle = acos(cosine) * 180 / 3.14159265;
+
+	m_Game->m_Hooks->hkGetPrimaryAttackActivity.fOriginal(curWep, meleeWepInfo); // Needed to call TestMeleeSwingCollision
+
+	m_Game->m_MeleeEyeOverride = hand;
+	m_Game->m_PerformingMelee = true;
+
+	Vector traceDirection = initialMeleeDirection;
+	int numTraces = 10;
+	float traceAngle = swingAngle / numTraces;
+	for (int i = 0; i < numTraces; ++i)
+	{
+		traceDirection = VectorRotate(traceDirection, pivot, traceAngle);
+		m_Game->m_Hooks->hkTestMeleeSwingCollisionServer.fOriginal(curWep, traceDirection);
+	}
+
+	m_Game->m_PerformingMelee = false;
+	m_Game->m_MeleeEyeOverride = nullptr;
 }
 
 int Hooks::dReadUsercmd(void *buf, CUserCmd *move, CUserCmd *from)
@@ -712,7 +731,7 @@ Vector *Hooks::dEyePosition(void *ecx, void *edx, Vector *eyePos)
 	if (m_Game->m_PerformingMelee)
 	{
 		int i = m_Game->m_CurrentUsercmdID;
-		*result = m_Game->m_PlayersVRInfo[i].controllerPos;
+		*result = m_Game->m_MeleeEyeOverride ? *m_Game->m_MeleeEyeOverride : m_Game->m_PlayersVRInfo[i].controllerPos;
 	}
 
 	return result;
@@ -1113,6 +1132,34 @@ void Hooks::initWeaponStateHooks()
 		hkServerSetHelpingHandState.createHook((LPVOID)offsets->ServerSetHelpingHandState.address, &dServerSetHelpingHandState);
 	if (offsets->ClientSetHelpingHandState.address)
 		hkClientSetHelpingHandState.createHook((LPVOID)offsets->ClientSetHelpingHandState.address, &dClientSetHelpingHandState);
+
+	// Dual wield: a melee weapon in the left hand has a slot of its own
+	DualWield::ServerInit(m_Game);
+	if (offsets->ClientGetSlot.address && offsets->ServerGetSlot.address)
+	{
+		hkClientGetSlot.createHook((LPVOID)offsets->ClientGetSlot.address, &dClientGetSlot);
+		hkServerGetSlot.createHook((LPVOID)offsets->ServerGetSlot.address, &dServerGetSlot);
+	}
+	else
+	{
+		Diagnostics::Log("dual wield: GetSlot not found in this game version, a melee weapon in the left hand replaces the pistol");
+	}
+}
+
+int __fastcall Hooks::dClientGetSlot(void *ecx, void *edx)
+{
+	int slot;
+	if (DualWield::ClientGetSlot(ecx, slot))
+		return slot;
+	return hkClientGetSlot.fOriginal(ecx);
+}
+
+int __fastcall Hooks::dServerGetSlot(void *ecx, void *edx)
+{
+	int slot;
+	if (DualWield::ServerGetSlot(ecx, slot))
+		return slot;
+	return hkServerGetSlot.fOriginal(ecx);
 }
 
 bool Hooks::IsLocalPlayerWeapon(void *weapon)
@@ -1257,15 +1304,23 @@ void *__fastcall Hooks::dFindUseEntity(void *ecx, void *edx, float radius, float
 
 void __fastcall Hooks::dPlayerUse(void *ecx, void *edx, void *useEntity)
 {
+	// A melee weapon taken with the left hand doesn't replace the pistol (dual wield)
+	const int playerIndex = GetServerEntityIndex(ecx);
+	DualWield::ServerBeginUse(ecx, playerIndex);
+
 	Vector origin;
 	QAngle angles;
 	if (GetServerHandAim(ecx, origin, angles))
 	{
 		ScopedUseAim aim(g_ServerUseAim, ecx, origin, angles);
-		return hkPlayerUse.fOriginal(ecx, useEntity);
+		hkPlayerUse.fOriginal(ecx, useEntity);
+	}
+	else
+	{
+		hkPlayerUse.fOriginal(ecx, useEntity);
 	}
 
-	hkPlayerUse.fOriginal(ecx, useEntity);
+	DualWield::ServerEndUse(ecx, playerIndex);
 }
 
 Vector *__fastcall Hooks::dServerPlayerEyePosition(void *ecx, void *edx, Vector *eyePos)

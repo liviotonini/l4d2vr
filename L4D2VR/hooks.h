@@ -94,6 +94,7 @@ typedef void(__thiscall *tSetHelpingHandState)(void *thisptr, int state);
 typedef void(__thiscall *tServerClientCommand)(void *thisptr, edict_t *player, const void *command);
 typedef const QAngle *(__thiscall *tServerEyeAngles)(void *thisptr);
 typedef void(__thiscall *tEyeVectors)(void *thisptr, Vector *forward, Vector *right, Vector *up);
+typedef int(__thiscall *tGetSlot)(void *thisptr);
 
 // A Vector passed by value (CBaseCSGrenade::EmitGrenade takes its vectors by value)
 struct VectorValue { float x, y, z; };
@@ -153,6 +154,8 @@ public:
 	static inline Hook<tEyePosition> hkClientPlayerEyePosition;
 	static inline Hook<tServerEyeAngles> hkServerPlayerEyeAngles;
 	static inline Hook<tEyeVectors> hkClientPlayerEyeVectors;
+	static inline Hook<tGetSlot> hkClientGetSlot;
+	static inline Hook<tGetSlot> hkServerGetSlot;
 
 	// Read from the code of CBaseCSGrenade::ThrowGrenade by initGrenadeThrowHooks (null / 0 if it doesn't look as expected)
 	static inline tThrowGrenade m_ThrowGrenade = nullptr;
@@ -235,6 +238,9 @@ public:
 	static Vector *__fastcall dClientPlayerEyePosition(void *ecx, void *edx, Vector *eyePos);
 	static const QAngle *__fastcall dServerPlayerEyeAngles(void *ecx, void *edx);
 	static void __fastcall dClientPlayerEyeVectors(void *ecx, void *edx, Vector *forward, Vector *right, Vector *up);
+	static int __fastcall dClientGetSlot(void *ecx, void *edx);
+	static int __fastcall dServerGetSlot(void *ecx, void *edx);
+	static void TraceMeleeSwing(void *weapon, const QAngle &from, const QAngle &to, const Vector *hand, bool newSwing);
 	static bool GetServerHandAim(void *player, Vector &origin, QAngle &angles);
 	static int GetServerEntityIndex(void *entity);
 	static bool IsVRThrower(int playerIndex, bool &isLocalPlayer);

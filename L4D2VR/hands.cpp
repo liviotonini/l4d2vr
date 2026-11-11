@@ -161,6 +161,10 @@ bool VR::WantsLeftHandOnController() const
 	if (m_LeftControllerDeviceIndex == vr::k_unTrackedDeviceIndexInvalid || !m_Poses[m_LeftControllerDeviceIndex].bPoseIsValid)
 		return false;
 
+	// Holding its own item (dual wield)
+	if (LeftHandHoldsItem())
+		return true;
+
 	if (isHoldingWeapon2Handed || m_ViewmodelHasTwoWeapons || NeedsBothHands(m_ActiveWeaponId))
 		return false;
 
@@ -313,25 +317,21 @@ bool VR::BuildFirstPersonHands(const void *studioHeader, const void *customBones
 				curl = std::min(curl, kHoldingMagazineCurl);
 		}
 
-		// Hand turned by the optional fine tuning, around its own axes
-		Vec3 forward = m_LeftHandForward;
-		Vec3 up = m_LeftHandUp;
-		if (m_HandAngleOffset.x != 0.0f || m_HandAngleOffset.y != 0.0f || m_HandAngleOffset.z != 0.0f)
-		{
-			const Vec3 right = Cross(forward, up);
-			const float toRadians = 3.14159265f / 180.0f;
-			const Mat34 turn = Multiply(Multiply(AxisAngle(up, -m_HandAngleOffset.y * toRadians), AxisAngle(right, m_HandAngleOffset.x * toRadians)), AxisAngle(forward, m_HandAngleOffset.z * toRadians));
-			forward = RotateVector(turn, forward);
-			up = RotateVector(turn, up);
-		}
+		// Holding its own item (dual wield): closed around it
+		const bool holdsItem = LeftHandHoldsItem();
+		if (holdsItem)
+			HoldLeftItem(rig, curls);
 
-		const Mat34 hand = rig.HandFromFrame(HandRig::Left, forward, up, m_LeftHandWrist);
+		// Hand turned by the optional fine tuning, around its own axes
+		const Mat34 hand = GetLeftHandBone(rig);
 		if (!IsFinite(hand))
 			return false;
 
 		if (m_LeftHandFollow >= 1.0f)
 		{
 			rig.PoseHand(HandRig::Left, hand, curls, bones);
+			if (holdsItem)
+				KeepLeftGrip(rig, bones);
 		}
 		else
 		{
@@ -342,6 +342,10 @@ bool VR::BuildFirstPersonHands(const void *studioHeader, const void *customBones
 			rig.BlendHand(HandRig::Left, bones, posed, m_LeftHandFollow, bones);
 		}
 	}
+
+	// Using the left hand's item: the game's weapon hand is at the left controller (ApplyLeftUseHand) and holds it
+	if (m_LeftUseActive)
+		rig.CollapseHand(HandRig::Left, bones);
 
 	rig.CollapseArm(HandRig::Left, bones);
 	rig.CollapseArm(HandRig::Right, bones);
