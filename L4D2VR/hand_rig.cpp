@@ -291,7 +291,7 @@ Mat34 HandRig::GripFrame(Side s, const Mat34 *bones, float palmOffset) const
 	const Vec3 grip = GripAxis(s, bones);
 	const Vec3 forward = Normalized(fingers - grip * Dot(fingers, grip), palm);
 	const Vec3 knuckles = (Origin(bones[side.indexBase]) + Origin(bones[side.pinkyBase])) * 0.5f;
-	return FromAxes(forward, grip, Cross(forward, grip), knuckles + palm * palmOffset);
+	return FromAxes(Cross(grip, forward), grip, forward, knuckles + palm * palmOffset);
 }
 
 void HandRig::CollapseHand(Side s, Mat34 *bones) const

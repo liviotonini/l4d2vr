@@ -1,5 +1,6 @@
 // L4D2VR test room: a game mode that puts every weapon and item on tables around the player, with no infected and no
-// bots, to test the VR mod. Load with:  map c2m1_highway l4d2vrtest
+// bots, to test the VR mod: guns in front, items on the left, melee weapons on the right, laser sights behind and doors
+// further behind. Load with:  map c2m1_highway l4d2vrtest
 // Type it in the console in game: when launching, the addon is mounted after the map, so +map ignores the mode.
 // To put the tables in front of you again, wherever you are:  sv_cheats 1  then  script L4D2VR_TestRoom()
 
@@ -45,6 +46,17 @@ const TABLE_TOP = 32.0
 // tonfa, golf club, pitchfork or shovel)
 ::L4D2VR_Melee <- [ "fireaxe", "katana", "baseball_bat", "crowbar", "electric_guitar", "knife" ]
 
+// Behind: a table with laser sights (each box gives the laser once to each player, so there are several) and a row of
+// doors of different kinds, to open and close with the hand
+const LASER_COUNT = 8
+::L4D2VR_Doors <- [
+	"models/props_doors/doormain01.mdl", "models/props_doors/doormainmetal01.mdl", "models/props_doors/doorglassmain01.mdl",
+	"models/props_doors/doormain_rural01.mdl", "models/props_doors/doorfreezer01.mdl", "models/props_doors/checkpoint_door_02.mdl",
+	"models/props_doors/doormainmetalwindow01.mdl"
+]
+const DOOR_HALF_HEIGHT = 53.0 // these models have their origin at the hinge, half way up
+const DOOR_SPACING = 80.0
+
 Msg("L4D2VR test room: script loaded\n")
 
 PrecacheModel(TABLE_MODEL)
@@ -53,6 +65,9 @@ foreach (name in ::L4D2VR_Guns)
 	PrecacheEntityFromTable({ classname = name })
 foreach (name in ::L4D2VR_Items)
 	PrecacheEntityFromTable({ classname = name })
+PrecacheEntityFromTable({ classname = "upgrade_laser_sight" })
+foreach (model in ::L4D2VR_Doors)
+	PrecacheModel(model)
 
 ::L4D2VR_Spawned <- 0
 ::L4D2VR_Placed <- false
@@ -130,6 +145,26 @@ foreach (name in ::L4D2VR_Items)
 	{
 		local at = other + top + forward * (-(TABLE_LENGTH * 0.5 - 8.0) + spacing * i)
 		::L4D2VR_Spawn("weapon_melee_spawn", { origin = at, angles = Vector(0, yaw - 90, 90), melee_weapon = ::L4D2VR_Melee[i], count = 99, spawnflags = 2 })
+	}
+
+	// Behind: a table with laser sights
+	local back = origin - forward * 70.0
+	::L4D2VR_Table(back, yaw)
+	spacing = (TABLE_LENGTH - 16.0) / (LASER_COUNT - 1)
+	for (local i = 0; i < LASER_COUNT; i++)
+	{
+		local at = back + top + left * (-(TABLE_LENGTH * 0.5 - 8.0) + spacing * i)
+		::L4D2VR_Spawn("upgrade_laser_sight", { origin = at, angles = Vector(0, yaw + 180, 0) })
+	}
+
+	// Further behind: a row of doors facing the player, each turning on its hinge, opened from either side
+	local doors = origin - forward * 170.0
+	count = ::L4D2VR_Doors.len()
+	for (local i = 0; i < count; i++)
+	{
+		local hinge = doors + left * (-(DOOR_SPACING * (count - 1)) * 0.5 + DOOR_SPACING * i - 28.0) + Vector(0, 0, DOOR_HALF_HEIGHT)
+		::L4D2VR_Spawn("prop_door_rotating", { model = ::L4D2VR_Doors[i], origin = hinge, angles = Vector(0, yaw, 0),
+			spawnflags = 8192, distance = 90, speed = 200, hardware = 1, opendir = 0, returndelay = -1, spawnpos = 0 })
 	}
 
 	Msg("L4D2VR test room: " + ::L4D2VR_Spawned + " things placed\n")

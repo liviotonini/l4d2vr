@@ -84,6 +84,10 @@ public:
     Offset ClientGetSlot =               { "client.dll", 0x15390, "0F B7 81 ? ? ? ? 50 E8 ? ? ? ? 8B 80 58 01 00 00 83 C4 04 C3", 0, true };
     Offset ServerGetSlot =               { "server.dll", 0x4A960, "0F B7 81 ? ? ? ? 50 E8 ? ? ? ? 8B 80 58 01 00 00 83 C4 04 C3", 0, true };
 
+    // The call of CGrenadeLauncher_Projectile::Create(origin, angles, velocity, angular velocity, owner, flags) in the
+    // grenade launcher's fire: the grenade leaves from the eyes the game's way, the hook takes it to the weapon
+    Offset GrenadeLauncherCreateCall =   { "server.dll", 0x3CF420, "52 8B 90 34 02 00 00 8B CE F3 0F 11 45 90 F3 0F 11 45 94 F3 0F 11 45 98 FF D2 50 8D 45 AC 50 E8", 31, true };
+
     Offset ServerFireTerrorBullets =     { "server.dll", 0x3C78B0, "55 8B EC 81 EC ? ? ? ? A1 ? ? ? ? 33 C5 89 45 FC 8B 45 08 8B 4D 10" };
     Offset ReadUserCmd =                 { "server.dll", 0x205710, "55 8B EC 53 8B 5D 10 56 57 8B 7D 0C 53" };
     // CBaseCSGrenade::StartGrenadeThrow, called when the trigger is let go: m_fThrowTime = curtime + 0.2

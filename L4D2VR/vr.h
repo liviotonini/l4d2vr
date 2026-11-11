@@ -403,7 +403,7 @@ public:
 	unsigned long long m_GrabUseAimUntil = 0;
 	unsigned long long m_GrabUsePressAt = 0;
 	unsigned long long m_GrabUsePressUntil = 0;
-	static constexpr int kMaxBodyDraws = 4;
+	static constexpr int kMaxBodyDraws = 6;
 	BodyModelDraw m_BodyDraws[kMaxBodyDraws];
 	int m_BodyDrawCount = 0;
 	bool m_AmmoBagDrawn = false;           // the game has the bag's model: the magazines don't hang at the waist themselves
@@ -550,6 +550,7 @@ public:
 	void TakeIntoLeftHand(int entityIndex, int weaponId);
 	void ClearLeftItem();
 	bool LeftHandChestGrab(const HandMath::Vec3 &handWorld);
+	bool LeftShoulderGrab();
 	bool GetLeftItemDraw(BodyModelDraw &draw);
 	HandMath::Mat34 GetLeftHandBone(const HandRig &rig) const;
 	void HoldLeftItem(const HandRig &rig, float curls[HandRig::FingerCount]);

@@ -106,6 +106,8 @@ Hooks::Hooks(Game *game)
 		hkClientGetSlot.enableHook();
 	if (hkServerGetSlot.pTarget)
 		hkServerGetSlot.enableHook();
+	if (hkGrenadeLauncherCreate.pTarget)
+		hkGrenadeLauncherCreate.enableHook();
 }
 
 Hooks::~Hooks()
@@ -757,6 +759,9 @@ Hooks::ModelKind Hooks::GetModelKind(const void *model)
 			kind = ModelKind::FirstPersonArms;
 		else if (strstr(name, "models/v_models/v_"))
 			kind = strstr(name, "dual_pistola") ? ModelKind::DualPistolsViewmodel : ModelKind::Viewmodel;
+		// Melee weapons in first person are elsewhere, without them what's on the body wasn't drawn
+		else if (strstr(name, "models/weapons/melee/v_"))
+			kind = ModelKind::Viewmodel;
 		else if (strstr(name, "models/survivors/survivor_"))
 			kind = ModelKind::Survivor;
 		else if (strstr(name, "models/w_models/") || strstr(name, "models/weapons/melee/w_"))
@@ -1144,6 +1149,55 @@ void Hooks::initWeaponStateHooks()
 	{
 		Diagnostics::Log("dual wield: GetSlot not found in this game version, a melee weapon in the left hand replaces the pistol");
 	}
+
+	// The grenade launcher's grenade from the weapon in the hand: the target of the call found by its signature
+	const uintptr_t createCall = offsets->GrenadeLauncherCreateCall.address;
+	if (createCall && *(const uint8_t *)createCall == 0xE8)
+		hkGrenadeLauncherCreate.createHook((LPVOID)(createCall + 5 + *(const int32_t *)(createCall + 1)), &dGrenadeLauncherCreate);
+	else
+		Diagnostics::Log("grenade launcher: its fire wasn't found in this game version, the grenade leaves from the eyes");
+}
+
+// The grenade launcher's grenade fired by a VR player leaves from the weapon in the hand, where it points. The game's
+// velocity, relative to where the eyes look (forward with some lift), is turned the same way.
+void *__cdecl Hooks::dGrenadeLauncherCreate(const Vector &origin, const QAngle &angles, const Vector &velocity, const Vector &angularVelocity, void *owner, int flags)
+{
+	bool isLocalPlayer;
+	const int playerIndex = GetServerEntityIndex(owner);
+	if (!IsVRThrower(playerIndex, isLocalPlayer))
+		return hkGrenadeLauncherCreate.fOriginal(origin, angles, velocity, angularVelocity, owner, flags);
+
+	Vector hand;
+	QAngle aim;
+	if (isLocalPlayer)
+	{
+		hand = m_VR->GetRightControllerAbsPos();
+		aim = m_VR->GetRightControllerAbsAngle();
+	}
+	else
+	{
+		const Player &player = m_Game->m_PlayersVRInfo[playerIndex];
+		hand = player.controllerPos;
+		aim = player.controllerAngle;
+	}
+
+	Vector eyeForward, eyeRight, eyeUp, aimForward, aimRight, aimUp;
+	QAngle::AngleVectors(angles, &eyeForward, &eyeRight, &eyeUp);
+	QAngle::AngleVectors(aim, &aimForward, &aimRight, &aimUp);
+	const Vector newVelocity = aimForward * DotProduct(velocity, eyeForward) + aimRight * DotProduct(velocity, eyeRight) + aimUp * DotProduct(velocity, eyeUp);
+
+	// In front of the hand, unless a wall is between it and the eyes
+	const float kMuzzleForward = 16.0f;
+	Vector eye;
+	hkEyePosition.fOriginal(owner, &eye);
+	const Vector newOrigin = m_VR->GetGrenadeThrowOrigin(eye, hand + aimForward * kMuzzleForward, origin);
+
+	static bool s_Logged = false;
+	if (!s_Logged)
+		Diagnostics::Log("grenade launcher: fired by player %d from the hand, %.0f units from the game's point", playerIndex, VectorLength(newOrigin - origin));
+	s_Logged = true;
+
+	return hkGrenadeLauncherCreate.fOriginal(newOrigin, aim, newVelocity, angularVelocity, owner, flags);
 }
 
 int __fastcall Hooks::dClientGetSlot(void *ecx, void *edx)

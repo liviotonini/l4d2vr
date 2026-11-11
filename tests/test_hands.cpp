@@ -192,7 +192,7 @@ namespace
 			CHECK_NEAR(Dot(Axis(grip, 0), Axis(grip, 1)), 0.0f, 0.001f);
 			CHECK_NEAR(Dot(Cross(Axis(grip, 0), Axis(grip, 1)), Axis(grip, 2)), 1.0f, 0.001f); // not mirrored
 			CHECK_NEAR(Dot(Axis(grip, 1), rig.GripAxis(HandRig::Left, held.data())), 1.0f, 0.001f);
-			CHECK(Dot(Axis(grip, 0), forward) > 0.7f);
+			CHECK(Dot(Axis(grip, 2), forward) > 0.7f); // like the game's weapon bone: z where the barrel points
 			CHECK(Dot(Axis(grip, 1), up) > 0.8f);
 			const Vec3 knuckles = (Origin(held[leftIndex]) + Origin(held[leftPinky])) * 0.5f;
 			CHECK_NEAR(Length(Origin(grip) - knuckles), palmOffset, 0.001f);

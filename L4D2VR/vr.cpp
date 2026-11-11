@@ -2060,6 +2060,16 @@ void VR::UpdateBodyGrab(bool weaponHand, const Vector &handPosLocalInWorld, int 
         WriteBodyGrabLog("%s: chest, left hand (dual wield), holds entity %d", handName, m_LeftItemIndex);
         return;
     }
+    // Behind the left shoulder, the left hand puts its melee weapon away or takes it (dual wield). Wider than the right
+    // shoulder's place: people reach further back with the hand that doesn't hold the weapon.
+    if (!weaponHand && m_DualWieldEnabled && InRange(hand.distance, 0.32f, 0.11f) && hand.side <= -0.1f && hand.forward <= -0.6f
+        && LeftShoulderGrab())
+    {
+        WriteBodyGrabLog("%s: %.2f m away, side %.2f, forward %.2f, %.2f m below: left shoulder, holds entity %d",
+            handName, hand.distance, hand.side, hand.forward, hand.drop, m_LeftItemIndex);
+        return;
+    }
+
     const int chestSlot = GetChestItemSlotAt(HandMath::Vec3(handWorld.x, handWorld.y, handWorld.z));
     if (chestSlot)
     {
@@ -2074,7 +2084,9 @@ void VR::UpdateBodyGrab(bool weaponHand, const Vector &handPosLocalInWorld, int 
 
     for (const BodyGrabPlace &place : kBodyGrabPlaces)
     {
-        if (place.weaponHand != weaponHand || !place.isAt(hand, m_PlayerHeightInMeters))
+        // With items in the left hand, a grab only changes what its own hand holds: the left hand takes nothing for the
+        // right one
+        if (place.weaponHand != weaponHand || !place.isAt(hand, m_PlayerHeightInMeters) || (!weaponHand && m_DualWieldEnabled))
             continue;
 
         const int slot = GetWeaponSlot(weaponId) == place.slot ? place.otherSlot : place.slot;

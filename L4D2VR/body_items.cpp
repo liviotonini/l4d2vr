@@ -268,6 +268,11 @@ namespace
 	const Vec3 kChestSpots[2] = { Vec3(0.11f, 0.13f, -0.37f), Vec3(0.10f, -0.16f, -0.34f) };
 	const float kChestGrabRadius = 0.12f; // meters
 	const float kChestViewCosine = 0.2f;
+	// The pistol's holster, per meter of the player's height, from the same place as the body items: the middle of the
+	// place where the weapon hand takes the secondary weapon (vr.cpp: 22.5 and 21.5 units at 43.2 units per meter, from
+	// the eyes and below them, to the side)
+	const Vec3 kHolsterSpot(0.0f, -0.1535f, -0.4977f);
+
 	// The fist of another player's left hand from the wrist they send, meters: along the fingers, towards the palm
 	const float kRemoteFistForward = 0.075f;
 	const float kRemoteFistPalm = 0.025f;
@@ -414,6 +419,38 @@ void VR::UpdateBodyItems()
 	BodyModelDraw leftItem;
 	if (m_BodyDrawCount < kMaxBodyDraws && GetLeftItemDraw(leftItem))
 		m_BodyDraws[m_BodyDrawCount++] = leftItem;
+
+	// The pistol on the thigh of the weapon hand, pointing down, where the grab takes it (the "secondary weapon (leg)"
+	// place in vr.cpp). Its weapon bone has y along the grip and z along the barrel: the grip sticks out backwards.
+	for (int i = 0; i < g_MyWeaponsCount && m_BodyDrawCount < kMaxBodyDraws; ++i)
+	{
+		const int handle = Read<int>(local, g_MyWeaponsOffset + i * 4);
+		if (!IsValidHandle(handle))
+			continue;
+		C_WeaponCSBase *weapon = (C_WeaponCSBase *)m_Game->m_ClientEntityList->GetClientEntityFromHandle(handle);
+		if (!weapon || weapon == active || (handle & kHandleIndexMask) == m_LeftItemIndex)
+			continue;
+		const int weaponId = weapon->GetWeaponID();
+		if (weaponId != C_WeaponCSBase::PISTOL && weaponId != C_WeaponCSBase::MAGNUM)
+			continue;
+
+		Vec3 offset = kHolsterSpot * m_PlayerHeightInMeters;
+		if (m_LeftHanded)
+			offset.y = -offset.y;
+		const Vec3 point = TransformPoint(body, offset * m_VRScale);
+		const void *model = GetEntityModel(weapon);
+		const bool inView = Dot(Normalized(point - ToVec3(m_HmdPosAbs)), ToVec3(m_HmdForward)) > kChestViewCosine;
+		if (model && inView)
+		{
+			const Vec3 facing = Axis(body, 0), down(0.0f, 0.0f, -1.0f);
+			BodyModelDraw draw;
+			draw.model = model;
+			draw.frame = FromAxes(Cross(facing, down), facing, down, point);
+			draw.alignWeaponBone = true;
+			m_BodyDraws[m_BodyDrawCount++] = draw;
+		}
+		break;
+	}
 
 	for (int spot = 0; spot < 2; ++spot)
 	{
@@ -590,8 +627,11 @@ bool VR::BuildRemoteItemBones(int entityIndex, const void *weapon, const void *s
 			const Vec3 thumb = Normalized(pose.leftWrist.up - fingers * Dot(fingers, pose.leftWrist.up), Vec3(0.0f, 0.0f, 1.0f));
 			const Vec3 palm = Cross(fingers, thumb);
 			const Vec3 wrist = pose.leftWrist.position + m_RemoteHeadOffset[player];
+			const Vec3 fist = wrist + (fingers * kRemoteFistForward + palm * kRemoteFistPalm) * m_VRScale;
+			// Weapon bone: y along the grip, z where the fingers point. A melee weapon points forward, edge down.
+			const bool melee = ((C_WeaponCSBase *)weapon)->GetWeaponID() == C_WeaponCSBase::MELEE;
 			BodyModelDraw draw;
-			draw.frame = FromAxes(fingers, thumb, palm, wrist + (fingers * kRemoteFistForward + palm * kRemoteFistPalm) * m_VRScale);
+			draw.frame = melee ? FromAxes(Cross(fingers, thumb * -1.0f), fingers, thumb * -1.0f, fist) : FromAxes(Cross(thumb, fingers), thumb, fingers, fist);
 			draw.alignWeaponBone = true;
 			BuildBodyModelBones(studioHeader, draw, outBones);
 			return true;
@@ -641,6 +681,27 @@ namespace
 			|| strstr(lowerName, "ammo_can") || strstr(lowerName, "coffeeammo") || strstr(lowerName, "exploding_ammo") || strstr(lowerName, "incendiary_ammo");
 	}
 
+	// A grab only changes what its own hand holds: the left hand takes what goes in it (dual wield), and what doesn't go
+	// to the right hand: ammo and upgrades for the weapon it holds
+	enum LeftHandRule { AnyHand, LeftHandDualWield, LeftHandOnly };
+
+	bool TakenByLeftHand(const char *lowerName, LeftHandRule rule)
+	{
+		if (rule == AnyHand)
+			return true;
+
+		const bool carriedPack = strstr(lowerName, "_ammopack") != nullptr; // goes to the inventory
+		if (!carriedPack && (strstr(lowerName, "terror/ammo_stack") || strstr(lowerName, "ammo_can") || strstr(lowerName, "coffeeammo")
+			|| strstr(lowerName, "exploding_ammo") || strstr(lowerName, "incendiary_ammo") || strstr(lowerName, "laser_sight")))
+			return true;
+
+		if (rule != LeftHandDualWield)
+			return false;
+		return (strstr(lowerName, "weapons/melee/w_") && !strstr(lowerName, "chainsaw")) || strstr(lowerName, "w_eq_painpills")
+			|| strstr(lowerName, "w_eq_adrenaline") || strstr(lowerName, "w_eq_molotov") || strstr(lowerName, "w_eq_pipebomb")
+			|| strstr(lowerName, "w_eq_bile_flask");
+	}
+
 	bool IsDoor(const char *lowerName)
 	{
 		return strstr(lowerName, "props_doors/") && !strstr(lowerName, "frame") && !strstr(lowerName, "reinforcement")
@@ -685,7 +746,7 @@ namespace
 
 	// A wrong guess about an entity must not take the game down. itemReach: game units, or the hand's reach if 0.
 	// filter: only models whose path has it.
-	void FindWorldTarget(Game *game, const Vec3 &hand, float unitsPerMeter, WorldTarget &best, float itemReach = 0.0f, const char *filter = nullptr)
+	void FindWorldTarget(Game *game, const Vec3 &hand, float unitsPerMeter, WorldTarget &best, float itemReach = 0.0f, const char *filter = nullptr, LeftHandRule rule = AnyHand)
 	{
 		__try
 		{
@@ -705,8 +766,8 @@ namespace
 				char lower[128];
 				strncpy_s(lower, name, _TRUNCATE);
 				_strlwr_s(lower);
-				const bool pickable = IsPickable(lower);
-				const bool door = !pickable && IsDoor(lower);
+				const bool pickable = IsPickable(lower) && TakenByLeftHand(lower, rule);
+				const bool door = !IsPickable(lower) && IsDoor(lower);
 				if ((!pickable && !door) || (filter && !strstr(lower, filter)))
 					continue;
 
@@ -757,7 +818,8 @@ bool VR::TryGrabWorld(const Vec3 &handWorld, bool leftHand)
 		return false;
 
 	WorldTarget target;
-	FindWorldTarget(m_Game, handWorld, m_VRScale, target);
+	const LeftHandRule rule = !leftHand ? AnyHand : m_DualWieldEnabled ? LeftHandDualWield : LeftHandOnly;
+	FindWorldTarget(m_Game, handWorld, m_VRScale, target, 0.0f, nullptr, rule);
 	if (!target.found)
 		return false;
 

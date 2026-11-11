@@ -43,6 +43,8 @@ namespace
 	const float kHoldThumbCurl = 0.6f;
 	// From the knuckles to the middle of the fist, meters
 	const float kGripPalmOffset = 0.022f;
+	// Hooks::TraceMeleeSwing turns the aim by this, degrees
+	const float kServerMeleeTraceTilt = 50.0f;
 
 	unsigned long long NowMs() { return GetTickCount64(); }
 
@@ -214,6 +216,43 @@ bool VR::LeftHandChestGrab(const Vec3 &handWorld)
 	return false;
 }
 
+// A grab with the left hand behind the left shoulder: the melee weapon in it goes there, or the one there comes to it.
+// True if it did something.
+bool VR::LeftShoulderGrab()
+{
+	if (!m_DualWieldEnabled)
+		return false;
+
+	if (m_LeftItemIndex)
+	{
+		if (m_LeftItemId != C_WeaponCSBase::MELEE)
+			return false;
+		ClearLeftItem();
+		m_Haptics.Play(Haptics::Hand::OtherHand, HapticEffects::Confirm);
+		return true;
+	}
+
+	// One that isn't in the right hand, the one that was in this hand first
+	C_BasePlayer *local = (C_BasePlayer *)m_Game->GetClientEntity(m_Game->m_EngineClient->GetLocalPlayer());
+	if (!local)
+		return false;
+	InventoryItem items[64];
+	const int count = GetInventory(local, items, 64);
+	const void *active = local->GetActiveWeapon();
+	int melee = 0;
+	for (int i = 0; i < count; ++i)
+	{
+		if (items[i].id == C_WeaponCSBase::MELEE && items[i].weapon != active && (!melee || items[i].index == m_ExtraMeleeIndex))
+			melee = items[i].index;
+	}
+	if (!melee)
+		return false;
+
+	TakeIntoLeftHand(melee, C_WeaponCSBase::MELEE);
+	m_Haptics.Play(Haptics::Hand::OtherHand, HapticEffects::Take);
+	return true;
+}
+
 // What the left hand holds is drawn in it: the item's own model, with its "weapon_bone" in the fist like in the third
 // person
 bool VR::GetLeftItemDraw(BodyModelDraw &draw)
@@ -234,6 +273,16 @@ bool VR::GetLeftItemDraw(BodyModelDraw &draw)
 	draw.model = model;
 	draw.frame = Multiply(hand, m_LeftGripInHand);
 	draw.alignWeaponBone = true;
+
+	// A melee weapon points where the controller aims, like the right hand's, with the edge down. Its weapon bone has
+	// y along the blade and z towards the edge.
+	if (m_LeftItemId == C_WeaponCSBase::MELEE)
+	{
+		const Vec3 blade = Normalized(Vec3(m_LeftControllerForward.x, m_LeftControllerForward.y, m_LeftControllerForward.z));
+		const Vec3 up(m_LeftControllerUp.x, m_LeftControllerUp.y, m_LeftControllerUp.z);
+		const Vec3 edge = Normalized(up - blade * Dot(up, blade), Vec3(0.0f, 0.0f, 1.0f)) * -1.0f;
+		draw.frame = FromAxes(Cross(blade, edge), blade, edge, Origin(draw.frame));
+	}
 	return true;
 }
 
@@ -469,9 +518,16 @@ void VR::UpdateLeftSwing(unsigned long long now)
 		return;
 	m_LeftHandSentMs = now;
 
+	// The server traces 50 degrees up from the aim it gets (made for the right hand's weapons): this one is sent turned
+	// down by as much, so the traces go along the blade as it's drawn (GetLeftItemDraw)
+	const Vector forward = VectorRotate(m_LeftControllerForward, m_LeftControllerRight, -kServerMeleeTraceTilt);
+	const Vector up = VectorRotate(m_LeftControllerUp, m_LeftControllerRight, -kServerMeleeTraceTilt);
+	QAngle aim;
+	QAngle::VectorAngles(forward, up, aim);
+
 	char command[128];
 	snprintf(command, sizeof(command), "l4d2vr_left_hand %.1f %.1f %.1f %.1f %.1f %.1f %d", m_LeftControllerPosAbs.x, m_LeftControllerPosAbs.y, m_LeftControllerPosAbs.z,
-		m_LeftControllerAngAbs.x, m_LeftControllerAngAbs.y, m_LeftControllerAngAbs.z, DualWield::kLeftHandSwinging);
+		aim.x, aim.y, aim.z, DualWield::kLeftHandSwinging);
 	m_Game->m_EngineClient->ServerCmd(command, false);
 }
 
@@ -629,6 +685,12 @@ void VR::DualWieldTest(const char *action)
 			ClearLeftItem();
 			SelectWeapon(id);
 		}
+		return;
+	}
+
+	if (strcmp(action, "shoulder") == 0)
+	{
+		Diagnostics::Log("dual wield test: left shoulder %s", LeftShoulderGrab() ? "did something" : "did nothing");
 		return;
 	}
 
