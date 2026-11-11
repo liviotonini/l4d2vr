@@ -387,7 +387,8 @@ void VR::UpdateManualReload()
 		~MarkerUpdate() { vr->UpdateBoltMarker(show, inReach); }
 	} marker{ this };
 
-	const Profile *profile = m_ManualReloadEnabled ? FindProfile(m_ActiveWeaponId) : nullptr;
+	// Nothing to reload in an empty right hand (EmptyRightHand)
+	const Profile *profile = m_ManualReloadEnabled && !m_RightHandEmpty ? FindProfile(m_ActiveWeaponId) : nullptr;
 	const ULONGLONG now = GetTickCount64();
 
 	// The left trigger on a scope changes its zoom, whatever the reload is doing
@@ -475,6 +476,8 @@ void VR::UpdateManualReload()
 	inputs.unitsPerMeter = m_VRScale;
 	inputs.boltTravel = profile->boltTravel;
 	inputs.grip = PressedDigitalAction(m_LeftHandGrab);
+	// Ammo is only taken with an empty hand (the left hand's item, dual wield)
+	inputs.handFree = m_LeftItemIndex == 0;
 	// The left trigger shoves no more, and only cancels a grenade, which has no reload
 	inputs.trigger = PressedDigitalAction(m_ActionSecondaryAttack) && !scopeTookTrigger;
 	// Worked after every shot: holding the weapon with both hands, the trigger works it from wherever the other hand is

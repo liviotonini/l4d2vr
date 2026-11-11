@@ -238,6 +238,10 @@ bool VR::WantsLeftHandOnController() const
 	if (LeftHandShowsItem() || m_LeftUseActive)
 		return true;
 
+	// With nothing in the right hand, the left one is free
+	if (m_RightHandEmpty)
+		return true;
+
 	// Two pistols shown as one held with both hands: the animation's left hand is on the hidden pistol, so the hand stays
 	// where it is, around the one seen
 	if (isHoldingWeapon2Handed && m_DualAsOnePistol)
@@ -278,19 +282,18 @@ bool VR::ThrownGrenadeHasLeftTheHand() const
 
 // Animations of the game that don't fit VR are not shown: the weapon and the hands keep the last pose from before they
 // started, relative to the weapon's frame.
+// - A shove swings the weapon by itself: the shove is the arm's own swing (ProcessInput), its effect and sound stay.
 // - While throwing with the arm the game plays its wind-up animation, which pulls the hand back: the grenade stays
 //   where the real hand is.
 // - A pump action pumps by itself in its fire animation: it's pumped by hand instead (ManualReloadHoldsFirePose).
 // Returns the bones to draw with.
 const void *VR::ApplyThrowPose(const void *studioHeader, const void *customBones, void *storage)
 {
-	bool hold;
+	bool hold = GetTickCount64() < m_ShoveHoldUntil;
 	if (m_GrenadeThrowGesture && IsThrowableWeapon(m_ActiveWeaponId))
-		hold = m_GrenadeTriggerHeld || ThrownGrenadeHasLeftTheHand();
+		hold = hold || m_GrenadeTriggerHeld || ThrownGrenadeHasLeftTheHand();
 	else if (ManualReloadPumpsByHand())
-		hold = ManualReloadHoldsFirePose();
-	else
-		return customBones;
+		hold = hold || ManualReloadHoldsFirePose();
 
 	if (!Studio::IsValid(studioHeader))
 		return customBones;
@@ -351,8 +354,8 @@ void VR::UpdateHands(float deltaSeconds)
 		}
 	};
 	readFingers(m_LeftHanded ? m_ActionSkeletonRight : m_ActionSkeletonLeft, m_LeftFingerCurls);
-	// The right hand's own fingers are only shown while it's empty, as the left hand's item is used
-	if (m_LeftUseActive)
+	// The right hand's own fingers are only shown while it's empty: the left hand's item used, or its weapon put away
+	if (m_LeftUseActive || m_RightHandEmpty)
 		readFingers(m_LeftHanded ? m_ActionSkeletonLeft : m_ActionSkeletonRight, m_RightFingerCurls);
 }
 
@@ -397,7 +400,7 @@ bool VR::BuildFirstPersonHands(const void *studioHeader, const void *customBones
 	// weapon isn't drawn (Hooks::DrawModelForVR): the left hand holds the item as before, and the right hand is on its own
 	// controller, empty.
 	Mat34 rightHand;
-	if (m_LeftUseActive)
+	if (m_LeftUseActive || m_RightHandEmpty)
 	{
 		if (GetRightHandTarget(rig, rightHand))
 			rig.PoseHand(HandRig::Right, rightHand, m_RightFingerCurls, bones);

@@ -15,9 +15,10 @@ namespace BodyLayout
 	constexpr float kHipHeight = 0.53f; // the hip joint
 	constexpr float kKneeHeight = 0.285f;
 
-	// The pistol's grip on the thigh of the weapon hand, standing: height above the floor and distance to the side
-	constexpr float kHolsterHeight = 0.475f;
-	constexpr float kHolsterSide = 0.1535f;
+	// The pistol's grip on the thigh of the weapon hand, standing: height above the floor and distance to the side. Where
+	// the user put it for a height of 1.68 m (5 cm up and 5 cm in from 0.475 and 0.1535).
+	constexpr float kHolsterHeight = 0.505f;
+	constexpr float kHolsterSide = 0.1237f;
 
 	// Crouching: how much of the head's drop the hips follow (the back leans forward for the rest) and how far back
 	// they go for it. The first centimeters of the drop are ignored: standing straight or not, a floor a bit off.
@@ -53,7 +54,8 @@ namespace BodyLayout
 		return holster;
 	}
 
-	// Where the pills (0) and the grenade (1) are when config.txt doesn't say: by the shoulders. Meters from the eyes.
+	// Where the pills (0) and the grenade (1) are when config.txt doesn't say: on the chest, where the user put them for a
+	// height of 1.68 m (0.35 and 0.29 m below the eyes). Meters from the eyes.
 	struct ItemSpot
 	{
 		float forward, side, below;
@@ -61,7 +63,7 @@ namespace BodyLayout
 
 	inline ItemSpot DefaultItemSpot(int spot, float height)
 	{
-		return spot == 0 ? ItemSpot{ 0.11f, -0.13f, 0.2056f * height } : ItemSpot{ 0.10f, 0.16f, 0.1889f * height };
+		return spot == 0 ? ItemSpot{ 0.03f, -0.13f, 0.2083f * height } : ItemSpot{ 0.03f, 0.18f, 0.1726f * height };
 	}
 
 	inline Vec3 ItemSpotOffset(const ItemSpot &spot, bool leftHanded)

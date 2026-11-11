@@ -441,7 +441,8 @@ void VR::UpdateBodyItems()
 	if (g_MyWeaponsOffset < 0)
 		return;
 
-	const void *active = local->GetActiveWeapon();
+	// What the right hand put away (EmptyRightHand) is seen where it's carried
+	const void *active = m_RightHandEmpty ? nullptr : (const void *)local->GetActiveWeapon();
 	for (int i = 0; i < g_MyWeaponsCount; ++i)
 	{
 		const int handle = Read<int>(local, g_MyWeaponsOffset + i * 4);
@@ -629,7 +630,7 @@ bool VR::UpdateItemUse()
 {
 	const bool hostHasMod = m_Game->m_PoseRelay->IsServerCapable();
 	auto usedAtBody = [](int weaponId) { return weaponId == C_WeaponCSBase::PAIN_PILLS || weaponId == C_WeaponCSBase::ADRENALINE; };
-	const bool rightItem = !m_LeftUseActive && usedAtBody(m_ActiveWeaponId);
+	const bool rightItem = !m_LeftUseActive && !m_RightHandEmpty && usedAtBody(m_ActiveWeaponId);
 	const bool leftItem = LeftHandHoldsItem() && usedAtBody(m_LeftItemId);
 
 	// The game's sounds, as its animations play them (they aren't played): the adrenaline's cap comes off as the trigger
@@ -948,6 +949,7 @@ namespace
 	{
 		bool found = false;
 		bool door = false;
+		bool ammo = false;
 		Vec3 point;
 		float distance = 1e9f;
 		int modelIndex = 0;
@@ -980,31 +982,102 @@ namespace
 			|| strstr(lowerName, "w_eq_bile_flask");
 	}
 
+	// A door that opens, by its model: props_doors/, and others like c1m1's props_downtown/metal_door_112 (the class of the
+	// entity on the network would say it, but calling GetClientClass of the entities took the game down)
 	bool IsDoor(const char *lowerName)
 	{
-		return strstr(lowerName, "props_doors/") && !strstr(lowerName, "frame") && !strstr(lowerName, "reinforcement")
-			&& !strstr(lowerName, "gib") && !strstr(lowerName, "dummy") && !strstr(lowerName, "crossbar") && !strstr(lowerName, "damaged");
+		const char *file = strrchr(lowerName, '/');
+		file = file ? file + 1 : lowerName;
+		return (strstr(lowerName, "props_doors/") || strstr(file, "door")) && !strstr(lowerName, "frame") && !strstr(lowerName, "reinforcement")
+			&& !strstr(lowerName, "gib") && !strstr(lowerName, "dummy") && !strstr(lowerName, "crossbar") && !strstr(lowerName, "damaged")
+			&& !strstr(file, "trim") && !strstr(file, "knob") && !strstr(file, "handle");
 	}
 
-	void Consider(WorldTarget &best, const Vec3 &hand, const Vec3 &point, float reach, bool door, int modelIndex)
+	// Ammo for the weapon: piles, cans and the boxes of special ammo put down (not the packs, which are carried)
+	bool IsAmmo(const char *lowerName)
+	{
+		return !strstr(lowerName, "_ammopack") && (strstr(lowerName, "terror/ammo_stack") || strstr(lowerName, "ammo_can") || strstr(lowerName, "coffeeammo")
+			|| strstr(lowerName, "exploding_ammo") || strstr(lowerName, "incendiary_ammo"));
+	}
+
+	void Consider(WorldTarget &best, const Vec3 &hand, const Vec3 &point, float reach, bool door, int modelIndex, bool ammo = false)
 	{
 		const float distance = Length(point - hand);
 		if (distance < reach && distance < best.distance)
 		{
 			best.found = true;
 			best.door = door;
+			best.ammo = ammo;
 			best.point = point;
 			best.distance = distance;
 			best.modelIndex = modelIndex;
 		}
 	}
 
+	// What the mod needs of an entity in the world, each read on its own: one that can't be read (a wrong guess about
+	// it) is skipped, and the others still are looked at
+	struct WorldEntity
+	{
+		const uint8_t *entity = nullptr;
+		int modelIndex = 0;
+		char lower[128] = {}; // the model's path, lower case
+		int owner = 0;
+		Vec3 origin, mins, maxs;
+		QAngle angles;
+	};
+	int g_UnreadableEntities = 0, g_FirstUnreadableEntity = 0, g_UnreadableStep = 0;
+
+	bool ReadWorldEntity(Game *game, int index, WorldEntity &out)
+	{
+		volatile int step = 0;
+		__try
+		{
+			out.entity = (const uint8_t *)game->m_ClientEntityList->GetClientEntity(index);
+			if (!out.entity)
+				return false;
+			out.modelIndex = *(const int16_t *)(out.entity + g_ModelIndexOffset);
+			void *model = out.modelIndex != 0 ? game->m_ModelInfo->GetModel(out.modelIndex) : nullptr;
+			const char *name = model ? game->m_ModelInfo->GetModelName(model) : nullptr;
+			if (!name)
+				return false;
+			strncpy_s(out.lower, name, _TRUNCATE);
+			_strlwr_s(out.lower);
+			step = 1;
+			out.mins = *(const Vec3 *)((const uint8_t *)model + 0x118);
+			out.maxs = *(const Vec3 *)((const uint8_t *)model + 0x124);
+			step = 2;
+			out.owner = *(const int *)(out.entity + g_OwnerOffset);
+
+			// IClientRenderable::GetRenderOrigin and GetRenderAngles
+			void *renderable = (uint8_t *)out.entity + 4;
+			void **vtable = *(void ***)renderable;
+			typedef const Vector &(__thiscall *tGetOrigin)(void *thisptr);
+			typedef const QAngle &(__thiscall *tGetAngles)(void *thisptr);
+			step = 4;
+			const Vector &origin = ((tGetOrigin)vtable[1])(renderable);
+			step = 5;
+			out.origin = Vec3(origin.x, origin.y, origin.z);
+			out.angles = ((tGetAngles)vtable[2])(renderable);
+			return true;
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			if (!g_UnreadableEntities++)
+			{
+				g_FirstUnreadableEntity = index;
+				g_UnreadableStep = step;
+			}
+			return false;
+		}
+	}
+
 	// The handle of a door: on the free edge, a bit under the middle of its height. Doors turn around their origin, or
 	// around the middle of the model when it has two leaves: then either edge has one.
-	void ConsiderDoorHandles(WorldTarget &best, const Vec3 &hand, const Vec3 &origin, const QAngle &angles, const void *model, float reach, int modelIndex)
+	void ConsiderDoorHandles(WorldTarget &best, const Vec3 &hand, const WorldEntity &door, float reach)
 	{
-		const Vec3 mins = *(const Vec3 *)((const uint8_t *)model + 0x118);
-		const Vec3 maxs = *(const Vec3 *)((const uint8_t *)model + 0x124);
+		const Vec3 &origin = door.origin, &mins = door.mins, &maxs = door.maxs;
+		const QAngle &angles = door.angles;
+		const int modelIndex = door.modelIndex;
 
 		Vector forwardV, rightV, upV;
 		QAngle::AngleVectors(angles, &forwardV, &rightV, &upV);
@@ -1024,54 +1097,51 @@ namespace
 
 	// A wrong guess about an entity must not take the game down. itemReach: game units, or the hand's reach if 0.
 	// filter: only models whose path has it.
-	void FindWorldTarget(Game *game, const Vec3 &hand, float unitsPerMeter, WorldTarget &best, float itemReach = 0.0f, const char *filter = nullptr, LeftHandRule rule = AnyHand)
+	void FindWorldTarget(Game *game, const Vec3 &hand, float unitsPerMeter, WorldTarget &best, float itemReach = 0.0f, const char *filter = nullptr, LeftHandRule rule = AnyHand,
+		bool doorsOnly = false)
 	{
-		__try
+		const int highest = game->m_ClientEntityList->GetHighestEntityIndex();
+		for (int i = 33; i <= highest; ++i)
 		{
-			const int highest = game->m_ClientEntityList->GetHighestEntityIndex();
-			for (int i = 33; i <= highest; ++i)
-			{
-				const uint8_t *entity = (const uint8_t *)game->m_ClientEntityList->GetClientEntity(i);
-				if (!entity)
-					continue;
+			WorldEntity entity;
+			if (!ReadWorldEntity(game, i, entity))
+				continue;
 
-				const int modelIndex = *(const int16_t *)(entity + g_ModelIndexOffset);
-				void *model = modelIndex != 0 ? game->m_ModelInfo->GetModel(modelIndex) : nullptr;
-				const char *name = model ? game->m_ModelInfo->GetModelName(model) : nullptr;
-				if (!name)
-					continue;
+			const bool pickable = IsPickable(entity.lower) && TakenByLeftHand(entity.lower, rule);
+			const bool door = !IsPickable(entity.lower) && IsDoor(entity.lower);
+			if ((!pickable && !door) || (filter && !strstr(entity.lower, filter)) || (doorsOnly && !door))
+				continue;
 
-				char lower[128];
-				strncpy_s(lower, name, _TRUNCATE);
-				_strlwr_s(lower);
-				const bool pickable = IsPickable(lower) && TakenByLeftHand(lower, rule);
-				const bool door = !IsPickable(lower) && IsDoor(lower);
-				if ((!pickable && !door) || (filter && !strstr(lower, filter)))
-					continue;
+			// Carried by somebody
+			if (pickable && entity.owner != 0 && entity.owner != -1)
+				continue;
 
-				// Carried by somebody
-				const int owner = *(const int *)(entity + g_OwnerOffset);
-				if (pickable && owner != 0 && owner != -1)
-					continue;
-
-				// IClientRenderable::GetRenderOrigin and GetRenderAngles
-				void *renderable = (uint8_t *)entity + 4;
-				void **vtable = *(void ***)renderable;
-				typedef const Vector &(__thiscall *tGetOrigin)(void *thisptr);
-				typedef const QAngle &(__thiscall *tGetAngles)(void *thisptr);
-				const Vector &originV = ((tGetOrigin)vtable[1])(renderable);
-				const Vec3 origin(originV.x, originV.y, originV.z);
-
-				if (pickable)
-					Consider(best, hand, origin, itemReach > 0.0f ? itemReach : kWorldItemReach * unitsPerMeter, false, modelIndex);
-				else if (itemReach <= 0.0f)
-					ConsiderDoorHandles(best, hand, origin, ((tGetAngles)vtable[2])(renderable), model, kDoorHandleReach * unitsPerMeter, modelIndex);
-			}
-		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
-		{
+			if (pickable)
+				Consider(best, hand, entity.origin, itemReach > 0.0f ? itemReach : kWorldItemReach * unitsPerMeter, false, entity.modelIndex, IsAmmo(entity.lower));
+			else if (itemReach <= 0.0f || doorsOnly)
+				ConsiderDoorHandles(best, hand, entity, doorsOnly ? itemReach : kDoorHandleReach * unitsPerMeter);
 		}
 	}
+}
+
+// The doors near `from`, in the log (l4d2vr_dual_test doors): their class, model and distance
+void VR::LogDoors(const Vec3 &from)
+{
+	if (!g_NetvarsLookedUp)
+		LookUpNetvars(m_Game);
+	int logged = 0;
+	g_UnreadableEntities = 0;
+	const int highest = m_Game->m_ClientEntityList->GetHighestEntityIndex();
+	for (int i = 33; i <= highest && logged < 12; ++i)
+	{
+		WorldEntity entity;
+		if (!ReadWorldEntity(m_Game, i, entity) || !strstr(entity.lower, "door") || Length(entity.origin - from) > 600.0f)
+			continue;
+		Diagnostics::Log("doors: entity %d %s%s, %.0f units away, turned %.0f", i, entity.lower, IsDoor(entity.lower) ? "" : " (not taken for a door)",
+			Length(entity.origin - from), entity.angles.y);
+		++logged;
+	}
+	Diagnostics::Log("doors: %d listed, %d entities couldn't be read (the first %d, at step %d)", logged, g_UnreadableEntities, g_FirstUnreadableEntity, g_UnreadableStep);
 }
 
 // The weapon or item lying nearest to `from`, within radiusUnits (the test of the dual wield)
@@ -1083,7 +1153,8 @@ bool VR::FindNearestPickable(const Vec3 &from, float radiusUnits, Vec3 &point, c
 		return false;
 
 	WorldTarget target;
-	FindWorldTarget(m_Game, from, m_VRScale, target, radiusUnits, filter);
+	const bool doors = filter && strcmp(filter, "door") == 0;
+	FindWorldTarget(m_Game, from, m_VRScale, target, radiusUnits, doors ? nullptr : filter, AnyHand, doors);
 	point = target.point;
 	return target.found;
 }
@@ -1100,6 +1171,14 @@ bool VR::TryGrabWorld(const Vec3 &handWorld, bool leftHand)
 	FindWorldTarget(m_Game, handWorld, m_VRScale, target, 0.0f, nullptr, rule);
 	if (!target.found)
 		return false;
+
+	// Ammo is taken with an empty hand: the right one with its weapon put away (EmptyRightHand), the left one without
+	// its item
+	if (target.ammo && (leftHand ? m_LeftItemIndex != 0 : !m_RightHandEmpty))
+	{
+		Diagnostics::Log("grab: ammo, the %s hand isn't empty", leftHand ? "left" : "right");
+		return false;
+	}
 
 	// From a little behind the hand, straight at it
 	Vec3 direction = target.point - handWorld;

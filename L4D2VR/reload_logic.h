@@ -51,6 +51,7 @@ namespace Reload
 		int reserve = 0;
 		bool shells = false;        // loaded one by one
 		bool hasBolt = false;
+		bool handFree = true;       // the hand holds nothing of its own: only then it takes ammo from the bag
 	};
 
 	// Distances, in meters
@@ -182,7 +183,7 @@ namespace Reload
 					m_OldGrabOffset = in.palm - in.socket;
 					events |= Event_GrabbedOld;
 				}
-				else if (pressed && canTake && toWaist < kPouchRadius * meters)
+				else if (pressed && canTake && in.handFree && toWaist < kPouchRadius * meters)
 				{
 					// One can be taken at any time. It only goes in once the old one is out.
 					m_State = State::HoldingFresh;

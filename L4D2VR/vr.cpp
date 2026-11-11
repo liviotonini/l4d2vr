@@ -188,6 +188,15 @@ void VR::Update()
     if (!m_IsInitialized || !m_Game->m_Initialized)
         return;
 
+    // l4d2vr_dual_test grab: the use of the grab, from the console (there are no controllers in those tests)
+    if (m_TestUsePressAt && GetTickCount64() >= m_TestUsePressAt)
+    {
+        const bool down = GetTickCount64() < m_GrabUsePressUntil;
+        m_Game->ClientCmd_Unrestricted(down ? "+use" : "-use");
+        if (!down)
+            m_TestUsePressAt = 0;
+    }
+
     if (m_IsVREnabled && g_D3DVR9)
     {
         // Prevents crashing at menu
@@ -669,6 +678,10 @@ void VR::ProcessInput()
     bool attackTrigger = m_LeftUseActive ? triggerHeld && m_LeftUseWasActive && m_ActiveWeaponId == m_LeftItemId : triggerHeld;
     if (!UpdateItemUse())
         attackTrigger = false;
+    // The right hand empty: its unseen weapon does nothing (EmptyRightHand)
+    const bool rightHandEmpty = m_RightHandEmpty && !m_LeftUseActive;
+    if (rightHandEmpty)
+        attackTrigger = false;
     SetGameButton(GameButton_Attack, GetAttackButton(attackTrigger));
     SetGameButton(GameButton_Jump, PressedDigitalAction(m_ActionJump));
     // A grab next to something in the world presses use for a moment (TryGrabWorld)
@@ -676,7 +689,7 @@ void VR::ProcessInput()
     const bool grabbingUse = useTick >= m_GrabUsePressAt && useTick < m_GrabUsePressUntil;
     SetGameButton(GameButton_Use, PressedDigitalAction(m_ActionUse) || grabbingUse);
 
-    SetGameButton(GameButton_Reload, (PressedDigitalAction(m_ActionReload) && !ManualReloadOwnsReloadButton()) || isReloading);
+    SetGameButton(GameButton_Reload, !rightHandEmpty && ((PressedDigitalAction(m_ActionReload) && !ManualReloadOwnsReloadButton()) || isReloading));
     isReloading = false;
 
     //if (PressedDigitalAction(m_ActionSecondaryAttack) || (m_IsTrackingManualPush && VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 5.0))
@@ -684,7 +697,12 @@ void VR::ProcessInput()
     // button stops the game from throwing). Neither does the shove button press that cancelled a throw.
     // A melee weapon in the left hand hits instead of shoving, and its item being used doesn't shove (dual wield)
     const bool leftShoves = !ManualReloadUsesLeftHand() && !LeftHandHoldsMelee() && !m_LeftUseActive;
-    SetGameButton(GameButton_Attack2, m_IsTrackingManualPush && !IsGrenadeThrowInProgress() && ((VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 4.0 && leftShoves) || (!m_Game->m_IsMeleeWeaponActive && VectorLength(m_RightControllerPose.TrackedDeviceVel) > 4.0)));
+    const bool shove = m_IsTrackingManualPush && !IsGrenadeThrowInProgress() && ((VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 4.0 && leftShoves) || ((rightHandEmpty || !m_Game->m_IsMeleeWeaponActive) && VectorLength(m_RightControllerPose.TrackedDeviceVel) > 4.0));
+    SetGameButton(GameButton_Attack2, shove);
+    // The game's shove animation isn't shown, the arm already swung (ApplyThrowPose)
+    if (shove && !m_ShoveDown)
+        m_ShoveHoldUntil = GetTickCount64() + kShoveAnimationMs;
+    m_ShoveDown = shove;
 
     if (PressedDigitalAction(m_ActionPrevItem, true))
     {
@@ -1267,6 +1285,8 @@ bool VR::UpdateScope()
     if (m_RightControllerDeviceIndex == vr::k_unTrackedDeviceIndexInvalid)
         return skip("no right controller");
 
+    if (m_RightHandEmpty)
+        return skip("the right hand is empty");
     const ScopeInfo *scope = FindScope(m_ActiveWeaponId);
     if (!scope)
         return skip("this weapon has no scope");
@@ -1636,7 +1656,8 @@ void VR::UpdateGrenadeThrow()
     const auto now = std::chrono::steady_clock::now();
     // A grenade in the left hand (dual wield) is thrown with that hand and its trigger
     const bool leftHand = m_LeftUseActive;
-    const bool trigger = PressedDigitalAction(leftHand ? m_ActionSecondaryAttack : m_ActionPrimaryAttack);
+    // An empty right hand throws nothing: its grenade is put away (EmptyRightHand)
+    const bool trigger = PressedDigitalAction(leftHand ? m_ActionSecondaryAttack : m_ActionPrimaryAttack) && (leftHand || !m_RightHandEmpty);
 
     const bool shoveButton = !leftHand && PressedDigitalAction(m_ActionSecondaryAttack);
     const bool shoveButtonPressed = shoveButton && !m_ShoveButtonDown;
@@ -2061,6 +2082,7 @@ void VR::UpdateBodyGrab(bool weaponHand, const Vector &handPosLocalInWorld, int 
     const int chestSlot = GetChestItemSlotAt(fist);
     if (chestSlot)
     {
+        m_RightHandEmpty = false;
         char command[16];
         snprintf(command, sizeof(command), "slot%d", chestSlot);
         m_Game->ClientCmd_Unrestricted(command);
@@ -2070,30 +2092,42 @@ void VR::UpdateBodyGrab(bool weaponHand, const Vector &handPosLocalInWorld, int 
         return;
     }
 
-    // The right hand puts its grenade, pills or adrenaline back where they're seen on the body, and takes its weapon again
-    if (weaponHand)
+    // The right hand puts back on the body what it holds and is left empty (EmptyRightHand), or, holding something else
+    // or nothing, takes what's there
+    const int heldSlot = weaponHand && !m_RightHandEmpty ? GetWeaponSlot(weaponId) : 0;
+    auto putOrTake = [&](int slot, const char *place)
+    {
+        const char *result = "nothing there";
+        if (heldSlot == slot)
+        {
+            EmptyRightHand(place);
+            result = "put there, the hand is empty";
+        }
+        else if (TakeRightSlot(slot))
+        {
+            result = "taken";
+        }
+        m_Haptics.Play(Haptics::Hand::WeaponHand, *result == 'n' ? HapticEffects::Cancel : HapticEffects::Confirm);
+        WriteBodyGrabLog("%s: %.2f m away, side %.2f, forward %.2f, %.2f m below, head pitched %.0f deg down: %s, %s",
+            handName, hand.distance, hand.side, hand.forward, hand.drop, headPitchDown, place, result);
+    };
+
+    // Its grenade, pills or adrenaline where they're seen on the chest
+    if (weaponHand && !m_RightHandEmpty)
     {
         const int spot = GetChestSpotAt(fist);
         const bool pills = weaponId == C_WeaponCSBase::PAIN_PILLS || weaponId == C_WeaponCSBase::ADRENALINE;
-        if (((spot == 1 && IsThrowableWeapon(weaponId)) || (spot == 0 && pills)) && StowRightItem(weaponId))
+        if ((spot == 1 && IsThrowableWeapon(weaponId)) || (spot == 0 && pills))
         {
-            m_Haptics.Play(Haptics::Hand::WeaponHand, HapticEffects::Confirm);
-            WriteBodyGrabLog("%s: %.2f m away, side %.2f, forward %.2f, %.2f m below: put back on the body", handName, hand.distance, hand.side, hand.forward, hand.drop);
+            putOrTake(heldSlot, "chest");
             return;
         }
     }
 
-    // The pistol's place on the thigh (body_items.cpp), which follows the leg when crouching: the secondary weapon, or
-    // the primary one when the secondary is in the hand
+    // The pistol's place on the thigh (body_items.cpp), which follows the leg when crouching: the pistol or melee weapon
     if (weaponHand && IsAtHolster(fist))
     {
-        const int slot = GetWeaponSlot(weaponId) == 2 ? 1 : 2;
-        char command[16];
-        snprintf(command, sizeof(command), "slot%d", slot);
-        m_Game->ClientCmd_Unrestricted(command);
-        m_Haptics.Play(Haptics::Hand::WeaponHand, HapticEffects::Confirm);
-        WriteBodyGrabLog("%s: %.2f m away, side %.2f, forward %.2f, %.2f m below, head pitched %.0f deg down: secondary weapon (thigh), %s",
-            handName, hand.distance, hand.side, hand.forward, hand.drop, headPitchDown, command);
+        putOrTake(2, "secondary weapon (thigh)");
         return;
     }
 
@@ -2104,11 +2138,18 @@ void VR::UpdateBodyGrab(bool weaponHand, const Vector &handPosLocalInWorld, int 
         if (place.weaponHand != weaponHand || !place.isAt(hand, m_PlayerHeightInMeters) || (!weaponHand && m_DualWieldEnabled))
             continue;
 
+        if (weaponHand)
+        {
+            putOrTake(place.slot, place.name);
+            return;
+        }
+
         const int slot = GetWeaponSlot(weaponId) == place.slot ? place.otherSlot : place.slot;
+        m_RightHandEmpty = false;
         char command[16];
         snprintf(command, sizeof(command), "slot%d", slot);
         m_Game->ClientCmd_Unrestricted(command);
-        m_Haptics.Play(weaponHand ? Haptics::Hand::WeaponHand : Haptics::Hand::OtherHand, HapticEffects::Confirm);
+        m_Haptics.Play(Haptics::Hand::OtherHand, HapticEffects::Confirm);
 
         WriteBodyGrabLog("%s: %.2f m away, side %.2f, forward %.2f, %.2f m below, head pitched %.0f deg down: %s, %s",
             handName, hand.distance, hand.side, hand.forward, hand.drop, headPitchDown, place.name, command);
@@ -2186,6 +2227,7 @@ void VR::UpdateTracking()
 
     m_Game->m_IsMeleeWeaponActive = localPlayer->IsMeleeWeaponActive();
     m_ActiveWeaponId = weaponId;
+    UpdateEmptyHand(localPlayer);
 
     UpdateFlashlightAttachment();
 
@@ -2405,7 +2447,7 @@ void VR::UpdateTracking()
             const bool alongTheWeapon = handsDistanceLocalInWorldLength >= (handsDistanceFor2HandWeapon - handsDistanceFor2HandWeaponOffset)
                 && handsDistanceLocalInWorldLength <= (handsDistanceFor2HandWeapon + handsDistanceFor2HandWeaponOffset)
                 && rightControllerForward_HandsDistLocalWorld_Angle <= angleLimitFor2HandWeapon;
-            if (ManualReloadHandIsBusy() || m_LeftUseActive)
+            if (ManualReloadHandIsBusy() || m_LeftUseActive || m_RightHandEmpty)
             {
                 isHoldingWeapon2Handed = false;
             }

@@ -636,7 +636,7 @@ int Hooks::dWriteUsercmd(void *buf, CUserCmd *to, CUserCmd *from)
 		int rollEncoding = (((int)controllerAngles.z + 180) / 2 * 10000000);
 		to->command_number += rollEncoding;
 
-		if (VectorLength(m_VR->m_RightControllerPose.TrackedDeviceVel) > m_VR->m_MeleeSwingVelocityRequired)
+		if (VectorLength(m_VR->m_RightControllerPose.TrackedDeviceVel) > m_VR->m_MeleeSwingVelocityRequired && !m_VR->m_RightHandEmpty)
 		{
 			to->command_number *= -1; // Signal to server that melee swing in motion
 		}
@@ -918,7 +918,8 @@ void Hooks::DrawModelForVR(void *ecx, void *state, const ModelRenderInfo_t &info
 	// The left hand's item being used: the game holds it in its weapon hand, put at the left controller. The mod draws it
 	// in the left hand instead (VR::GetLeftItemDraw), and the right hand empty (BuildFirstPersonHands). The weapon the
 	// game puts away or takes out meanwhile isn't drawn either.
-	if ((kind == ModelKind::Viewmodel || kind == ModelKind::DualPistolsViewmodel) && m_VR->m_LeftUseActive)
+	// The right hand empty: its weapon is put away, the game's one is there only to draw the hands with (EmptyRightHand)
+	if ((kind == ModelKind::Viewmodel || kind == ModelKind::DualPistolsViewmodel) && (m_VR->m_LeftUseActive || m_VR->m_RightHandEmpty))
 		return;
 
 	// l4d2vr_dual_test vmgrip: how the weapon's animation holds it, relative to the right hand (to hold it the same way in

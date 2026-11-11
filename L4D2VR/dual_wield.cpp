@@ -48,6 +48,8 @@ namespace
 	// A thumbstick click shorter than this is a click; held this long it drops what the hand holds
 	const unsigned long long kStickTapMs = 500;
 	const unsigned long long kStickDropMs = 3000;
+	// The game changes the weapon this long after the mod asked it to (SelectWeapon) while the right hand is empty
+	const unsigned long long kEmptyHandSelectMs = 1500;
 	// Hooks::TraceMeleeSwing turns the aim by this, degrees
 	const float kServerMeleeTraceTilt = 50.0f;
 
@@ -152,6 +154,9 @@ void VR::SelectWeapon(int weaponId)
 	const char *name = DualWield::ClassName(weaponId);
 	if (!*name)
 		return;
+	// The right hand stays empty with the weapon the mod takes out for it (UpdateEmptyHand)
+	if (m_RightHandEmpty)
+		m_EmptyHandSelectMs = NowMs();
 	char command[64];
 	snprintf(command, sizeof(command), "use %s", name);
 	m_Game->ClientCmd_Unrestricted(command);
@@ -668,7 +673,7 @@ void VR::DropFromHand(bool weaponHand)
 	{
 		index = m_LeftItemIndex;
 	}
-	else if (!m_LeftUseActive)
+	else if (!m_LeftUseActive && !m_RightHandEmpty)
 	{
 		// The game draws the hands with the model of the weapon in them: with nothing at all to hold they'd be gone. So
 		// the right hand keeps its weapon when it's the last thing carried (the left hand's item aside).
@@ -696,27 +701,64 @@ void VR::DropFromHand(bool weaponHand)
 		SendDrop(index);
 }
 
-// The right hand puts its grenade, pills or adrenaline back where they're carried on the body (UpdateBodyGrab): it takes
-// the primary weapon again, or the pistol or melee weapon. False if there's nothing else to take.
-bool VR::StowRightItem(int activeWeaponId)
+// The right hand put what it held back on the body (UpdateBodyGrab) and is empty: that weapon stays the game's active
+// one, unseen (Hooks::DrawModelForVR), with the hand open on its controller (BuildFirstPersonHands), and it does nothing
+// (ProcessInput and the rest check m_RightHandEmpty)
+void VR::EmptyRightHand(const char *why)
 {
 	C_BasePlayer *local = (C_BasePlayer *)m_Game->GetClientEntity(m_Game->m_EngineClient->GetLocalPlayer());
-	if (!local)
-		return false;
+	const void *active = local ? (const void *)local->GetActiveWeapon() : nullptr;
+	if (!active)
+		return;
+	m_RightHandEmpty = true;
+	m_EmptyHandWeapon = active;
+	isHoldingWeapon2Handed = false;
+	Diagnostics::Log("hands: the right hand is empty (%s)", why);
+}
+
+// The right hand takes the weapon of a slot from the body (1 primary, 2 pistol or melee, 3 grenade, 4 kit, 5 pills). False
+// if the player has none there.
+bool VR::TakeRightSlot(int slot)
+{
+	C_BasePlayer *local = (C_BasePlayer *)m_Game->GetClientEntity(m_Game->m_EngineClient->GetLocalPlayer());
 	InventoryItem items[64];
-	const int count = GetInventory(local, items, 64);
-	int activeIndex = 0;
-	for (int i = 0; i < count; ++i)
-	{
-		if (items[i].weapon == (void *)local->GetActiveWeapon())
-			activeIndex = items[i].index;
-	}
-	const int weapon = PickRightWeapon(items, count, activeIndex, 0);
-	if (!weapon)
+	const int count = local ? GetInventory(local, items, 64) : 0;
+	bool has = false;
+	for (int i = 0; i < count && !has; ++i)
+		has = items[i].index != m_LeftItemIndex && GetWeaponSlot(items[i].id) == slot;
+	if (!has)
 		return false;
-	SelectWeapon(weapon);
-	Diagnostics::Log("dual wield: the right hand put weapon %d back on the body and takes weapon %d", activeWeaponId, weapon);
+
+	m_RightHandEmpty = false;
+	char command[16];
+	snprintf(command, sizeof(command), "slot%d", slot);
+	m_Game->ClientCmd_Unrestricted(command);
 	return true;
+}
+
+// Every frame: the empty hand ends when the game takes out another weapon by itself (a weapon picked up, being down, the
+// weapon buttons). The left hand using its item, and the mod changing the unseen weapon for it, don't end it.
+void VR::UpdateEmptyHand(C_BasePlayer *local)
+{
+	if (!m_RightHandEmpty)
+		return;
+	const void *active = local ? (const void *)local->GetActiveWeapon() : nullptr;
+	if (!active)
+	{
+		m_RightHandEmpty = false;
+		return;
+	}
+	if (active == m_EmptyHandWeapon || m_LeftUseActive)
+		return;
+	if (m_LeftItemIndex && active == (const void *)m_Game->GetClientEntity(m_LeftItemIndex))
+		return;
+	if (NowMs() - m_EmptyHandSelectMs < kEmptyHandSelectMs)
+	{
+		m_EmptyHandWeapon = active;
+		return;
+	}
+	m_RightHandEmpty = false;
+	Diagnostics::Log("hands: the right hand holds the weapon the game took out");
 }
 
 // A weapon of the player goes to the ground, falling from where it is (DualWield::ServerDropItem)
@@ -736,7 +778,7 @@ void VR::UpdateHandSwap(unsigned long long now, float deltaSeconds, int activeIn
 	if (bothValid && !m_LeftUseActive && VectorLength(m_LeftControllerPose.TrackedDevicePos - m_RightControllerPose.TrackedDevicePos) < kHandSwapDistance)
 	{
 		const bool leftGrab = PressedDigitalAction(m_LeftHandGrab), rightGrab = PressedDigitalAction(m_RightHandGrab);
-		if (!m_LeftItemIndex && activeIndex && DualWield::IsLeftHandItem(activeWeaponId) && leftGrab && !rightGrab)
+		if (!m_LeftItemIndex && activeIndex && !m_RightHandEmpty && DualWield::IsLeftHandItem(activeWeaponId) && leftGrab && !rightGrab)
 			direction = 1;
 		else if (m_LeftItemIndex && rightGrab && !leftGrab)
 			direction = -1;
@@ -778,6 +820,7 @@ void VR::UpdateHandSwap(unsigned long long now, float deltaSeconds, int activeIn
 	{
 		const int id = m_LeftItemId;
 		ClearLeftItem();
+		m_RightHandEmpty = false;
 		SelectWeapon(id);
 		Diagnostics::Log("dual wield: the item went from the left hand to the right");
 	}
@@ -829,7 +872,9 @@ void VR::DualWieldTest(const char *action)
 		if (FindNearestPickable(Vec3(m_SetupOrigin.x, m_SetupOrigin.y, m_SetupOrigin.z), 400.0f, target, filter))
 		{
 			Diagnostics::Log("dual wield test: %s grab at %.0f %.0f %.0f", left ? "left" : "right", target.x, target.y, target.z);
-			TryGrabWorld(target, left);
+			// Without controllers ProcessInput presses nothing: the use goes as the console's, at the grab's moment
+			if (TryGrabWorld(target, left))
+				m_TestUsePressAt = m_GrabUsePressAt;
 		}
 		else
 		{
@@ -927,6 +972,24 @@ void VR::DualWieldTest(const char *action)
 	if (strcmp(action, "drop") == 0 || strcmp(action, "dropleft") == 0)
 	{
 		DropFromHand(strcmp(action, "drop") == 0);
+		return;
+	}
+
+	if (strcmp(action, "doors") == 0)
+	{
+		LogDoors(Vec3(m_SetupOrigin.x, m_SetupOrigin.y, m_SetupOrigin.z));
+		return;
+	}
+
+	// empty: the right hand puts its weapon away; take_<slot>: it takes the one of that slot (UpdateBodyGrab)
+	if (strcmp(action, "empty") == 0)
+	{
+		EmptyRightHand("test");
+		return;
+	}
+	if (strncmp(action, "take", 4) == 0 && filter)
+	{
+		Diagnostics::Log("dual wield test: take slot %s: %s", filter, TakeRightSlot(atoi(filter)) ? "taken" : "nothing there");
 		return;
 	}
 

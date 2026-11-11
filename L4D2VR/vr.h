@@ -367,6 +367,10 @@ public:
 	// Pills or adrenaline in the hand that uses them are at the mouth or against the body (ItemUseGestureReady)
 	bool m_ItemGestureReady = false;
 	int m_LogViewmodelGrip = 0;             // l4d2vr_dual_test vmgrip: draws of the weapon to log the bones of (hooks.cpp)
+	// A shove by swinging an arm: the game's animation of it isn't shown, for about as long as it lasts (ApplyThrowPose)
+	static constexpr unsigned long long kShoveAnimationMs = 700;
+	unsigned long long m_ShoveHoldUntil = 0;
+	bool m_ShoveDown = false;
 	bool m_ViewmodelHasTwoWeapons = false;  // dual pistols shown as such, both hands are holding one
 	bool m_OnePistolDoubled = true;         // the second pistol isn't shown: one pistol that does double damage, with a mark
 	bool m_DualAsOnePistol = false;         // holding two pistols now, shown as one
@@ -426,6 +430,7 @@ public:
 	unsigned long long m_GrabUseAimUntil = 0;
 	unsigned long long m_GrabUsePressAt = 0;
 	unsigned long long m_GrabUsePressUntil = 0;
+	unsigned long long m_TestUsePressAt = 0; // l4d2vr_dual_test grab: +use from the console when the grab presses it
 	static constexpr int kMaxBodyDraws = 6;
 	BodyModelDraw m_BodyDraws[kMaxBodyDraws];
 	int m_BodyDrawCount = 0;
@@ -437,9 +442,9 @@ public:
 	// Where the pills (0) and the grenade (1) are carried, meters from the eyes looking straight ahead: forward, to the
 	// weapon hand's side (negative is the other side) and below. Only in config.txt (PillsForward, GrenadeSide...); the
 	// defaults follow the player's height (BodyLayout::DefaultItemSpot).
-	float m_ItemSpotForward[2] = { 0.11f, 0.10f };
-	float m_ItemSpotSide[2] = { -0.13f, 0.16f };
-	float m_ItemSpotBelowEyes[2] = { 0.37f, 0.34f };
+	float m_ItemSpotForward[2] = { 0.03f, 0.03f };
+	float m_ItemSpotSide[2] = { -0.13f, 0.18f };
+	float m_ItemSpotBelowEyes[2] = { 0.375f, 0.311f };
 	// Moves the pistol's place on the thigh from where the player's height puts it, meters: forward, away from the body
 	// (on the weapon hand's side) and up. HolsterForward, HolsterOutward, HolsterUp in config.txt and the menu.
 	float m_HolsterForward = 0.0f;
@@ -596,6 +601,7 @@ public:
 	int GetInventory(C_BasePlayer *player, InventoryItem *items, int max);
 	const void *GetEntityModel(const void *entity);
 	const void *GetWorldModel(const void *weapon);
+	void LogDoors(const HandMath::Vec3 &from);
 	int GetChestSpotAt(const HandMath::Vec3 &handWorld) const;
 	bool IsAtHolster(const HandMath::Vec3 &fist) const;
 	const void *GetSyringeModel();
@@ -645,7 +651,15 @@ public:
 	bool UpdateStickHold(StickHold &hold, bool down, bool weaponHand);
 	void DropFromHand(bool weaponHand);
 	void SendDrop(int entityIndex);
-	bool StowRightItem(int activeWeaponId);
+	// The right hand empty: what it held was put back on the body. The game always has a weapon out, and draws the hands
+	// with it, so that one stays the active weapon, unseen and doing nothing, until the hand takes something
+	// (UpdateEmptyHand)
+	bool m_RightHandEmpty = false;
+	const void *m_EmptyHandWeapon = nullptr;
+	unsigned long long m_EmptyHandSelectMs = 0; // the mod changed the unseen weapon (dual wield), not the player
+	void EmptyRightHand(const char *why);
+	void UpdateEmptyHand(C_BasePlayer *local);
+	bool TakeRightSlot(int slot);
 	bool IsAtTwoHandSpot(bool &known) const;
 	const void *ApplyItemInHand(const void *studioHeader, const void *customBones, void *storage);
 	HandMath::Vec3 GetLeftPalm() const;

@@ -19,8 +19,8 @@ namespace
 		CHECK_NEAR(holster.barrel.z, -1.0f, 0.001f);
 		CHECK_NEAR(holster.slide.x, 1.0f, 0.001f);
 
-		// Higher than before (it was 0.4977 of the height below the eyes)
-		CHECK(holster.point.z > -0.4977f * height + 0.05f);
+		// Where the user put it: 0.4977 of the height below the eyes at first, then 5 cm higher twice
+		CHECK(holster.point.z > -0.4977f * height + 0.10f);
 
 		// Left handed: on the left
 		CHECK_NEAR(HolsterOnThigh(height, kEyeHeight * height, true).point.y, kHolsterSide * height, 0.001f);
@@ -67,20 +67,20 @@ namespace
 
 	void TestItemSpots()
 	{
-		// The defaults of a player of 1.8 m: pills on the left, the grenade on the right
-		const Vec3 pills = ItemSpotOffset(DefaultItemSpot(0, 1.8f), false);
-		const Vec3 grenade = ItemSpotOffset(DefaultItemSpot(1, 1.8f), false);
-		CHECK_NEAR(pills.x, 0.11f, 0.001f);
+		// The defaults: where the user (1.68 m) put them, pills on the left, the grenade on the right
+		const Vec3 pills = ItemSpotOffset(DefaultItemSpot(0, 1.68f), false);
+		const Vec3 grenade = ItemSpotOffset(DefaultItemSpot(1, 1.68f), false);
+		CHECK_NEAR(pills.x, 0.03f, 0.001f);
 		CHECK_NEAR(pills.y, 0.13f, 0.001f);
-		CHECK_NEAR(pills.z, -0.37f, 0.001f);
-		CHECK_NEAR(grenade.y, -0.16f, 0.001f);
-		CHECK_NEAR(grenade.z, -0.34f, 0.001f);
+		CHECK_NEAR(pills.z, -0.35f, 0.001f);
+		CHECK_NEAR(grenade.y, -0.18f, 0.001f);
+		CHECK_NEAR(grenade.z, -0.29f, 0.001f);
 
 		// The side is towards the weapon hand: mirrored for left handed players
-		CHECK_NEAR(ItemSpotOffset(DefaultItemSpot(1, 1.8f), true).y, 0.16f, 0.001f);
+		CHECK_NEAR(ItemSpotOffset(DefaultItemSpot(1, 1.68f), true).y, 0.18f, 0.001f);
 
-		// Lower for shorter players
-		CHECK(ItemSpotOffset(DefaultItemSpot(0, 1.6f), false).z > pills.z);
+		// Lower for taller players
+		CHECK(ItemSpotOffset(DefaultItemSpot(0, 1.9f), false).z < pills.z);
 	}
 
 	void TestBodyYaw()
