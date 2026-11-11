@@ -225,7 +225,9 @@ void SettingsMenu::Update()
 	const bool inUse = now - m_LastInputTime < kInputActiveTime || ImGui::IsAnyItemActive();
 	const auto frameInterval = inUse ? kFrameInterval : kIdleFrameInterval;
 
-	if (tabVisible && (m_PendingFrames > 0 || now - m_LastFrameTime >= frameInterval))
+	// Once before it's seen too, so the tab has an image when it's opened
+	const bool mayDraw = tabVisible || (!m_UploadedValid && m_PendingFrames > 0);
+	if (mayDraw && (m_PendingFrames > 0 || now - m_LastFrameTime >= frameInterval))
 	{
 		Render();
 		if (m_PendingFrames > 0)
@@ -612,6 +614,9 @@ void SettingsMenu::DrawMenu()
 			DrawSlider("Grenade: forward", "Where the grenade is carried: how far in front of your eyes. Negative is behind.", settings.m_ItemSpotForward[1], -0.4f, 0.5f, 0.01f, "%.2f m");
 			DrawSlider("Grenade: to the side", "Where the grenade is carried: how far to the side of your eyes. Positive is the side of the weapon hand, negative the other side.", settings.m_ItemSpotSide[1], -0.5f, 0.5f, 0.01f, "%.2f m");
 			DrawSlider("Grenade: below the eyes", "Where the grenade is carried: how far below your eyes. About 0.6 m is the belt.", settings.m_ItemSpotBelowEyes[1], 0.1f, 1.1f, 0.01f, "%.2f m");
+			DrawSlider("Pistol on the thigh: forward", "Moves the pistol on your thigh, and where it's taken, forward from where your height puts it. Negative is back.", settings.m_HolsterForward, -0.3f, 0.3f, 0.01f, "%.2f m");
+			DrawSlider("Pistol on the thigh: outward", "Moves the pistol on your thigh away from your body, to the side. Negative is towards the middle.", settings.m_HolsterOutward, -0.3f, 0.3f, 0.01f, "%.2f m");
+			DrawSlider("Pistol on the thigh: up", "Moves the pistol on your thigh up. Negative is down.", settings.m_HolsterUp, -0.3f, 0.3f, 0.01f, "%.2f m");
 			DrawCheckbox("Items in the left hand", "The left hand holds a melee weapon, a grenade, pills or adrenaline while the right hand holds a weapon. Take them with the left grip: on your chest, or where they lie (a melee weapon taken with the left hand doesn't replace your pistol). Swing the melee weapon to hit. Hold the left trigger to throw the grenade with your arm, to drink the pills by bringing them to your mouth, or to stab the adrenaline into your body with the needle (it shows while the trigger is held). To change hands, hold the hands together and keep the grip of the empty hand pressed for 2 seconds. Keep a thumbstick pressed for 3 seconds to drop what that hand holds. The host needs this version of the mod.", settings.m_DualWieldEnabled);
 			DrawCheckbox("Interact with your hand", "Doors, items and teammates are used by pointing your weapon hand at them instead of looking at them. In a game you joined, the host needs this version of the mod.", settings.m_InteractWithHand);
 			DrawCheckbox("Shove by swinging", "Shove by swinging the left controller (or the right one when not holding a melee weapon).", settings.m_IsTrackingManualPush);

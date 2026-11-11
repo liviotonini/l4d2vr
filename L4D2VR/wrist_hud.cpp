@@ -5,6 +5,9 @@
 #include "sdk.h"
 #include "game.h"
 #include "wrist_hud_draw.h"
+#include "diagnostics.h"
+#include <d3d9.h>
+#include <d3d9_vr.h>
 
 namespace
 {
@@ -124,6 +127,74 @@ namespace
 		const float seconds = (now - clock.changedAt) * 0.001f;
 		return (int)std::max(std::ceil(buffer - seconds * kTemporaryHealthDecay), 0.0f);
 	}
+}
+
+// The pixels (RGBA) go into a dynamic texture of the game's D3D9 device (DXVK), made the first time, and SteamVR is given
+// its Vulkan image. Nothing is left waiting, unlike SetOverlayRaw. False if it can't be done.
+bool VR::UploadOverlayPixels(vr::VROverlayHandle_t handle, OverlayTexture &target, const uint8_t *rgba, int width, int height)
+{
+	if (!g_D3DVR9 || !m_D9HUDSurface || handle == vr::k_ulOverlayHandleInvalid)
+		return false;
+	IDirect3DDevice9 *device = nullptr;
+	if (FAILED(m_D9HUDSurface->GetDevice(&device)) || !device)
+		return false;
+
+	g_D3DVR9->LockDevice();
+	bool ready = target.texture && target.width == width && target.height == height;
+	if (!ready)
+	{
+		if (target.surface)
+			target.surface->Release();
+		if (target.texture)
+			target.texture->Release();
+		target = OverlayTexture();
+
+		D3D9_TEXTURE_VR_DESC desc = {};
+		if (SUCCEEDED(device->CreateTexture(width, height, 1, D3DUSAGE_DYNAMIC, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &target.texture, nullptr))
+			&& SUCCEEDED(target.texture->GetSurfaceLevel(0, &target.surface)) && SUCCEEDED(g_D3DVR9->GetVRDesc(target.surface, &desc)))
+		{
+			memcpy(&target.vk.m_VulkanData, &desc, sizeof(vr::VRVulkanTextureData_t));
+			target.vk.m_VRTexture.handle = &target.vk.m_VulkanData;
+			target.vk.m_VRTexture.eColorSpace = vr::ColorSpace_Auto;
+			target.vk.m_VRTexture.eType = vr::TextureType_Vulkan;
+			target.width = width;
+			target.height = height;
+			ready = true;
+			Diagnostics::Log("overlays: a %dx%d texture of the game's device for an overlay", width, height);
+		}
+		else
+		{
+			Diagnostics::Log("overlays: couldn't make a %dx%d texture for an overlay, its images go through shared memory", width, height);
+		}
+	}
+
+	D3DLOCKED_RECT locked = {};
+	if (ready && SUCCEEDED(target.texture->LockRect(0, &locked, nullptr, D3DLOCK_DISCARD)) && locked.pBits)
+	{
+		// D3DFMT_A8R8G8B8 is BGRA in memory
+		for (int y = 0; y < height; ++y)
+		{
+			const uint8_t *source = rgba + (size_t)y * width * 4;
+			uint8_t *destination = (uint8_t *)locked.pBits + (size_t)y * locked.Pitch;
+			for (int x = 0; x < width; ++x, source += 4, destination += 4)
+			{
+				destination[0] = source[2];
+				destination[1] = source[1];
+				destination[2] = source[0];
+				destination[3] = source[3];
+			}
+		}
+		target.texture->UnlockRect(0);
+		g_D3DVR9->TransferSurface(target.surface, FALSE);
+	}
+	else
+	{
+		ready = false;
+	}
+	g_D3DVR9->UnlockDevice();
+	device->Release();
+
+	return ready && m_Overlay->SetOverlayTexture(handle, &target.vk.m_VRTexture) == vr::VROverlayError_None;
 }
 
 void VR::HideWristHud()
@@ -285,7 +356,12 @@ void VR::UpdateWristHud()
 			m_WristHudPixels.resize(WristHud::kWidth * WristHud::kHeight * 4);
 			WristHud::Draw(state, m_WristHudPixels.data());
 
-			const vr::EVROverlayError error = m_Overlay->SetOverlayRaw(m_WristHudHandle, m_WristHudPixels.data(), WristHud::kWidth, WristHud::kHeight, 4);
+			// Through a texture of the game's device: SetOverlayRaw keeps every image in a block of shared memory until SteamVR
+			// has drawn it, and with the hand out of view they piled up to its limit of 201, after which every image of the
+			// game is refused (the HUD went away, and the settings menu with it). Raw only if that can't be done.
+			vr::EVROverlayError error = vr::VROverlayError_None;
+			if (!UploadOverlayPixels(m_WristHudHandle, m_WristHudTexture, m_WristHudPixels.data(), WristHud::kWidth, WristHud::kHeight))
+				error = m_Overlay->SetOverlayRaw(m_WristHudHandle, m_WristHudPixels.data(), WristHud::kWidth, WristHud::kHeight, 4);
 			if (error != vr::VROverlayError_None)
 			{
 				// If the upload keeps failing the overlay is recreated

@@ -83,13 +83,13 @@ namespace
 	}
 
 	// A wrong layout would read garbage: it's caught instead of crashing
-	bool FindPlayerProp(void *firstClass, const char *name, int &offset, int &count)
+	bool FindClassProp(void *firstClass, const char *className, const char *name, int &offset, int &count)
 	{
 		__try
 		{
 			for (const ClientClass *clientClass = (const ClientClass *)firstClass; clientClass; clientClass = clientClass->next)
 			{
-				if (clientClass->networkName && strcmp(clientClass->networkName, "CTerrorPlayer") == 0)
+				if (clientClass->networkName && strcmp(clientClass->networkName, className) == 0)
 					return FindProp(clientClass->table, name, 0, 0, offset, count);
 			}
 		}
@@ -99,11 +99,19 @@ namespace
 		return false;
 	}
 
+	bool FindPlayerProp(void *firstClass, const char *name, int &offset, int &count)
+	{
+		return FindClassProp(firstClass, "CTerrorPlayer", name, offset, count);
+	}
+
 	const int kClientAmmoArrayOffset = 0xF24; // known, checks the lookup
 	int g_MyWeaponsOffset = -1;
 	int g_MyWeaponsCount = 0;
 	int g_ModelIndexOffset = -1;
 	int g_OwnerOffset = -1;
+	// The model of a weapon in the world (DT_BaseCombatWeapon). The weapons a player carries have their first person
+	// model as their own (m_nModelIndex), with the parts placed for the animations.
+	int g_WorldModelIndexOffset = -1;
 	bool g_NetvarsLookedUp = false;
 
 	bool HasPlayerClass(const ClientClass *clientClass)
@@ -159,8 +167,10 @@ namespace
 		{
 			FindPlayerProp(classes, "m_nModelIndex", g_ModelIndexOffset, unused);
 			FindPlayerProp(classes, "m_hOwnerEntity", g_OwnerOffset, unused);
+			FindClassProp(classes, "CPistol", "m_iWorldModelIndex", g_WorldModelIndexOffset, unused);
 		}
-		Diagnostics::Log("body items: m_nModelIndex at 0x%X, m_hOwnerEntity at 0x%X", g_ModelIndexOffset, g_OwnerOffset);
+		Diagnostics::Log("body items: m_nModelIndex at 0x%X, m_hOwnerEntity at 0x%X, m_iWorldModelIndex at 0x%X", g_ModelIndexOffset, g_OwnerOffset,
+			g_WorldModelIndexOffset);
 
 		if (foundAmmo && ammoOffset == kClientAmmoArrayOffset && foundWeapons && weaponsCount > 0 && weaponsCount <= 64)
 		{
@@ -462,7 +472,8 @@ void VR::UpdateBodyItems()
 	// origin, in tracking space)
 	const float floorZ = m_HmdPosAbs.z - m_HmdPosLocalInWorld.z;
 	const BodyLayout::Holster holster = BodyLayout::HolsterOnThigh(m_PlayerHeightInMeters, (Origin(body).z - floorZ) / m_VRScale, m_LeftHanded);
-	m_HolsterPoint = TransformPoint(body, holster.point * m_VRScale);
+	const Vec3 holsterMoved(m_HolsterForward, (m_LeftHanded ? 1.0f : -1.0f) * m_HolsterOutward, m_HolsterUp);
+	m_HolsterPoint = TransformPoint(body, (holster.point + holsterMoved) * m_VRScale);
 	m_HolsterBarrel = RotateVector(body, holster.barrel);
 	m_HolsterValid = true;
 
@@ -485,7 +496,7 @@ void VR::UpdateBodyItems()
 		if (weaponId != C_WeaponCSBase::PISTOL && weaponId != C_WeaponCSBase::MAGNUM)
 			continue;
 
-		const void *model = GetEntityModel(weapon);
+		const void *model = GetWorldModel(weapon);
 		const bool inView = Dot(Normalized(m_HolsterPoint - ToVec3(m_HmdPosAbs)), ToVec3(m_HmdForward)) > kChestViewCosine;
 		if (model && inView)
 		{
@@ -621,6 +632,15 @@ bool VR::UpdateItemUse()
 	const bool rightItem = !m_LeftUseActive && usedAtBody(m_ActiveWeaponId);
 	const bool leftItem = LeftHandHoldsItem() && usedAtBody(m_LeftItemId);
 
+	// The game's sounds, as its animations play them (they aren't played): the adrenaline's cap comes off as the trigger
+	// is pressed, the needle shows
+	const bool leftTrigger = PressedDigitalAction(m_ActionSecondaryAttack), rightTrigger = PressedDigitalAction(m_ActionPrimaryAttack);
+	if (hostHasMod && ((leftItem && m_LeftItemId == C_WeaponCSBase::ADRENALINE && leftTrigger && !m_ItemTriggerDown[0])
+		|| (rightItem && m_ActiveWeaponId == C_WeaponCSBase::ADRENALINE && rightTrigger && !m_ItemTriggerDown[1])))
+		m_Game->ClientCmd_Unrestricted("playgamesound Adrenaline.CapOff");
+	m_ItemTriggerDown[0] = leftTrigger;
+	m_ItemTriggerDown[1] = rightTrigger;
+
 	int itemIndex = 0;
 	bool leftHand = false;
 	if (leftItem && PressedDigitalAction(m_ActionSecondaryAttack) && ItemUseGestureReady(true, m_LeftItemId))
@@ -650,6 +670,8 @@ bool VR::UpdateItemUse()
 			char command[48];
 			snprintf(command, sizeof(command), "l4d2vr_use_item %d", itemIndex);
 			m_Game->m_EngineClient->ServerCmd(command, true);
+			const bool pills = (leftHand ? m_LeftItemId : m_ActiveWeaponId) == C_WeaponCSBase::PAIN_PILLS;
+			m_Game->ClientCmd_Unrestricted(pills ? "playgamesound PainPills.Use" : "playgamesound Adrenaline.NeedleIn");
 			Diagnostics::Log("items: %s at the %s, entity %d", leftHand ? "left hand's" : "right hand's",
 				(leftHand ? m_LeftItemId : m_ActiveWeaponId) == C_WeaponCSBase::PAIN_PILLS ? "mouth" : "body", itemIndex);
 		}
@@ -710,9 +732,24 @@ const void *VR::GetEntityModel(const void *entity)
 	return modelIndex > 0 ? m_Game->m_ModelInfo->GetModel(modelIndex) : nullptr;
 }
 
+// The model of a weapon as it's seen in the world and in other players' hands, which is what a hand holds and the body
+// carries. The weapons a player has are drawn by the game with their first person model instead (GetEntityModel), whose
+// parts are placed for its animations: the magazine out, the syringe away from the hand.
+const void *VR::GetWorldModel(const void *weapon)
+{
+	if (!g_NetvarsLookedUp)
+		LookUpNetvars(m_Game);
+	if (!weapon || g_WorldModelIndexOffset < 0)
+		return GetEntityModel(weapon);
+	const int modelIndex = Read<int>(weapon, g_WorldModelIndexOffset);
+	const void *model = modelIndex > 0 && modelIndex < 0x10000 ? m_Game->m_ModelInfo->GetModel(modelIndex) : nullptr;
+	return model ? model : GetEntityModel(weapon);
+}
+
 namespace
 {
-	// The bone a model is held by in the third person ("ValveBiped.weapon_bone", "L_weapon_bone"), -1 if none
+	// The bone a model is held by in the third person ("ValveBiped.weapon_bone", "L_weapon_bone"), -1 if none. A name
+	// ending with it: the model of two pistols has "weapon_bone_Clip2" (the second one's magazine) before its own.
 	int WeaponBoneOf(const void *studioHeader)
 	{
 		static std::unordered_map<const void *, int> s_Found;
@@ -720,13 +757,21 @@ namespace
 		if (found != s_Found.end())
 			return found->second;
 
-		int bone = -1;
+		const char kName[] = "weapon_bone";
+		const size_t kLength = sizeof(kName) - 1;
+		int bone = -1, containing = -1;
 		const int count = Studio::BoneCount(studioHeader);
 		for (int i = 0; i < count && bone < 0; ++i)
 		{
-			if (strstr(Studio::BoneName(studioHeader, i), "weapon_bone"))
+			const char *name = Studio::BoneName(studioHeader, i);
+			const size_t length = strlen(name);
+			if (length >= kLength && strcmp(name + length - kLength, kName) == 0)
 				bone = i;
+			else if (containing < 0 && strstr(name, kName))
+				containing = i;
 		}
+		if (bone < 0)
+			bone = containing;
 		s_Found[studioHeader] = bone;
 		return bone;
 	}

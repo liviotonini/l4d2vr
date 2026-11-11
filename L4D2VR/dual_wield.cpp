@@ -1,6 +1,7 @@
 #include "dual_wield.h"
 #include "vr.h"
 #include <Windows.h>
+#include <d3d9.h>
 #include <algorithm>
 #include <cstdio>
 #include "sdk.h"
@@ -164,7 +165,13 @@ void VR::TakeIntoLeftHand(int entityIndex, int weaponId)
 	m_LeftItemId = weaponId;
 	m_LeftGripValid = false;
 	if (weaponId == C_WeaponCSBase::MELEE)
+	{
+		// One melee weapon for the left hand: the one it had, in it or behind the shoulder, goes to the ground. Otherwise
+		// it would lose the slot of its own and stay as the right hand's.
+		if (m_ExtraMeleeIndex && m_ExtraMeleeIndex != entityIndex)
+			SendDrop(m_ExtraMeleeIndex);
 		m_ExtraMeleeIndex = entityIndex;
+	}
 	Diagnostics::Log("dual wield: entity %d (weapon %d) in the left hand", entityIndex, weaponId);
 }
 
@@ -273,7 +280,7 @@ bool VR::GetLeftItemDraw(BodyModelDraw &draw)
 		return false;
 
 	const void *entity = m_Game->GetClientEntity(m_LeftItemIndex);
-	const void *model = entity ? GetEntityModel(entity) : nullptr;
+	const void *model = entity ? GetWorldModel(entity) : nullptr;
 	if (!model)
 		return false;
 
@@ -663,23 +670,62 @@ void VR::DropFromHand(bool weaponHand)
 	}
 	else if (!m_LeftUseActive)
 	{
+		// The game draws the hands with the model of the weapon in them: with nothing at all to hold they'd be gone. So
+		// the right hand keeps its weapon when it's the last thing carried (the left hand's item aside).
 		C_BasePlayer *local = (C_BasePlayer *)m_Game->GetClientEntity(m_Game->m_EngineClient->GetLocalPlayer());
 		InventoryItem items[64];
 		const int count = local ? GetInventory(local, items, 64) : 0;
+		int others = 0;
 		for (int i = 0; i < count; ++i)
 		{
-			if (items[i].weapon == (void *)local->GetActiveWeapon() && items[i].index != m_LeftItemIndex)
+			if (items[i].index == m_LeftItemIndex)
+				continue;
+			if (items[i].weapon == (void *)local->GetActiveWeapon())
 				index = items[i].index;
+			else
+				++others;
+		}
+		if (index && !others)
+		{
+			m_Haptics.Play(Haptics::Hand::WeaponHand, HapticEffects::Cancel);
+			Diagnostics::Log("dual wield: the right hand keeps its weapon, the last one carried");
+			return;
 		}
 	}
-	if (!index)
-		return;
+	if (index)
+		SendDrop(index);
+}
 
-	// It falls from where it is, without being thrown
+// The right hand puts its grenade, pills or adrenaline back where they're carried on the body (UpdateBodyGrab): it takes
+// the primary weapon again, or the pistol or melee weapon. False if there's nothing else to take.
+bool VR::StowRightItem(int activeWeaponId)
+{
+	C_BasePlayer *local = (C_BasePlayer *)m_Game->GetClientEntity(m_Game->m_EngineClient->GetLocalPlayer());
+	if (!local)
+		return false;
+	InventoryItem items[64];
+	const int count = GetInventory(local, items, 64);
+	int activeIndex = 0;
+	for (int i = 0; i < count; ++i)
+	{
+		if (items[i].weapon == (void *)local->GetActiveWeapon())
+			activeIndex = items[i].index;
+	}
+	const int weapon = PickRightWeapon(items, count, activeIndex, 0);
+	if (!weapon)
+		return false;
+	SelectWeapon(weapon);
+	Diagnostics::Log("dual wield: the right hand put weapon %d back on the body and takes weapon %d", activeWeaponId, weapon);
+	return true;
+}
+
+// A weapon of the player goes to the ground, falling from where it is (DualWield::ServerDropItem)
+void VR::SendDrop(int entityIndex)
+{
 	char command[64];
-	snprintf(command, sizeof(command), "l4d2vr_drop %d 0 0 0", index);
+	snprintf(command, sizeof(command), "l4d2vr_drop %d 0 0 0", entityIndex);
 	m_Game->m_EngineClient->ServerCmd(command, true);
-	Diagnostics::Log("dual wield: dropping entity %d from the %s hand", index, weaponHand ? "right" : "left");
+	Diagnostics::Log("dual wield: dropping entity %d", entityIndex);
 }
 
 // The hands together and the grab of the hand without the item held for 2 seconds: the item changes hands
@@ -803,8 +849,10 @@ void VR::DualWieldTest(const char *action)
 		for (int i = 0; i < count; ++i)
 		{
 			const int slot = getSlot ? getSlot(items[i].weapon) : -1;
-			Diagnostics::Log("dual wield test: entity %d weapon %d slot %d%s%s", items[i].index, items[i].id, slot,
-				items[i].weapon == active ? " (active)" : "", items[i].index == m_LeftItemIndex ? " (left hand)" : "");
+			const void *model = GetEntityModel(items[i].weapon), *worldModel = GetWorldModel(items[i].weapon);
+			Diagnostics::Log("dual wield test: entity %d weapon %d slot %d%s%s, %s, in the world %s", items[i].index, items[i].id, slot,
+				items[i].weapon == active ? " (active)" : "", items[i].index == m_LeftItemIndex ? " (left hand)" : "",
+				model ? m_Game->m_ModelInfo->GetModelName((void *)model) : "no model", worldModel ? m_Game->m_ModelInfo->GetModelName((void *)worldModel) : "no model");
 		}
 		Diagnostics::Log("dual wield test: left item %d, extra melee %d, right weapon %d", m_LeftItemIndex, m_ExtraMeleeIndex, m_RightWeaponId);
 		return;
@@ -879,6 +927,29 @@ void VR::DualWieldTest(const char *action)
 	if (strcmp(action, "drop") == 0 || strcmp(action, "dropleft") == 0)
 	{
 		DropFromHand(strcmp(action, "drop") == 0);
+		return;
+	}
+
+	// texoverlay: images given to an overlay through a texture of the game's device (UploadOverlayPixels)
+	if (strcmp(action, "texoverlay") == 0)
+	{
+		vr::VROverlayHandle_t handle = vr::k_ulOverlayHandleInvalid;
+		if (m_Overlay->CreateOverlay("L4D2VRTextureTest", "L4D2VR texture test", &handle) != vr::VROverlayError_None)
+			return;
+		OverlayTexture texture;
+		std::vector<uint8_t> pixels(256 * 128 * 4, 200);
+		int done = 0;
+		for (int i = 0; i < 300; ++i)
+		{
+			pixels[0] = (uint8_t)i;
+			done += UploadOverlayPixels(handle, texture, pixels.data(), 256, 128) ? 1 : 0;
+		}
+		Diagnostics::Log("dual wield test: %d of 300 images given to an overlay through a texture", done);
+		m_Overlay->DestroyOverlay(handle);
+		if (texture.surface)
+			texture.surface->Release();
+		if (texture.texture)
+			texture.texture->Release();
 		return;
 	}
 

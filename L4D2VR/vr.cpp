@@ -2070,6 +2070,19 @@ void VR::UpdateBodyGrab(bool weaponHand, const Vector &handPosLocalInWorld, int 
         return;
     }
 
+    // The right hand puts its grenade, pills or adrenaline back where they're seen on the body, and takes its weapon again
+    if (weaponHand)
+    {
+        const int spot = GetChestSpotAt(fist);
+        const bool pills = weaponId == C_WeaponCSBase::PAIN_PILLS || weaponId == C_WeaponCSBase::ADRENALINE;
+        if (((spot == 1 && IsThrowableWeapon(weaponId)) || (spot == 0 && pills)) && StowRightItem(weaponId))
+        {
+            m_Haptics.Play(Haptics::Hand::WeaponHand, HapticEffects::Confirm);
+            WriteBodyGrabLog("%s: %.2f m away, side %.2f, forward %.2f, %.2f m below: put back on the body", handName, hand.distance, hand.side, hand.forward, hand.drop);
+            return;
+        }
+    }
+
     // The pistol's place on the thigh (body_items.cpp), which follows the leg when crouching: the secondary weapon, or
     // the primary one when the secondary is in the hand
     if (weaponHand && IsAtHolster(fist))
@@ -2606,6 +2619,10 @@ void VR::ParseConfigFile()
         m_ItemSpotSide[spot] = readFloat((name + "Side").c_str(), defaults.side, -0.5f, 0.5f);
         m_ItemSpotBelowEyes[spot] = readFloat((name + "BelowEyes").c_str(), defaults.below, 0.1f, 1.1f);
     }
+    // The pistol on the thigh, moved from where the player's height puts it
+    m_HolsterForward = readFloat("HolsterForward", 0.0f, -0.3f, 0.3f);
+    m_HolsterOutward = readFloat("HolsterOutward", 0.0f, -0.3f, 0.3f);
+    m_HolsterUp = readFloat("HolsterUp", 0.0f, -0.3f, 0.3f);
 
     // Fine tuning of the hand, only by editing config.txt
     Vector handOffset = m_HandOffsetMeters;
@@ -2692,6 +2709,9 @@ bool VR::SaveConfigFile()
         { "GrenadeForward", ConfigFloatString(m_ItemSpotForward[1]) },
         { "GrenadeSide", ConfigFloatString(m_ItemSpotSide[1]) },
         { "GrenadeBelowEyes", ConfigFloatString(m_ItemSpotBelowEyes[1]) },
+        { "HolsterForward", ConfigFloatString(m_HolsterForward) },
+        { "HolsterOutward", ConfigFloatString(m_HolsterOutward) },
+        { "HolsterUp", ConfigFloatString(m_HolsterUp) },
         { "ShareBodyMovement", ConfigBoolString(m_ShareBodyMovement) },
         { "ShowOtherPlayersMovement", ConfigBoolString(m_ShowOtherPlayersMovement) },
     };

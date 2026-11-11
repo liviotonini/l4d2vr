@@ -15,6 +15,7 @@
 class Game;
 class IDirect3DTexture9;
 class IDirect3DSurface9;
+struct IDirect3DTexture9;
 class ITexture;
 class SettingsMenu;
 class C_BasePlayer;
@@ -439,6 +440,11 @@ public:
 	float m_ItemSpotForward[2] = { 0.11f, 0.10f };
 	float m_ItemSpotSide[2] = { -0.13f, 0.16f };
 	float m_ItemSpotBelowEyes[2] = { 0.37f, 0.34f };
+	// Moves the pistol's place on the thigh from where the player's height puts it, meters: forward, away from the body
+	// (on the weapon hand's side) and up. HolsterForward, HolsterOutward, HolsterUp in config.txt and the menu.
+	float m_HolsterForward = 0.0f;
+	float m_HolsterOutward = 0.0f;
+	float m_HolsterUp = 0.0f;
 	// The pistol's place on the thigh, follows the leg when crouching (BodyLayout::HolsterOnThigh)
 	HandMath::Vec3 m_HolsterPoint;         // the grip
 	HandMath::Vec3 m_HolsterBarrel;        // where the barrel points from it
@@ -499,6 +505,17 @@ public:
 	unsigned long long m_WristHudLastRefresh = 0;
 	int m_WristHudUploadFailures = 0;
 	std::vector<uint8_t> m_WristHudPixels;
+	// An image written by the CPU into a texture of the game's device (DXVK), given to SteamVR as a Vulkan texture
+	// (UploadOverlayPixels)
+	struct OverlayTexture
+	{
+		IDirect3DTexture9 *texture = nullptr;
+		IDirect3DSurface9 *surface = nullptr;
+		SharedTextureHolder vk = {};
+		int width = 0, height = 0;
+	};
+	OverlayTexture m_WristHudTexture;
+	bool UploadOverlayPixels(vr::VROverlayHandle_t handle, OverlayTexture &target, const uint8_t *rgba, int width, int height);
 	unsigned char m_WristHudLastState[300] = {}; // WristHud::State, kept here so vr.h doesn't need its header
 	int m_WristHudWeaponId = -1;
 	int m_WristHudMaxClip = 0;
@@ -578,6 +595,7 @@ public:
 	bool FindNearestPickable(const HandMath::Vec3 &from, float radiusUnits, HandMath::Vec3 &point, const char *filter = nullptr);
 	int GetInventory(C_BasePlayer *player, InventoryItem *items, int max);
 	const void *GetEntityModel(const void *entity);
+	const void *GetWorldModel(const void *weapon);
 	int GetChestSpotAt(const HandMath::Vec3 &handWorld) const;
 	bool IsAtHolster(const HandMath::Vec3 &fist) const;
 	const void *GetSyringeModel();
@@ -614,6 +632,7 @@ public:
 	void UpdateBodyYaw(float deltaSeconds);
 	bool ItemUseGestureReady(bool leftHand, int weaponId);
 	bool UpdateItemUse();
+	bool m_ItemTriggerDown[2] = {};          // left, right: the triggers on the last update, for the adrenaline's cap
 	// The thumbstick clicks: a short click, or held to drop what the hand holds (UpdateStickHold)
 	struct StickHold
 	{
@@ -625,6 +644,8 @@ public:
 	StickHold m_LeftStickHold, m_RightStickHold;
 	bool UpdateStickHold(StickHold &hold, bool down, bool weaponHand);
 	void DropFromHand(bool weaponHand);
+	void SendDrop(int entityIndex);
+	bool StowRightItem(int activeWeaponId);
 	bool IsAtTwoHandSpot(bool &known) const;
 	const void *ApplyItemInHand(const void *studioHeader, const void *customBones, void *storage);
 	HandMath::Vec3 GetLeftPalm() const;
