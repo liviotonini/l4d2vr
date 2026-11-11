@@ -665,8 +665,22 @@ void VR::ProcessInput()
     UpdateGrenadeThrow();
 
     // While the left hand's item is used, its trigger is the attack, once the item is out (dual wield)
-    const bool attackTrigger = m_LeftUseActive ? PressedDigitalAction(m_ActionSecondaryAttack) && m_LeftUseWasActive && m_ActiveWeaponId == m_LeftItemId
-        : PressedDigitalAction(m_ActionPrimaryAttack);
+    const bool triggerHeld = PressedDigitalAction(m_LeftUseActive ? m_ActionSecondaryAttack : m_ActionPrimaryAttack);
+    bool attackTrigger = m_LeftUseActive ? triggerHeld && m_LeftUseWasActive && m_ActiveWeaponId == m_LeftItemId : triggerHeld;
+
+    // Pills are taken at the mouth and adrenaline stabbed into the body, with the trigger held: it only uses them there
+    if (m_ActiveWeaponId == C_WeaponCSBase::PAIN_PILLS || m_ActiveWeaponId == C_WeaponCSBase::ADRENALINE)
+    {
+        const bool ready = triggerHeld && ItemUseGestureReady(m_LeftUseActive, m_ActiveWeaponId);
+        if (ready && !m_ItemGestureReady)
+            m_Haptics.Play(m_LeftUseActive ? Haptics::Hand::OtherHand : Haptics::Hand::WeaponHand, HapticEffects::Confirm);
+        m_ItemGestureReady = ready;
+        attackTrigger = attackTrigger && ready;
+    }
+    else
+    {
+        m_ItemGestureReady = false;
+    }
     SetGameButton(GameButton_Attack, GetAttackButton(attackTrigger));
     SetGameButton(GameButton_Jump, PressedDigitalAction(m_ActionJump));
     // A grab next to something in the world presses use for a moment (TryGrabWorld)
@@ -2025,18 +2039,14 @@ int VR::GetWeaponSlot(int weaponId)
 }
 
 // Called by UpdateTracking when a grab button is pressed (and the weapon isn't being grabbed with both hands)
-void VR::UpdateBodyGrab(bool weaponHand, const Vector &handPosLocalInWorld, int weaponId)
+void VR::UpdateBodyGrab(bool weaponHand, const Vector &handPosLocalInWorld, int weaponId, const HandMath::Vec3 *fistOverride)
 {
-    // Horizontal direction the head faces: the forward vector without its height (tilting the head sideways doesn't
-    // change it). When looking almost straight up or down that's too short, so the up vector is used as well: for a head
-    // pitched by p, forward * cos(p) + up * sin(p) is level, with cos(p) = up.z and sin(p) = -forward.z.
-    Vector facing(m_HmdForward.x, m_HmdForward.y, 0.0f);
-    if (VectorLength(facing) < 0.2f)
-        facing = Vector(m_HmdForward.x * m_HmdUp.z - m_HmdUp.x * m_HmdForward.z, m_HmdForward.y * m_HmdUp.z - m_HmdUp.y * m_HmdForward.z, 0.0f);
-    VectorNormalize(facing);
+    // Horizontal direction the body faces (UpdateBodyYaw): the places on the body stay where they are when the head
+    // turns to look at them
+    const Vector facing = m_BodyFacing;
     const Vector right(facing.y, -facing.x, 0.0f);
 
-    // Where the eyes would be with the head looking straight ahead, from the neck pivot
+    // Where the eyes would be with the head turned that way and looking straight ahead, from the neck pivot
     const Vector neck = m_HmdPosLocalInWorld - m_HmdForward * (kEyeToNeckForward * m_VRScale) - m_HmdUp * (kEyeToNeckDown * m_VRScale);
     const Vector reference = neck + facing * (kEyeToNeckForward * m_VRScale) + Vector(0.0f, 0.0f, kEyeToNeckDown * m_VRScale);
 
@@ -2053,9 +2063,12 @@ void VR::UpdateBodyGrab(bool weaponHand, const Vector &handPosLocalInWorld, int 
     const float headPitchDown = RAD2DEG(asinf(std::clamp(-m_HmdForward.z, -1.0f, 1.0f)));
     const char *handName = weaponHand ? "weapon hand" : "other hand";
 
-    // The pills or the grenade on the chest. The left hand takes them into itself (dual wield), and puts them back.
+    // What's seen on the body is taken where the fist is on it, as it's drawn. The places not drawn are by the controller.
     const Vector handWorld = m_CameraAnchor - Vector(0, 0, 64) + handPosLocalInWorld;
-    if (!weaponHand && LeftHandChestGrab(HandMath::Vec3(handWorld.x, handWorld.y, handWorld.z)))
+    const HandMath::Vec3 fist = fistOverride ? *fistOverride : GetFistPoint(weaponHand);
+
+    // The pills or the grenade on the chest. The left hand takes them into itself (dual wield), and puts them back.
+    if (!weaponHand && LeftHandChestGrab(fist))
     {
         WriteBodyGrabLog("%s: chest, left hand (dual wield), holds entity %d", handName, m_LeftItemIndex);
         return;
@@ -2070,7 +2083,7 @@ void VR::UpdateBodyGrab(bool weaponHand, const Vector &handPosLocalInWorld, int 
         return;
     }
 
-    const int chestSlot = GetChestItemSlotAt(HandMath::Vec3(handWorld.x, handWorld.y, handWorld.z));
+    const int chestSlot = GetChestItemSlotAt(fist);
     if (chestSlot)
     {
         char command[16];
@@ -2084,7 +2097,7 @@ void VR::UpdateBodyGrab(bool weaponHand, const Vector &handPosLocalInWorld, int 
 
     // The pistol's place on the thigh (body_items.cpp), which follows the leg when crouching: the secondary weapon, or
     // the primary one when the secondary is in the hand
-    if (weaponHand && IsAtHolster(HandMath::Vec3(handWorld.x, handWorld.y, handWorld.z)))
+    if (weaponHand && IsAtHolster(fist))
     {
         const int slot = GetWeaponSlot(weaponId) == 2 ? 1 : 2;
         char command[16];
@@ -2228,8 +2241,11 @@ void VR::UpdateTracking()
     
     typedef std::chrono::duration<float, std::milli> duration;
     auto currentTime = std::chrono::steady_clock::now();
-    duration elapsed = currentTime - m_PrevFrameTime; 
+    duration elapsed = currentTime - m_PrevFrameTime;
     float deltaTime = elapsed.count();
+
+    // Which way the body faces, for what's on it (body_items.cpp, the ammo bag, UpdateBodyGrab)
+    UpdateBodyYaw(deltaTime / 1000.0f);
 
     m_CameraAnchor.z = m_SetupOrigin.z + m_HeightOffset;
 
@@ -2394,14 +2410,18 @@ void VR::UpdateTracking()
             float handsDistanceFor2HandWeaponOffset = 5.0f;
 
             float angleLimitFor2HandWeapon = 15.0f;
+            // The left hand takes the weapon where the weapon's animation holds it, the place it goes to once held. Only
+            // when the animation has no left hand on the weapon, at a distance along it.
+            bool twoHandSpotKnown = false;
+            const bool atTwoHandSpot = IsAtTwoHandSpot(twoHandSpotKnown);
+            const bool alongTheWeapon = handsDistanceLocalInWorldLength >= (handsDistanceFor2HandWeapon - handsDistanceFor2HandWeaponOffset)
+                && handsDistanceLocalInWorldLength <= (handsDistanceFor2HandWeapon + handsDistanceFor2HandWeaponOffset)
+                && rightControllerForward_HandsDistLocalWorld_Angle <= angleLimitFor2HandWeapon;
             if (ManualReloadHandIsBusy() || m_LeftUseActive)
             {
                 isHoldingWeapon2Handed = false;
             }
-            else if (isHoldingWeapon2Handed ||
-                (handsDistanceLocalInWorldLength >= (handsDistanceFor2HandWeapon - handsDistanceFor2HandWeaponOffset)
-                    && handsDistanceLocalInWorldLength <= (handsDistanceFor2HandWeapon + handsDistanceFor2HandWeaponOffset)
-                    && rightControllerForward_HandsDistLocalWorld_Angle <= angleLimitFor2HandWeapon))
+            else if (isHoldingWeapon2Handed || (twoHandSpotKnown ? atTwoHandSpot : alongTheWeapon))
             {
                 // The weapon pivots around the right hand so that it keeps pointing at the left hand.
                 // Only changing the forward vector (keeping the controller's up/right vectors) creates a skewed basis,

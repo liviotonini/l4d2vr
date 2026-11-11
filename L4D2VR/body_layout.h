@@ -68,4 +68,39 @@ namespace BodyLayout
 	{
 		return Vec3(spot.forward, (leftHanded ? 1.0f : -1.0f) * spot.side, -spot.below);
 	}
+
+	// Which way the body faces, degrees. Only the head is tracked: it turns up to kHeadTurnMax on its own, and the body
+	// follows it slowly while it stays turned. Looking down at the body doesn't turn it, so what's on it stays put while
+	// the head turns to see it.
+	constexpr float kHeadTurnMax = 45.0f;
+	constexpr float kBodyFollowSeconds = 1.5f;
+
+	inline float WrapDegrees(float degrees)
+	{
+		return degrees - 360.0f * floorf((degrees + 180.0f) / 360.0f);
+	}
+
+	inline float FollowBodyYaw(float bodyYaw, float headYaw, bool lookingDown, float deltaSeconds)
+	{
+		const float turned = WrapDegrees(headYaw - bodyYaw);
+		if (fabsf(turned) > kHeadTurnMax)
+			bodyYaw += turned - (turned > 0.0f ? kHeadTurnMax : -kHeadTurnMax);
+		else if (!lookingDown)
+			bodyYaw += turned * std::min(1.0f, std::clamp(deltaSeconds, 0.0f, 0.1f) / kBodyFollowSeconds);
+		return WrapDegrees(bodyYaw);
+	}
+
+	// A needle with its tip at `tip`, pointing along `needle` (unit), is against a body around the vertical line from
+	// `top` down to the height `bottomZ`: its tip within `reach` of the line and pointing at it (cosine above
+	// `minCosine`). Any units.
+	inline bool NeedleAtBody(const Vec3 &tip, const Vec3 &needle, const Vec3 &top, float bottomZ, float reach, float minCosine)
+	{
+		const float down = std::max(top.z - bottomZ, 0.0f);
+		const float along = std::clamp(top.z - tip.z, 0.0f, down);
+		const Vec3 toLine = Vec3(top.x, top.y, top.z - along) - tip;
+		const float distance = HandMath::Length(toLine);
+		if (distance >= reach)
+			return false;
+		return distance < 1e-3f || HandMath::Dot(needle, toLine * (1.0f / distance)) > minCosine;
+	}
 }

@@ -915,6 +915,12 @@ void Hooks::DrawModelForVR(void *ecx, void *state, const ModelRenderInfo_t &info
 	if (kind == ModelKind::Viewmodel && m_VR->ThrownGrenadeHasLeftTheHand())
 		return;
 
+	// The left hand's item being used: the game holds it in its weapon hand, put at the left controller. The mod draws it
+	// in the left hand instead (VR::GetLeftItemDraw), and the right hand empty (BuildFirstPersonHands). The weapon the
+	// game puts away or takes out meanwhile isn't drawn either.
+	if ((kind == ModelKind::Viewmodel || kind == ModelKind::DualPistolsViewmodel) && m_VR->m_LeftUseActive)
+		return;
+
 	// The weapon and the hand keep their pose while throwing with the arm, instead of the game's wind-up animation
 	alignas(16) unsigned char throwPose[sizeof(HandMath::Mat34) * Studio::kMaxBones];
 	if (pCustomBoneToWorld && (kind == ModelKind::Viewmodel || kind == ModelKind::FirstPersonArms))

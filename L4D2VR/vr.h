@@ -345,7 +345,26 @@ public:
 	HandMath::Vec3 m_LeftHandUp;            // thumb side
 	HandMath::Vec3 m_LeftHandWrist;
 	float m_LeftFingerCurls[HandRig::FingerCount] = { HandRig::kRelaxedCurl, HandRig::kRelaxedCurl, HandRig::kRelaxedCurl, HandRig::kRelaxedCurl, HandRig::kRelaxedCurl };
+	float m_RightFingerCurls[HandRig::FingerCount] = { HandRig::kRelaxedCurl, HandRig::kRelaxedCurl, HandRig::kRelaxedCurl, HandRig::kRelaxedCurl, HandRig::kRelaxedCurl };
 	float m_LeftHandFollow = 0.0f;          // 0 = the weapon's animation, 1 = the controller
+	// From the last time the hands were drawn (BuildFirstPersonHands): the right hand's fist (HandRig::GripFrame), and
+	// both hand bones where the weapon's animation has them, before the mod moves them
+	HandMath::Mat34 m_RightGripFrame;
+	unsigned long long m_RightGripMs = 0;
+	HandMath::Vec3 m_AnimatedHand[2];       // HandRig::Left, HandRig::Right
+	unsigned long long m_AnimatedHandsMs = 0;
+	// The needle of the adrenaline in the right hand, from the last time it was drawn (ApplyItemInHand). Its tip is this
+	// far along -y from the bone of the syringe, in both of its models (game units).
+	static constexpr float kSyringeNeedleUnits = 7.1f;
+	HandMath::Vec3 m_RightNeedleTip;
+	HandMath::Vec3 m_RightNeedleDir;
+	unsigned long long m_RightNeedleMs = 0;
+	// Which way the body faces (not the head), horizontal, world (UpdateBodyYaw)
+	float m_BodyYawLocal = 0.0f;            // degrees, in the play area, without the turning of the thumbstick
+	bool m_BodyYawValid = false;
+	Vector m_BodyFacing = { 1, 0, 0 };
+	// Pills or adrenaline in the hand that uses them are at the mouth or against the body (ItemUseGestureReady)
+	bool m_ItemGestureReady = false;
 	bool m_ViewmodelHasTwoWeapons = false;  // dual pistols shown as such, both hands are holding one
 	bool m_OnePistolDoubled = true;         // the second pistol isn't shown: one pistol that does double damage, with a mark
 	bool m_DualAsOnePistol = false;         // holding two pistols now, shown as one
@@ -389,6 +408,7 @@ public:
 		bool hasCenter = false;      // otherwise the middle of the model's hull is at the frame
 		HandMath::Vec3 center;
 		bool alignWeaponBone = false; // the model's "weapon_bone" is at the frame instead, like in a hand
+		bool syringe = false;         // the adrenaline's first person model, uncapped: its syringe held like the weapon bone
 	};
 	// A weapon the player carries
 	struct InventoryItem
@@ -418,7 +438,8 @@ public:
 	float m_ItemSpotSide[2] = { -0.13f, 0.16f };
 	float m_ItemSpotBelowEyes[2] = { 0.37f, 0.34f };
 	// The pistol's place on the thigh, follows the leg when crouching (BodyLayout::HolsterOnThigh)
-	HandMath::Vec3 m_HolsterPoint;
+	HandMath::Vec3 m_HolsterPoint;         // the grip
+	HandMath::Vec3 m_HolsterBarrel;        // where the barrel points from it
 	bool m_HolsterValid = false;
 
 	// Dual wield (dual_wield.cpp): the left hand holds a melee weapon, a grenade, pills or adrenaline. DualWield in
@@ -442,6 +463,13 @@ public:
 	unsigned long long m_LeftUseReleaseMs = 0;
 	bool m_LeftTriggerDown = false;
 	bool m_LeftSwinging = false;
+	QAngle m_LeftSwingPrevAim = { 0, 0, 0 }; // the aim sent for the swing, from the last update
+	bool m_LeftSwingAimValid = false;
+	// The right controller's own pose while its poses are the left one's (ApplyLeftUseHand), where the right hand is drawn
+	Vector m_RightRealPosAbs = { 0, 0, 0 };
+	Vector m_RightRealForwardRaw = { 1, 0, 0 };
+	Vector m_RightRealRightRaw = { 0, -1, 0 };
+	Vector m_RightRealUpRaw = { 0, 0, 1 };
 	unsigned long long m_LeftHandSentMs = 0;
 	// Changing hands: 1 right to left, -1 left to right, 2 done and waiting for the grab to be let go
 	int m_HandSwapDirection = 0;
@@ -549,7 +577,8 @@ public:
 	int GetInventory(C_BasePlayer *player, InventoryItem *items, int max);
 	const void *GetEntityModel(const void *entity);
 	int GetChestSpotAt(const HandMath::Vec3 &handWorld) const;
-	bool IsAtHolster(const HandMath::Vec3 &handWorld) const;
+	bool IsAtHolster(const HandMath::Vec3 &fist) const;
+	const void *GetSyringeModel();
 	// Dual wield (dual_wield.cpp)
 	void UpdateDualWield(C_BasePlayer *local, int activeWeaponId, float deltaSeconds);
 	void UpdateLeftUse(unsigned long long now, int activeIndex, const InventoryItem *items, int count);
@@ -562,6 +591,8 @@ public:
 	bool LeftHandChestGrab(const HandMath::Vec3 &handWorld);
 	bool LeftShoulderGrab();
 	bool GetLeftItemDraw(BodyModelDraw &draw);
+	bool LeftHandShowsItem() const;
+	QAngle GetLeftSwingAim() const;
 	bool GetLeftGripFrame(HandMath::Mat34 &frame) const;
 	HandMath::Mat34 GetLeftHandBone(const HandRig &rig) const;
 	void HoldLeftItem(const HandRig &rig, float curls[HandRig::FingerCount]);
@@ -577,6 +608,10 @@ public:
 	bool BuildRemoteItemBones(int entityIndex, const void *weapon, const void *studioHeader, void *outBones);
 	static bool IsHeldInTheHand(int weaponId);
 	bool GetRightHandTarget(const HandRig &rig, HandMath::Mat34 &hand, float backMeters = 0.0f) const;
+	HandMath::Vec3 GetFistPoint(bool weaponHand) const;
+	void UpdateBodyYaw(float deltaSeconds);
+	bool ItemUseGestureReady(bool leftHand, int weaponId);
+	bool IsAtTwoHandSpot(bool &known) const;
 	const void *ApplyItemInHand(const void *studioHeader, const void *customBones, void *storage);
 	HandMath::Vec3 GetLeftPalm() const;
 	HandMath::Mat34 GetLeftHandGrabFrame() const;
@@ -604,7 +639,7 @@ public:
 	static bool DecodeGrenadeThrow(short mousedx, short mousedy, bool &gesture, int &sequence, Vector &armVelocity);
 	static void WriteGrenadeThrowLog(const char *format, ...);
 	static int GetWeaponSlot(int weaponId);
-	void UpdateBodyGrab(bool weaponHand, const Vector &handPosLocalInWorld, int weaponId);
+	void UpdateBodyGrab(bool weaponHand, const Vector &handPosLocalInWorld, int weaponId, const HandMath::Vec3 *fistOverride = nullptr);
 	Vector GetViewAngle();
 	Vector GetViewOriginLeft();
 	Vector GetViewOriginRight();

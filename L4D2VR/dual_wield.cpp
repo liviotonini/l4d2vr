@@ -134,6 +134,14 @@ bool VR::LeftHandHoldsMelee() const
 	return LeftHandHoldsItem() && m_LeftItemId == C_WeaponCSBase::MELEE;
 }
 
+// The left hand is drawn holding its item: while it holds it, and while it's used, until a grenade leaves the hand
+bool VR::LeftHandShowsItem() const
+{
+	if (m_LeftUseActive)
+		return m_LeftItemIndex != 0 && !ThrownGrenadeHasLeftTheHand();
+	return LeftHandHoldsItem();
+}
+
 void VR::SelectWeapon(int weaponId)
 {
 	const char *name = DualWield::ClassName(weaponId);
@@ -257,7 +265,7 @@ bool VR::LeftShoulderGrab()
 // person
 bool VR::GetLeftItemDraw(BodyModelDraw &draw)
 {
-	if (!LeftHandHoldsItem() || m_LeftHandFollow < 1.0f)
+	if (!LeftHandShowsItem() || m_LeftHandFollow < 1.0f)
 		return false;
 
 	const void *entity = m_Game->GetClientEntity(m_LeftItemIndex);
@@ -270,6 +278,18 @@ bool VR::GetLeftItemDraw(BodyModelDraw &draw)
 	draw = BodyModelDraw();
 	draw.model = model;
 	draw.alignWeaponBone = true;
+
+	// The adrenaline's model has its cap on. With the trigger held, ready to be stabbed in, it's the first person one
+	// instead, which shows the needle (out by the little finger).
+	if (m_LeftItemId == C_WeaponCSBase::ADRENALINE && m_LeftUseActive && m_LeftTriggerDown)
+	{
+		if (const void *syringe = GetSyringeModel())
+		{
+			draw.model = syringe;
+			draw.alignWeaponBone = false;
+			draw.syringe = true;
+		}
+	}
 	return GetLeftGripFrame(draw.frame);
 }
 
@@ -322,6 +342,12 @@ void VR::ApplyLeftUseHand(const Vector &leftForwardRaw, const Vector &leftRightR
 {
 	if (!m_LeftUseActive)
 		return;
+
+	// Where the right hand really is, to draw it there (GetRightHandTarget)
+	m_RightRealPosAbs = m_RightControllerPosAbs;
+	m_RightRealForwardRaw = m_RightControllerForwardRaw;
+	m_RightRealRightRaw = m_RightControllerRightRaw;
+	m_RightRealUpRaw = m_RightControllerUpRaw;
 
 	m_RightControllerPosAbs = m_LeftControllerPosAbs;
 	m_RightControllerForward = m_LeftControllerForward;
@@ -499,27 +525,51 @@ void VR::UpdateLeftUse(unsigned long long now, int activeIndex, const InventoryI
 	}
 }
 
-// The left hand's melee weapon hits what it swings through: its pose goes to the server while it swings
+// The left hand's melee weapon hits what it swings through, the same way as the right hand's (Hooks::dWriteUsercmd,
+// dProcessUsercmds): while the hand moves faster than the swing speed its pose goes to the server, which traces the
+// blade from one pose to the next. Each time the hand gets slower than that, the next swing can hit the same things
+// again.
 void VR::UpdateLeftSwing(unsigned long long now)
 {
 	if (!LeftHandHoldsMelee() || m_LeftControllerDeviceIndex == vr::k_unTrackedDeviceIndexInvalid)
 	{
 		m_LeftSwinging = false;
+		m_LeftSwingAimValid = false;
 		return;
 	}
 
+	const QAngle aim = GetLeftSwingAim();
 	const bool swinging = VectorLength(m_LeftControllerPose.TrackedDeviceVel) > m_MeleeSwingVelocityRequired;
-	if (swinging && !m_LeftSwinging)
-		m_Haptics.Play(Haptics::Hand::OtherHand, HapticEffects::Hint);
+	const bool newSwing = swinging && !m_LeftSwinging;
+	const QAngle from = m_LeftSwingAimValid ? m_LeftSwingPrevAim : aim;
 	m_LeftSwinging = swinging;
+	m_LeftSwingPrevAim = aim;
+	m_LeftSwingAimValid = true;
 
-	if (!swinging || now - m_LeftHandSentMs < kLeftHandSendIntervalMs)
+	if (!swinging || (!newSwing && now - m_LeftHandSentMs < kLeftHandSendIntervalMs))
 		return;
 	m_LeftHandSentMs = now;
 
-	// The server traces 50 degrees up from the aim it gets (made for the right hand's weapons, held up from the aim).
-	// The aim sent is the blade as it's drawn (GetLeftItemDraw) turned by as much towards its edge, with "up" towards
-	// the blade, so the traces go along it.
+	char command[160];
+	if (newSwing)
+	{
+		m_Haptics.Play(Haptics::Hand::OtherHand, HapticEffects::Hint);
+		snprintf(command, sizeof(command), "l4d2vr_left_hand %.1f %.1f %.1f %.1f %.1f %.1f %d %.1f %.1f %.1f", m_LeftControllerPosAbs.x, m_LeftControllerPosAbs.y,
+			m_LeftControllerPosAbs.z, aim.x, aim.y, aim.z, DualWield::kLeftHandSwinging | DualWield::kLeftHandNewSwing, from.x, from.y, from.z);
+	}
+	else
+	{
+		snprintf(command, sizeof(command), "l4d2vr_left_hand %.1f %.1f %.1f %.1f %.1f %.1f %d", m_LeftControllerPosAbs.x, m_LeftControllerPosAbs.y,
+			m_LeftControllerPosAbs.z, aim.x, aim.y, aim.z, DualWield::kLeftHandSwinging);
+	}
+	m_Game->m_EngineClient->ServerCmd(command, false);
+}
+
+// The server traces 50 degrees up from the aim it gets (made for the right hand's weapons, held up from the aim). The
+// aim sent for the left hand is the blade as it's drawn (GetLeftItemDraw) turned by as much towards its edge, with "up"
+// towards the blade, so the traces go along it.
+QAngle VR::GetLeftSwingAim() const
+{
 	Vector forward = VectorRotate(m_LeftControllerForward, m_LeftControllerRight, -kServerMeleeTraceTilt);
 	Vector up = VectorRotate(m_LeftControllerUp, m_LeftControllerRight, -kServerMeleeTraceTilt);
 	Mat34 grip;
@@ -534,11 +584,7 @@ void VR::UpdateLeftSwing(unsigned long long now)
 	}
 	QAngle aim;
 	QAngle::VectorAngles(forward, up, aim);
-
-	char command[128];
-	snprintf(command, sizeof(command), "l4d2vr_left_hand %.1f %.1f %.1f %.1f %.1f %.1f %d", m_LeftControllerPosAbs.x, m_LeftControllerPosAbs.y, m_LeftControllerPosAbs.z,
-		aim.x, aim.y, aim.z, DualWield::kLeftHandSwinging);
-	m_Game->m_EngineClient->ServerCmd(command, false);
+	return aim;
 }
 
 // The hands together and the grab of the hand without the item held for 2 seconds: the item changes hands
@@ -704,6 +750,26 @@ void VR::DualWieldTest(const char *action)
 		return;
 	}
 
+	// hands: where the weapon's animation has the left hand, which is where it takes the weapon with both hands
+	if (strcmp(action, "hands") == 0)
+	{
+		bool known = false;
+		const bool there = IsAtTwoHandSpot(known);
+		const Vec3 span = m_AnimatedHand[HandRig::Left] - m_AnimatedHand[HandRig::Right];
+		const Vec3 forward(m_ViewmodelForward.x, m_ViewmodelForward.y, m_ViewmodelForward.z);
+		Diagnostics::Log("dual wield test: weapon %d, the animation's left hand is %.2f m from the right one (%.2f m along the weapon), %s; the left hand %s",
+			m_ActiveWeaponId, Length(span) / m_VRScale, Dot(span, forward) / m_VRScale, known ? "on the weapon" : "not on the weapon",
+			there ? "is there" : "isn't there");
+		return;
+	}
+
+	// needle: the adrenaline's first person model, for its needle
+	if (strcmp(action, "needle") == 0)
+	{
+		Diagnostics::Log("dual wield test: the adrenaline's first person model is %s", GetSyringeModel() ? "loaded" : "NOT loaded");
+		return;
+	}
+
 	// thigh: the weapon hand's grab where the pistol is on the thigh
 	if (strcmp(action, "thigh") == 0)
 	{
@@ -713,9 +779,13 @@ void VR::DualWieldTest(const char *action)
 			return;
 		}
 		const Vector feet = m_CameraAnchor - Vector(0, 0, 64);
-		Diagnostics::Log("dual wield test: thigh %.1f %.1f %.1f units from the eyes, which are %.2f m above the floor",
-			m_HolsterPoint.x - m_HmdPosAbs.x, m_HolsterPoint.y - m_HmdPosAbs.y, m_HolsterPoint.z - m_HmdPosAbs.z, m_HmdPosLocalInWorld.z / m_VRScale);
-		UpdateBodyGrab(true, Vector(m_HolsterPoint.x - feet.x, m_HolsterPoint.y - feet.y, m_HolsterPoint.z - feet.z), m_ActiveWeaponId);
+		const Vec3 fist = GetFistPoint(true);
+		Diagnostics::Log("dual wield test: thigh %.1f %.1f %.1f units from the eyes, which are %.2f m above the floor; the body faces %.0f deg, the head %.0f deg; the right fist is %.1f units from the controller",
+			m_HolsterPoint.x - m_HmdPosAbs.x, m_HolsterPoint.y - m_HmdPosAbs.y, m_HolsterPoint.z - m_HmdPosAbs.z, m_HmdPosLocalInWorld.z / m_VRScale,
+			atan2f(m_BodyFacing.y, m_BodyFacing.x) * 57.2958f, atan2f(m_HmdForward.y, m_HmdForward.x) * 57.2958f,
+			Length(fist - Vec3(m_RightControllerPosAbs.x, m_RightControllerPosAbs.y, m_RightControllerPosAbs.z)));
+		const Vec3 onPistol = m_HolsterPoint + m_HolsterBarrel * (0.05f * m_VRScale);
+		UpdateBodyGrab(true, Vector(m_HolsterPoint.x - feet.x, m_HolsterPoint.y - feet.y, m_HolsterPoint.z - feet.z), m_ActiveWeaponId, &onPistol);
 		return;
 	}
 
@@ -935,7 +1005,7 @@ void DualWield::ServerSetLeftItem(edict_t *edict, int playerIndex, int itemIndex
 		SetExtraMelee(playerIndex, vrPlayer.leftItem, itemIndex);
 }
 
-void DualWield::ServerSetLeftHand(int playerIndex, const Vector &position, const QAngle &angles, int flags)
+void DualWield::ServerSetLeftHand(int playerIndex, const Vector &position, const QAngle &angles, int flags, const QAngle *from)
 {
 	if (!g_ServerGame || !g_ServerGame->IsValidPlayerIndex(playerIndex))
 		return;
@@ -946,12 +1016,14 @@ void DualWield::ServerSetLeftHand(int playerIndex, const Vector &position, const
 	vrPlayer.leftHandAngle = angles;
 	vrPlayer.leftHandUntil = now + 250;
 
+	// Like the right hand's (Hooks::dProcessUsercmds): a swing starts again each time the hand slowed down below the
+	// swing speed, and what it hits can be hit again. Traced from where the hand was just before.
 	if (flags & kLeftHandSwinging)
 	{
-		if (now > vrPlayer.leftSwingUntil + 150)
+		if ((flags & kLeftHandNewSwing) || now > vrPlayer.leftSwingUntil + 150)
 		{
 			vrPlayer.leftSwingNew = true;
-			vrPlayer.leftSwingPrevAngle = angles;
+			vrPlayer.leftSwingPrevAngle = from ? *from : angles;
 		}
 		vrPlayer.leftSwingUntil = now + 120;
 		vrPlayer.leftSwingTraced = false;

@@ -407,11 +407,9 @@ void VR::UpdateManualReload()
 		g_ActionSoundsOff = false;
 	}
 
-	// Facing and the point the waist hangs from, without the pitch and roll of the head. Same as the items on the body.
-	Vector facing(m_HmdForward.x, m_HmdForward.y, 0.0f);
-	if (VectorLength(facing) < 0.2f)
-		facing = Vector(m_HmdForward.x * m_HmdUp.z - m_HmdUp.x * m_HmdForward.z, m_HmdForward.y * m_HmdUp.z - m_HmdUp.y * m_HmdForward.z, 0.0f);
-	VectorNormalize(facing);
+	// The way the body faces (UpdateBodyYaw) and the point the waist hangs from, without the pitch and roll of the head.
+	// Same as the items on the body.
+	const Vector facing = m_BodyFacing;
 	const Vector right(facing.y, -facing.x, 0.0f);
 
 	const float neckForward = 0.08f * m_VRScale, neckDown = 0.075f * m_VRScale;

@@ -551,16 +551,22 @@ bool PoseRelay::HandleServerCommand(edict_t *player, const void *commandObject)
 		return true;
 	}
 
-	// The left hand while it swings a melee weapon: x y z pitch yaw roll flags
+	// The left hand while it swings a melee weapon: x y z pitch yaw roll flags, and pitch yaw roll where the swing
+	// started on its first pose
 	if (strcmp(name, "l4d2vr_left_hand") == 0)
 	{
 		const int index = ServerPlayerIndex(m_Game, player);
-		if (m_Game->IsValidPlayerIndex(index) && args.Count() == 8)
+		if (m_Game->IsValidPlayerIndex(index) && (args.Count() == 8 || args.Count() == 11))
 		{
 			const Vector position((float)atof(args.Arg(1)), (float)atof(args.Arg(2)), (float)atof(args.Arg(3)));
 			const QAngle angles((float)atof(args.Arg(4)), (float)atof(args.Arg(5)), (float)atof(args.Arg(6)));
-			if (std::isfinite(position.x) && std::isfinite(position.y) && std::isfinite(position.z) && std::isfinite(angles.x) && std::isfinite(angles.y) && std::isfinite(angles.z))
-				DualWield::ServerSetLeftHand(index, position, angles, atoi(args.Arg(7)));
+			QAngle from = angles;
+			if (args.Count() == 11)
+				from = QAngle((float)atof(args.Arg(8)), (float)atof(args.Arg(9)), (float)atof(args.Arg(10)));
+			const bool finite = std::isfinite(position.x) && std::isfinite(position.y) && std::isfinite(position.z) && std::isfinite(angles.x)
+				&& std::isfinite(angles.y) && std::isfinite(angles.z) && std::isfinite(from.x) && std::isfinite(from.y) && std::isfinite(from.z);
+			if (finite)
+				DualWield::ServerSetLeftHand(index, position, angles, atoi(args.Arg(7)), &from);
 		}
 		return true;
 	}

@@ -18,6 +18,12 @@ namespace
 	const float kFollowSpeed = 8.0f;
 	const float kFingerSmoothing = 18.0f;
 	const float kHoldingMagazineCurl = 0.55f;
+	// The middle of the fist from the knuckles, towards the palm (as the left hand's, dual_wield.cpp)
+	const float kRightGripPalmMeters = 0.022f;
+	// Holding the weapon with both hands starts with the left wrist this close to where the animation has it, if the
+	// animation has it on the weapon (closer than this to the right hand)
+	const float kTwoHandGrabMeters = 0.12f;
+	const float kTwoHandSpanMeters = 0.6f;
 
 	// The pose of the weapon and the hand before the throw started, relative to the weapon's frame, per model
 	std::unordered_map<const void *, std::vector<Mat34>> g_ThrowPoses;
@@ -25,6 +31,8 @@ namespace
 	std::unordered_map<const void *, int> g_ViewmodelRightHands;
 	// The bones of the left pistol in the dual pistols model
 	std::unordered_map<const void *, std::vector<int>> g_SecondPistolBones;
+	// The syringe of the adrenaline's first person model ("weapon_clip"), -1 if none
+	std::unordered_map<const void *, int> g_ViewmodelSyringes;
 	// After the throw the hand stays as it was until the game changes weapon
 	const auto kThrownGrenadeTime = std::chrono::milliseconds(1500);
 
@@ -62,6 +70,7 @@ void VR::ClearModelCaches()
 	g_ThrowPoses.clear();
 	g_ViewmodelRightHands.clear();
 	g_SecondPistolBones.clear();
+	g_ViewmodelSyringes.clear();
 	ClearBodyModels();
 	Hooks::m_ModelKinds.clear();
 }
@@ -73,18 +82,46 @@ bool VR::IsHeldInTheHand(int weaponId)
 	return IsThrowableWeapon(weaponId) || weaponId == C_WeaponCSBase::PAIN_PILLS || weaponId == C_WeaponCSBase::ADRENALINE || weaponId == C_WeaponCSBase::FIRST_AID_KIT;
 }
 
-// The right hand bone where the controller is: the same place and angle as the left hand on its controller
+// The right hand bone where the controller is: the same place and angle as the left hand on its controller. While the
+// left hand's item is used the right controller's poses are the left one's (ApplyLeftUseHand): its own are used.
 bool VR::GetRightHandTarget(const HandRig &rig, Mat34 &hand, float backMeters) const
 {
 	if (m_RightControllerDeviceIndex == vr::k_unTrackedDeviceIndexInvalid || !m_Poses[m_RightControllerDeviceIndex].bPoseIsValid)
 		return false;
 
-	const Vector forward = VectorRotate(m_RightControllerForwardRaw, m_RightControllerRightRaw, kHandGripTilt);
-	const Vector up = VectorRotate(m_RightControllerUpRaw, m_RightControllerRightRaw, kHandGripTilt);
-	const Vector wrist = m_RightControllerPosAbs + (forward * (m_HandOffsetMeters.x - backMeters) + up * m_HandOffsetMeters.z) * m_VRScale;
+	const bool own = m_LeftUseActive;
+	const Vector &rightRaw = own ? m_RightRealRightRaw : m_RightControllerRightRaw;
+	const Vector forward = VectorRotate(own ? m_RightRealForwardRaw : m_RightControllerForwardRaw, rightRaw, kHandGripTilt);
+	const Vector up = VectorRotate(own ? m_RightRealUpRaw : m_RightControllerUpRaw, rightRaw, kHandGripTilt);
+	const Vector wrist = (own ? m_RightRealPosAbs : m_RightControllerPosAbs) + (forward * (m_HandOffsetMeters.x - backMeters) + up * m_HandOffsetMeters.z) * m_VRScale;
 
 	hand = rig.HandFromFrame(HandRig::Right, ToVec3(forward), ToVec3(up), ToVec3(wrist));
 	return IsFinite(hand);
+}
+
+// The middle of the fist of a hand, where it holds things, in the world. The right one as it was last drawn, holding the
+// weapon; otherwise from the controller, like the left hand is drawn on it: along the fingers from the wrist and a bit
+// towards the palm.
+Vec3 VR::GetFistPoint(bool weaponHand) const
+{
+	const unsigned long long now = GetTickCount64();
+	if (weaponHand && now - m_RightGripMs < 250)
+		return Origin(m_RightGripFrame);
+
+	const float fingersMeters = 0.075f, palmMeters = 0.025f;
+	if (!weaponHand)
+	{
+		const Vec3 fingers = Normalized(m_LeftHandForward);
+		const Vec3 palm = Cross(fingers, m_LeftHandUp);
+		return m_LeftHandWrist + (fingers * fingersMeters + palm * palmMeters) * m_VRScale;
+	}
+
+	const bool own = m_LeftUseActive;
+	const Vector &rightRaw = own ? m_RightRealRightRaw : m_RightControllerRightRaw;
+	const Vec3 fingers = Normalized(ToVec3(VectorRotate(own ? m_RightRealForwardRaw : m_RightControllerForwardRaw, rightRaw, kHandGripTilt)));
+	const Vec3 up = ToVec3(VectorRotate(own ? m_RightRealUpRaw : m_RightControllerUpRaw, rightRaw, kHandGripTilt));
+	const Vec3 wrist = ToVec3(own ? m_RightRealPosAbs : m_RightControllerPosAbs) + (fingers * m_HandOffsetMeters.x + up * m_HandOffsetMeters.z) * m_VRScale;
+	return wrist + (fingers * fingersMeters + Cross(up, fingers) * palmMeters) * m_VRScale;
 }
 
 // The weapon model of an item held in the fist moves with the hand, so the item stays in it (see BuildFirstPersonHands
@@ -143,6 +180,22 @@ const void *VR::ApplyItemInHand(const void *studioHeader, const void *customBone
 	Mat34 *bones = (Mat34 *)storage;
 	for (int i = 0; i < boneCount; ++i)
 		bones[i] = Multiply(move, source[i]);
+
+	// The adrenaline's needle, to stab it into the body (ItemUseGestureReady): the syringe is the "weapon_clip" bone, the
+	// needle at its end along -y
+	if (m_ActiveWeaponId == C_WeaponCSBase::ADRENALINE)
+	{
+		auto syringe = g_ViewmodelSyringes.find(studioHeader);
+		if (syringe == g_ViewmodelSyringes.end())
+			syringe = g_ViewmodelSyringes.emplace(studioHeader, Studio::FindBone(studioHeader, "ValveBiped.weapon_clip")).first;
+		if (syringe->second >= 0 && syringe->second < boneCount)
+		{
+			const Mat34 &clip = bones[syringe->second];
+			m_RightNeedleDir = Normalized(Axis(clip, 1)) * -1.0f;
+			m_RightNeedleTip = Origin(clip) + m_RightNeedleDir * kSyringeNeedleUnits;
+			m_RightNeedleMs = GetTickCount64();
+		}
+	}
 	return bones;
 }
 
@@ -161,14 +214,28 @@ bool VR::WantsLeftHandOnController() const
 	if (m_LeftControllerDeviceIndex == vr::k_unTrackedDeviceIndexInvalid || !m_Poses[m_LeftControllerDeviceIndex].bPoseIsValid)
 		return false;
 
-	// Holding its own item (dual wield)
-	if (LeftHandHoldsItem())
+	// Holding its own item (dual wield), and using it: still there once a grenade has left it
+	if (LeftHandShowsItem() || m_LeftUseActive)
 		return true;
 
 	if (isHoldingWeapon2Handed || m_ViewmodelHasTwoWeapons || NeedsBothHands(m_ActiveWeaponId))
 		return false;
 
 	return !IsWeaponReloading();
+}
+
+// The left hand is where the weapon's animation holds the weapon with it (BuildFirstPersonHands), which is where the
+// hand goes once the weapon is held with both hands. `known` is false when the animation has no left hand on the weapon.
+bool VR::IsAtTwoHandSpot(bool &known) const
+{
+	known = false;
+	if (GetTickCount64() - m_AnimatedHandsMs > 250)
+		return false;
+	const Vec3 &spot = m_AnimatedHand[HandRig::Left];
+	if (Length(spot - m_AnimatedHand[HandRig::Right]) > kTwoHandSpanMeters * m_VRScale)
+		return false;
+	known = true;
+	return Length(m_LeftHandWrist - spot) < kTwoHandGrabMeters * m_VRScale;
 }
 
 bool VR::ThrownGrenadeHasLeftTheHand() const
@@ -238,19 +305,23 @@ void VR::UpdateHands(float deltaSeconds)
 		+ (forward * m_HandOffsetMeters.x + right * m_HandOffsetMeters.y + up * m_HandOffsetMeters.z) * m_VRScale;
 
 	// Fingers. SteamVR gives how closed each one is, from the sensors of the controller.
-	vr::VRActionHandle_t skeleton = m_LeftHanded ? m_ActionSkeletonRight : m_ActionSkeletonLeft;
-	vr::VRSkeletalSummaryData_t summary;
-	if (skeleton != vr::k_ulInvalidActionHandle
-		&& m_Input->GetSkeletalSummaryData(skeleton, vr::VRSummaryType_FromDevice, &summary) == vr::VRInputError_None)
+	const float blend = std::min(kFingerSmoothing * deltaSeconds, 1.0f);
+	auto readFingers = [&](vr::VRActionHandle_t skeleton, float curls[HandRig::FingerCount])
 	{
-		const float blend = std::min(kFingerSmoothing * deltaSeconds, 1.0f);
+		vr::VRSkeletalSummaryData_t summary;
+		if (skeleton == vr::k_ulInvalidActionHandle || m_Input->GetSkeletalSummaryData(skeleton, vr::VRSummaryType_FromDevice, &summary) != vr::VRInputError_None)
+			return;
 		for (int finger = 0; finger < HandRig::FingerCount; ++finger)
 		{
 			// A resting finger still has a natural bend
 			const float wanted = std::clamp(summary.flFingerCurl[finger], 0.0f, 1.0f);
-			m_LeftFingerCurls[finger] += (wanted - m_LeftFingerCurls[finger]) * blend;
+			curls[finger] += (wanted - curls[finger]) * blend;
 		}
-	}
+	};
+	readFingers(m_LeftHanded ? m_ActionSkeletonRight : m_ActionSkeletonLeft, m_LeftFingerCurls);
+	// The right hand's own fingers are only shown while it's empty, as the left hand's item is used
+	if (m_LeftUseActive)
+		readFingers(m_LeftHanded ? m_ActionSkeletonLeft : m_ActionSkeletonRight, m_RightFingerCurls);
 }
 
 // Writes the bones to draw the first person arms with: only the hands are visible, and the left one follows the
@@ -281,11 +352,25 @@ bool VR::BuildFirstPersonHands(const void *studioHeader, const void *customBones
 	Mat34 *bones = (Mat34 *)outBones;
 	memcpy(bones, customBones, boneCount * sizeof(Mat34));
 
+	// Where the weapon's animation has the hands: the left one on the weapon is where it holds it with both hands
+	// (IsAtTwoHandSpot)
+	m_AnimatedHand[HandRig::Left] = Origin(bones[rig.HandBone(HandRig::Left)]);
+	m_AnimatedHand[HandRig::Right] = Origin(bones[rig.HandBone(HandRig::Right)]);
+	m_AnimatedHandsMs = GetTickCount64();
+
 	// Melee weapons are placed on the controller (see meleeViewmodelOffsets), so the hand has to be there too. The
 	// animation has the hand somewhere else on the handle for each weapon.
 	// Items held in the fist go to the controller with the hand, keeping the fingers of the animation (ApplyItemInHand).
+	// While the left hand's item is used, the game's weapon hand is at the left controller (ApplyLeftUseHand) and the
+	// weapon isn't drawn (Hooks::DrawModelForVR): the left hand holds the item as before, and the right hand is on its own
+	// controller, empty.
 	Mat34 rightHand;
-	if (m_Game->m_IsMeleeWeaponActive && GetRightHandTarget(rig, rightHand, m_MeleeHandBackMeters))
+	if (m_LeftUseActive)
+	{
+		if (GetRightHandTarget(rig, rightHand))
+			rig.PoseHand(HandRig::Right, rightHand, m_RightFingerCurls, bones);
+	}
+	else if (m_Game->m_IsMeleeWeaponActive && GetRightHandTarget(rig, rightHand, m_MeleeHandBackMeters))
 	{
 		// The hand keeps the grip of the animation, with its fingers around the handle, and only slides along the handle
 		// to where the hand really is
@@ -318,7 +403,7 @@ bool VR::BuildFirstPersonHands(const void *studioHeader, const void *customBones
 		}
 
 		// Holding its own item (dual wield): closed around it
-		const bool holdsItem = LeftHandHoldsItem();
+		const bool holdsItem = LeftHandShowsItem();
 		if (holdsItem)
 			HoldLeftItem(rig, curls);
 
@@ -343,9 +428,13 @@ bool VR::BuildFirstPersonHands(const void *studioHeader, const void *customBones
 		}
 	}
 
-	// Using the left hand's item: the game's weapon hand is at the left controller (ApplyLeftUseHand) and holds it
-	if (m_LeftUseActive)
-		rig.CollapseHand(HandRig::Left, bones);
+	// The right fist, to take what's on the body where it's seen (GetFistPoint)
+	const Mat34 rightGrip = rig.GripFrame(HandRig::Right, bones, kRightGripPalmMeters * m_VRScale);
+	if (IsFinite(rightGrip))
+	{
+		m_RightGripFrame = rightGrip;
+		m_RightGripMs = GetTickCount64();
+	}
 
 	rig.CollapseArm(HandRig::Left, bones);
 	rig.CollapseArm(HandRig::Right, bones);

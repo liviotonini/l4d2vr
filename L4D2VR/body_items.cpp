@@ -193,8 +193,9 @@ namespace
 		{ "models/w_models/weapons/w_eq_molotov.mdl", nullptr, false, false },
 		{ "models/w_models/weapons/w_eq_pipebomb.mdl", nullptr, false, false },
 		{ "models/w_models/weapons/w_eq_bile_flask.mdl", nullptr, false, false },
+		{ "models/v_models/v_adrenaline.mdl", nullptr, false, true },
 	};
-	enum { Model_Pouch, Model_Bag, Model_BagOther, Model_Pills, Model_Adrenaline, Model_Molotov, Model_PipeBomb, Model_BileJar };
+	enum { Model_Pouch, Model_Bag, Model_BagOther, Model_Pills, Model_Adrenaline, Model_Molotov, Model_PipeBomb, Model_BileJar, Model_AdrenalineView };
 
 	// The game has no ammo pouch: its small backpack, reduced to the size of one, with its back against the hip
 	const float kPouchScale = 0.36f;
@@ -267,22 +268,41 @@ namespace
 	// Where the pills and the grenade go: m_ItemSpot* (config.txt), BodyLayout::DefaultItemSpot
 	const float kChestGrabRadius = 0.12f; // meters
 	const float kChestViewCosine = 0.2f;
-	// The weapon hand takes the secondary weapon this close to the pistol's place on the thigh, whether it's there or not
-	const float kHolsterGrabRadius = 0.16f; // meters
+	// The weapon hand's fist takes the secondary weapon this close to the pistol on the thigh, from its grip to the end of
+	// its barrel, whether it's there or not
+	const float kHolsterGrabRadius = 0.12f; // meters
+	const float kHolsterLengthMeters = 0.18f; // the pistol's models go 7.6 units along the barrel from the grip, 9.9 the magnum's
+
+	// Using pills and adrenaline (VR::ItemUseGestureReady), meters. The mouth from the eyes, and how close the fist with
+	// the pills gets to it.
+	const float kMouthBelowEyes = 0.08f;
+	const float kMouthForward = 0.02f;
+	const float kMouthReach = 0.15f;
+	// The body for the needle: a vertical line from the chest down to the thighs, a bit behind the eyes, and how close
+	// to it the tip gets, pointing at it (cosine)
+	const float kChestBelowEyes = 0.25f;
+	const float kBodyLineForward = -0.05f;
+	const float kBodyReach = 0.24f;
+	const float kNeedleTowardsBody = 0.3f;
 
 	// The fist of another player's left hand from the wrist they send, meters: along the fingers, towards the palm
 	const float kRemoteFistForward = 0.075f;
 	const float kRemoteFistPalm = 0.025f;
 
-	// The place the body items are measured from: where the eyes would be with the head looking straight ahead (the
-	// head turns around the neck), facing where the head faces horizontally. x forward, y left, z up.
-	Mat34 BodyFrame(const Vec3 &head, const Vec3 &headForward, const Vec3 &headUp, float unitsPerMeter)
+	// Where the head faces horizontally. When looking almost straight up or down the forward vector is too short, so the
+	// up vector is used as well: for a head pitched by p, forward * cos(p) + up * sin(p) is level.
+	Vec3 HeadFacing(const Vec3 &headForward, const Vec3 &headUp)
 	{
 		Vec3 facing(headForward.x, headForward.y, 0.0f);
 		if (Length(facing) < 0.2f)
 			facing = Vec3(headForward.x * headUp.z - headUp.x * headForward.z, headForward.y * headUp.z - headUp.y * headForward.z, 0.0f);
-		facing = Normalized(facing);
+		return Normalized(facing);
+	}
 
+	// The place the body items are measured from: where the eyes would be with the head turned the way the body faces
+	// and looking straight ahead (the head turns around the neck), facing that way. x forward, y left, z up.
+	Mat34 BodyFrame(const Vec3 &head, const Vec3 &headForward, const Vec3 &headUp, const Vec3 &facing, float unitsPerMeter)
+	{
 		const float neckForward = 0.08f * unitsPerMeter, neckDown = 0.075f * unitsPerMeter;
 		const Vec3 neck = head - headForward * neckForward - headUp * neckDown;
 		const Vec3 reference = neck + facing * neckForward + Vec3(0.0f, 0.0f, neckDown);
@@ -405,7 +425,8 @@ void VR::UpdateBodyItems()
 			m_ChestItemIds[spot] = weaponId;
 	}
 
-	const Mat34 body = BodyFrame(ToVec3(m_HmdPosAbs), ToVec3(m_HmdForward), ToVec3(m_HmdUp), m_VRScale);
+	// Turned the way the body faces, so what's on it stays where it is when the head turns to look at it
+	const Mat34 body = BodyFrame(ToVec3(m_HmdPosAbs), ToVec3(m_HmdForward), ToVec3(m_HmdUp), ToVec3(m_BodyFacing), m_VRScale);
 	Vec3 spotOffsets[2];
 	for (int spot = 0; spot < 2; ++spot)
 	{
@@ -420,6 +441,7 @@ void VR::UpdateBodyItems()
 	const float floorZ = m_HmdPosAbs.z - m_HmdPosLocalInWorld.z;
 	const BodyLayout::Holster holster = BodyLayout::HolsterOnThigh(m_PlayerHeightInMeters, (Origin(body).z - floorZ) / m_VRScale, m_LeftHanded);
 	m_HolsterPoint = TransformPoint(body, holster.point * m_VRScale);
+	m_HolsterBarrel = RotateVector(body, holster.barrel);
 	m_HolsterValid = true;
 
 	// The left hand's item
@@ -445,10 +467,10 @@ void VR::UpdateBodyItems()
 		const bool inView = Dot(Normalized(m_HolsterPoint - ToVec3(m_HmdPosAbs)), ToVec3(m_HmdForward)) > kChestViewCosine;
 		if (model && inView)
 		{
-			const Vec3 slide = RotateVector(body, holster.slide), barrel = RotateVector(body, holster.barrel);
+			const Vec3 slide = RotateVector(body, holster.slide);
 			BodyModelDraw draw;
 			draw.model = model;
-			draw.frame = FromAxes(Cross(slide, barrel), slide, barrel, m_HolsterPoint);
+			draw.frame = FromAxes(Cross(slide, m_HolsterBarrel), slide, m_HolsterBarrel, m_HolsterPoint);
 			draw.alignWeaponBone = true;
 			m_BodyDraws[m_BodyDrawCount++] = draw;
 		}
@@ -507,10 +529,78 @@ int VR::GetChestSpotAt(const Vec3 &handWorld) const
 	return -1;
 }
 
-// The hand is where the pistol goes on the thigh, with or without it
-bool VR::IsAtHolster(const Vec3 &handWorld) const
+// The fist is on the pistol on the thigh, with or without it there: anywhere from its grip to the end of the barrel
+bool VR::IsAtHolster(const Vec3 &fist) const
 {
-	return m_HolsterValid && Length(handWorld - m_HolsterPoint) < kHolsterGrabRadius * m_VRScale;
+	if (!m_HolsterValid)
+		return false;
+	const float along = std::clamp(Dot(fist - m_HolsterPoint, m_HolsterBarrel), 0.0f, kHolsterLengthMeters * m_VRScale);
+	return Length(fist - (m_HolsterPoint + m_HolsterBarrel * along)) < kHolsterGrabRadius * m_VRScale;
+}
+
+const void *VR::GetSyringeModel()
+{
+	return GetModel(m_Game, Model_AdrenalineView);
+}
+
+// Pills are taken by bringing them to the mouth, adrenaline by stabbing its needle into the body: true while the item in
+// the hand that uses it is there (the trigger only uses them then, ProcessInput)
+bool VR::ItemUseGestureReady(bool leftHand, int weaponId)
+{
+	const Vec3 head = ToVec3(m_HmdPosAbs), headForward = ToVec3(m_HmdForward), headUp = ToVec3(m_HmdUp);
+	Mat34 grip;
+	const bool leftGrip = leftHand && GetLeftGripFrame(grip);
+
+	if (weaponId == C_WeaponCSBase::PAIN_PILLS)
+	{
+		const Vec3 mouth = head + (headUp * -kMouthBelowEyes + headForward * kMouthForward) * m_VRScale;
+		const Vec3 fist = leftGrip ? Origin(grip) : GetFistPoint(!leftHand);
+		return Length(fist - mouth) < kMouthReach * m_VRScale;
+	}
+
+	if (weaponId != C_WeaponCSBase::ADRENALINE)
+		return false;
+
+	// The needle comes out of the fist by the little finger, in both hands
+	Vec3 tip, needle;
+	if (leftGrip)
+	{
+		needle = Normalized(Axis(grip, 1)) * -1.0f;
+		tip = Origin(grip) + needle * kSyringeNeedleUnits;
+	}
+	else if (!leftHand && GetTickCount64() - m_RightNeedleMs < 250)
+	{
+		tip = m_RightNeedleTip;
+		needle = m_RightNeedleDir;
+	}
+	else
+	{
+		return false;
+	}
+
+	// The body: a line from the chest down to the thighs (where the pistol is, which follows crouching), under the neck
+	const Mat34 body = BodyFrame(head, headForward, headUp, ToVec3(m_BodyFacing), m_VRScale);
+	const Vec3 top = TransformPoint(body, Vec3(kBodyLineForward, 0.0f, -kChestBelowEyes) * m_VRScale);
+	const float bottomZ = m_HolsterValid ? m_HolsterPoint.z : top.z - 0.5f * m_VRScale;
+	return BodyLayout::NeedleAtBody(tip, needle, top, bottomZ, kBodyReach * m_VRScale, kNeedleTowardsBody);
+}
+
+// Which way the body faces (BodyLayout::FollowBodyYaw), in the play area: the thumbstick turns it with the head
+void VR::UpdateBodyYaw(float deltaSeconds)
+{
+	const float kLookingDown = -0.55f; // forward.z, about 33 degrees down
+
+	const Vec3 facing = HeadFacing(ToVec3(m_HmdForward), ToVec3(m_HmdUp));
+	const float headYaw = atan2f(facing.y, facing.x) * 180.0f / 3.14159265f - m_RotationOffset;
+	if (!m_BodyYawValid)
+	{
+		m_BodyYawLocal = headYaw;
+		m_BodyYawValid = true;
+	}
+	m_BodyYawLocal = BodyLayout::FollowBodyYaw(m_BodyYawLocal, headYaw, m_HmdForward.z < kLookingDown, deltaSeconds);
+
+	const float radians = (m_BodyYawLocal + m_RotationOffset) * 3.14159265f / 180.0f;
+	m_BodyFacing = Vector(cosf(radians), sinf(radians), 0.0f);
 }
 
 // The weapons a player carries. Returns how many were written.
@@ -567,6 +657,27 @@ namespace
 		s_Found[studioHeader] = bone;
 		return bone;
 	}
+
+	// The adrenaline's first person model: the syringe is "weapon_clip", centered on its y axis like the weapon bone of
+	// the capped one, and the pieces of the cap are "weapon_bolt" and "weapon_trigger"
+	struct SyringeBones
+	{
+		int syringe = -1, capPieces[2] = { -1, -1 };
+	};
+
+	const SyringeBones &SyringeBonesOf(const void *studioHeader)
+	{
+		static std::unordered_map<const void *, SyringeBones> s_Found;
+		auto found = s_Found.find(studioHeader);
+		if (found != s_Found.end())
+			return found->second;
+
+		SyringeBones bones;
+		bones.syringe = Studio::FindBone(studioHeader, "ValveBiped.weapon_clip");
+		bones.capPieces[0] = Studio::FindBone(studioHeader, "ValveBiped.weapon_bolt");
+		bones.capPieces[1] = Studio::FindBone(studioHeader, "ValveBiped.weapon_trigger");
+		return s_Found.emplace(studioHeader, bones).first->second;
+	}
 }
 
 // The bones of an item drawn on the body: the model as it was made, its center at the frame, at its scale
@@ -576,12 +687,21 @@ void VR::BuildBodyModelBones(const void *studioHeader, const BodyModelDraw &draw
 	const int boneCount = std::clamp(Studio::BoneCount(studioHeader), 0, Studio::kMaxBones);
 
 	// Held: the bone the model is held by goes where the hand holds it
-	const int weaponBone = draw.alignWeaponBone ? WeaponBoneOf(studioHeader) : -1;
-	if (weaponBone >= 0 && weaponBone < boneCount)
+	const SyringeBones *syringe = draw.syringe ? &SyringeBonesOf(studioHeader) : nullptr;
+	const int heldBone = syringe ? syringe->syringe : draw.alignWeaponBone ? WeaponBoneOf(studioHeader) : -1;
+	if (heldBone >= 0 && heldBone < boneCount)
 	{
-		const Mat34 placed = Multiply(draw.frame, Studio::PoseToBone(studioHeader, weaponBone));
+		const Mat34 placed = Multiply(draw.frame, Studio::PoseToBone(studioHeader, heldBone));
 		for (int i = 0; i < boneCount; ++i)
 			bones[i] = Multiply(placed, InvertRigid(Studio::PoseToBone(studioHeader, i)));
+		if (syringe)
+		{
+			for (int piece : syringe->capPieces)
+			{
+				if (piece >= 0 && piece < boneCount)
+					bones[piece] = CollapsedAt(Origin(draw.frame));
+			}
+		}
 		return;
 	}
 
@@ -654,7 +774,7 @@ bool VR::BuildRemoteItemBones(int entityIndex, const void *weapon, const void *s
 		if (!m_Game->m_PoseRelay->GetPose(player, pose))
 			return false;
 
-		const Mat34 body = BodyFrame(pose.head.position + m_RemoteHeadOffset[player], pose.head.forward, pose.head.up, m_VRScale);
+		const Mat34 body = BodyFrame(pose.head.position + m_RemoteHeadOffset[player], pose.head.forward, pose.head.up, HeadFacing(pose.head.forward, pose.head.up), m_VRScale);
 		BodyModelDraw draw;
 		// Where they are by default for someone of 1.8 m: their own settings aren't sent
 		draw.frame = ChestItemFrame(body, BodyLayout::ItemSpotOffset(BodyLayout::DefaultItemSpot(spot, 1.8f), false), weaponId, m_VRScale);

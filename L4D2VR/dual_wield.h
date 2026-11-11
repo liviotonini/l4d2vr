@@ -36,11 +36,15 @@ namespace DualWield
 	void ServerAfterUsercmds(edict_t *edict, void *player, int playerIndex);
 	// Commands from the player (PoseRelay::HandleServerCommand)
 	void ServerSetLeftItem(edict_t *edict, int playerIndex, int itemIndex);
-	void ServerSetLeftHand(int playerIndex, const Vector &position, const QAngle &angles, int flags);
+	// `from`: where the swing started, with kLeftHandNewSwing
+	void ServerSetLeftHand(int playerIndex, const Vector &position, const QAngle &angles, int flags, const QAngle *from);
 
 	// Flags of l4d2vr_left_hand
 	constexpr int kLeftHandSwinging = 1;
 	constexpr int kLeftHandUsing = 2;
+	// The first pose of a swing: the hand was slower than the swing speed just before, like a usercmd of the right
+	// hand without the swing flag. Comes with the angles of the hand from just before.
+	constexpr int kLeftHandNewSwing = 4;
 
 	// --- Client
 	// The local player's melee weapon in the extra slot (entity index, 0 if none), kept by VR::UpdateDualWield

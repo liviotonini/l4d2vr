@@ -82,6 +82,55 @@ namespace
 		// Lower for shorter players
 		CHECK(ItemSpotOffset(DefaultItemSpot(0, 1.6f), false).z > pills.z);
 	}
+
+	void TestBodyYaw()
+	{
+		// A small turn of the head: the body follows slowly, not at once
+		float body = FollowBodyYaw(0.0f, 30.0f, false, 0.011f);
+		CHECK(body > 0.0f && body < 1.0f);
+		// Staying turned, it catches up in a few seconds
+		for (int frame = 0; frame < 90 * 8; ++frame)
+			body = FollowBodyYaw(body, 30.0f, false, 0.011f);
+		CHECK_NEAR(body, 30.0f, 1.0f);
+
+		// Looking down at the body, the head turns on its own: what's on the body stays put
+		body = 0.0f;
+		for (int frame = 0; frame < 90 * 5; ++frame)
+			body = FollowBodyYaw(body, 40.0f, true, 0.011f);
+		CHECK_NEAR(body, 0.0f, 0.001f);
+
+		// More than 45 degrees, the body turns too, at once, and keeps the head within 45 of it
+		CHECK_NEAR(FollowBodyYaw(0.0f, 100.0f, true, 0.011f), 55.0f, 0.001f);
+		CHECK_NEAR(FollowBodyYaw(0.0f, -100.0f, true, 0.011f), -55.0f, 0.001f);
+
+		// Across -180/180 it takes the short way
+		CHECK_NEAR(FollowBodyYaw(170.0f, -130.0f, true, 0.011f), -175.0f, 0.001f);
+		body = FollowBodyYaw(170.0f, -170.0f, false, 1.0f);
+		CHECK(body > 170.0f || body < -170.0f);
+
+		// A long pause between frames doesn't make it jump
+		CHECK(fabsf(FollowBodyYaw(0.0f, 30.0f, false, 5.0f)) < 3.0f);
+	}
+
+	void TestNeedle()
+	{
+		// The body: a line from (0, 0, 0) down to z = -10, units. The needle 3 units in front of its middle.
+		const Vec3 top(0.0f, 0.0f, 0.0f);
+		const Vec3 tip(3.0f, 0.0f, -5.0f);
+		CHECK(NeedleAtBody(tip, Vec3(-1.0f, 0.0f, 0.0f), top, -10.0f, 5.0f, 0.3f));
+		// Pointing away, or along the body, it isn't stuck in
+		CHECK(!NeedleAtBody(tip, Vec3(1.0f, 0.0f, 0.0f), top, -10.0f, 5.0f, 0.3f));
+		CHECK(!NeedleAtBody(tip, Vec3(0.0f, 0.0f, -1.0f), top, -10.0f, 5.0f, 0.3f));
+		// Pointing at it a bit down, like into the thigh: yes
+		CHECK(NeedleAtBody(tip, Normalized(Vec3(-1.0f, 0.0f, -0.8f)), top, -10.0f, 5.0f, 0.3f));
+		// Too far
+		CHECK(!NeedleAtBody(Vec3(6.0f, 0.0f, -5.0f), Vec3(-1.0f, 0.0f, 0.0f), top, -10.0f, 5.0f, 0.3f));
+		// Above the chest or below the thighs, measured from the ends of the line
+		CHECK(NeedleAtBody(Vec3(0.0f, 2.0f, 2.0f), Normalized(Vec3(0.0f, -1.0f, -1.0f)), top, -10.0f, 5.0f, 0.3f));
+		CHECK(!NeedleAtBody(Vec3(3.0f, 0.0f, -16.0f), Vec3(-1.0f, 0.0f, 0.0f), top, -10.0f, 5.0f, 0.3f));
+		// The bottom above the top (crouched far down): the chest is still there
+		CHECK(NeedleAtBody(Vec3(3.0f, 0.0f, 0.0f), Vec3(-1.0f, 0.0f, 0.0f), top, 2.0f, 5.0f, 0.3f));
+	}
 }
 
 void RunBodyTests()
@@ -90,4 +139,6 @@ void RunBodyTests()
 	TestHolsterStanding();
 	TestHolsterCrouching();
 	TestItemSpots();
+	TestBodyYaw();
+	TestNeedle();
 }
