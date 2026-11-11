@@ -667,20 +667,8 @@ void VR::ProcessInput()
     // While the left hand's item is used, its trigger is the attack, once the item is out (dual wield)
     const bool triggerHeld = PressedDigitalAction(m_LeftUseActive ? m_ActionSecondaryAttack : m_ActionPrimaryAttack);
     bool attackTrigger = m_LeftUseActive ? triggerHeld && m_LeftUseWasActive && m_ActiveWeaponId == m_LeftItemId : triggerHeld;
-
-    // Pills are taken at the mouth and adrenaline stabbed into the body, with the trigger held: it only uses them there
-    if (m_ActiveWeaponId == C_WeaponCSBase::PAIN_PILLS || m_ActiveWeaponId == C_WeaponCSBase::ADRENALINE)
-    {
-        const bool ready = triggerHeld && ItemUseGestureReady(m_LeftUseActive, m_ActiveWeaponId);
-        if (ready && !m_ItemGestureReady)
-            m_Haptics.Play(m_LeftUseActive ? Haptics::Hand::OtherHand : Haptics::Hand::WeaponHand, HapticEffects::Confirm);
-        m_ItemGestureReady = ready;
-        attackTrigger = attackTrigger && ready;
-    }
-    else
-    {
-        m_ItemGestureReady = false;
-    }
+    if (!UpdateItemUse())
+        attackTrigger = false;
     SetGameButton(GameButton_Attack, GetAttackButton(attackTrigger));
     SetGameButton(GameButton_Jump, PressedDigitalAction(m_ActionJump));
     // A grab next to something in the world presses use for a moment (TryGrabWorld)
@@ -761,7 +749,9 @@ void VR::ProcessInput()
 
     SetGameButton(GameButton_Duck, isSendingCrouchCommand || m_IsPlayerCrouched);
 
-    if (PressedDigitalAction(m_ActionFlashlight, true))
+    // The thumbstick clicks: a short click turns the flashlight on or off (right) or changes the walking speed (left),
+    // once let go; held for 3 seconds it drops what that hand holds instead (UpdateStickHold)
+    if (UpdateStickHold(m_RightStickHold, PressedDigitalAction(m_ActionFlashlight), true))
     {
         m_Game->ClientCmd_Unrestricted("impulse 100");
     }
@@ -771,25 +761,10 @@ void VR::ProcessInput()
         m_Game->ClientCmd_Unrestricted("impulse 201");
     }
 
-    if (PressedDigitalAction(m_ToggleWalkSpeed))
+    if (UpdateStickHold(m_LeftStickHold, PressedDigitalAction(m_ToggleWalkSpeed), false))
     {
-        if (isPressingToggleWalkSpeed == false)
-        {
-            isWalkingSlowly = !isWalkingSlowly;
-            if (isWalkingSlowly)
-            {
-                m_Game->ClientCmd_Unrestricted("+speed");
-            }
-            else
-            {
-                m_Game->ClientCmd_Unrestricted("-speed");
-            }
-            isPressingToggleWalkSpeed = true;
-        }
-    }
-    else 
-    {
-        isPressingToggleWalkSpeed = false;
+        isWalkingSlowly = !isWalkingSlowly;
+        m_Game->ClientCmd_Unrestricted(isWalkingSlowly ? "+speed" : "-speed");
     }
     
     bool isControllerVertical = m_RightControllerAngAbs.x > 60 || m_RightControllerAngAbs.x < -45;

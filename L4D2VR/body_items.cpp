@@ -310,15 +310,37 @@ namespace
 		return FromAxes(facing, Cross(up, facing), up, reference);
 	}
 
-	// An item standing upright on the body, facing forward, `offset` meters away in the body frame. The adrenaline's
-	// model lies along its y axis.
+	// An item standing upright on the body, facing forward, `offset` meters away in the body frame. Each model is long
+	// along its own axis, as drawn without animation (their vertices, not their hulls, which are turned for some): the
+	// pills, the molotov and the pipe bomb along z, the bile jar along y, the adrenaline along x, its needle at +x.
 	Mat34 ChestItemFrame(const Mat34 &body, const Vec3 &offset, int weaponId, float unitsPerMeter)
 	{
 		const Vec3 point = TransformPoint(body, offset * unitsPerMeter);
-		const Vec3 forward = Axis(body, 0), up(0.0f, 0.0f, 1.0f);
-		if (weaponId == C_WeaponCSBase::ADRENALINE)
+		const Vec3 forward = Axis(body, 0), up(0.0f, 0.0f, 1.0f), left = Cross(up, forward);
+		switch (weaponId)
+		{
+		case C_WeaponCSBase::VOMITJAR:
 			return FromAxes(forward, up, Cross(forward, up), point);
-		return FromAxes(forward, Cross(up, forward), up, point);
+		case C_WeaponCSBase::ADRENALINE:
+			// The needle down, like in a pocket
+			return FromAxes(up * -1.0f, left, forward, point);
+		default:
+			return FromAxes(forward, left, up, point);
+		}
+	}
+
+	// The middle of each model's vertices, put at the item's place
+	Vec3 ChestItemCenter(int weaponId)
+	{
+		switch (weaponId)
+		{
+		case C_WeaponCSBase::PAIN_PILLS: return Vec3(0.0f, -0.1f, 3.0f);
+		case C_WeaponCSBase::ADRENALINE: return Vec3(1.4f, 0.0f, 0.8f);
+		case C_WeaponCSBase::MOLOTOV: return Vec3(0.6f, 0.0f, 1.9f);
+		case C_WeaponCSBase::PIPE_BOMB: return Vec3(0.35f, -0.1f, 1.45f);
+		case C_WeaponCSBase::VOMITJAR: return Vec3(-0.1f, 0.55f, 0.0f);
+		default: return Vec3();
+		}
 	}
 
 	template <typename T>
@@ -472,6 +494,7 @@ void VR::UpdateBodyItems()
 			draw.model = model;
 			draw.frame = FromAxes(Cross(slide, m_HolsterBarrel), slide, m_HolsterBarrel, m_HolsterPoint);
 			draw.alignWeaponBone = true;
+			draw.onePistol = true; // two pistols are one on the thigh
 			m_BodyDraws[m_BodyDrawCount++] = draw;
 		}
 		break;
@@ -493,6 +516,8 @@ void VR::UpdateBodyItems()
 			draw.model = model;
 			draw.frame = frame;
 			draw.scale = m_SmallBodyItems ? kChestItemSmallScale : 1.0f;
+			draw.hasCenter = true;
+			draw.center = ChestItemCenter(weaponId);
 			m_BodyDraws[m_BodyDrawCount++] = draw;
 		}
 	}
@@ -583,6 +608,54 @@ bool VR::ItemUseGestureReady(bool leftHand, int weaponId)
 	const Vec3 top = TransformPoint(body, Vec3(kBodyLineForward, 0.0f, -kChestBelowEyes) * m_VRScale);
 	const float bottomZ = m_HolsterValid ? m_HolsterPoint.z : top.z - 0.5f * m_VRScale;
 	return BodyLayout::NeedleAtBody(tip, needle, top, bottomZ, kBodyReach * m_VRScale, kNeedleTowardsBody);
+}
+
+// Pills are taken by bringing them to the mouth and adrenaline by stabbing it into the body, with the trigger of the hand
+// that holds them pressed. With the mod on the host they're used right there, without the game's animation, from either
+// hand (DualWield::ServerUseItem); otherwise the right trigger only attacks there. False while the right trigger
+// mustn't attack.
+bool VR::UpdateItemUse()
+{
+	const bool hostHasMod = m_Game->m_PoseRelay->IsServerCapable();
+	auto usedAtBody = [](int weaponId) { return weaponId == C_WeaponCSBase::PAIN_PILLS || weaponId == C_WeaponCSBase::ADRENALINE; };
+	const bool rightItem = !m_LeftUseActive && usedAtBody(m_ActiveWeaponId);
+	const bool leftItem = LeftHandHoldsItem() && usedAtBody(m_LeftItemId);
+
+	int itemIndex = 0;
+	bool leftHand = false;
+	if (leftItem && PressedDigitalAction(m_ActionSecondaryAttack) && ItemUseGestureReady(true, m_LeftItemId))
+	{
+		itemIndex = m_LeftItemIndex;
+		leftHand = true;
+	}
+	else if (rightItem && PressedDigitalAction(m_ActionPrimaryAttack) && ItemUseGestureReady(false, m_ActiveWeaponId))
+	{
+		itemIndex = -1;
+		C_BasePlayer *local = (C_BasePlayer *)m_Game->GetClientEntity(m_Game->m_EngineClient->GetLocalPlayer());
+		InventoryItem items[64];
+		const int count = local ? GetInventory(local, items, 64) : 0;
+		for (int i = 0; i < count; ++i)
+		{
+			if (items[i].weapon == (void *)local->GetActiveWeapon())
+				itemIndex = items[i].index;
+		}
+	}
+
+	const bool ready = itemIndex != 0;
+	if (ready && !m_ItemGestureReady)
+	{
+		m_Haptics.Play(leftHand ? Haptics::Hand::OtherHand : Haptics::Hand::WeaponHand, HapticEffects::Confirm);
+		if (hostHasMod && itemIndex > 0)
+		{
+			char command[48];
+			snprintf(command, sizeof(command), "l4d2vr_use_item %d", itemIndex);
+			m_Game->m_EngineClient->ServerCmd(command, true);
+			Diagnostics::Log("items: %s at the %s, entity %d", leftHand ? "left hand's" : "right hand's",
+				(leftHand ? m_LeftItemId : m_ActiveWeaponId) == C_WeaponCSBase::PAIN_PILLS ? "mouth" : "body", itemIndex);
+		}
+	}
+	m_ItemGestureReady = ready;
+	return !rightItem || (!hostHasMod && ready);
 }
 
 // Which way the body faces (BodyLayout::FollowBodyYaw), in the play area: the thumbstick turns it with the head
@@ -678,6 +751,27 @@ namespace
 		bones.capPieces[1] = Studio::FindBone(studioHeader, "ValveBiped.weapon_trigger");
 		return s_Found.emplace(studioHeader, bones).first->second;
 	}
+
+	// The second pistol of the models of two pistols: on the left hand bone and its children ("weapon_bone_Clip2",
+	// "weapon_bolt_l", "flash_L")
+	const std::vector<int> &SecondPistolBonesOf(const void *studioHeader)
+	{
+		static std::unordered_map<const void *, std::vector<int>> s_Found;
+		auto found = s_Found.find(studioHeader);
+		if (found != s_Found.end())
+			return found->second;
+
+		std::vector<int> bones;
+		const int count = Studio::BoneCount(studioHeader);
+		for (int i = 0; i < count; ++i)
+		{
+			const char *name = Studio::BoneName(studioHeader, i);
+			const size_t length = strlen(name);
+			if (strstr(name, "L_Hand") || strstr(name, "Clip2") || strstr(name, "flash_L") || (length > 2 && _stricmp(name + length - 2, "_l") == 0))
+				bones.push_back(i);
+		}
+		return s_Found.emplace(studioHeader, std::move(bones)).first->second;
+	}
 }
 
 // The bones of an item drawn on the body: the model as it was made, its center at the frame, at its scale
@@ -700,6 +794,14 @@ void VR::BuildBodyModelBones(const void *studioHeader, const BodyModelDraw &draw
 			{
 				if (piece >= 0 && piece < boneCount)
 					bones[piece] = CollapsedAt(Origin(draw.frame));
+			}
+		}
+		if (draw.onePistol)
+		{
+			for (int bone : SecondPistolBonesOf(studioHeader))
+			{
+				if (bone < boneCount)
+					bones[bone] = CollapsedAt(Origin(draw.frame));
 			}
 		}
 		return;
@@ -779,6 +881,8 @@ bool VR::BuildRemoteItemBones(int entityIndex, const void *weapon, const void *s
 		// Where they are by default for someone of 1.8 m: their own settings aren't sent
 		draw.frame = ChestItemFrame(body, BodyLayout::ItemSpotOffset(BodyLayout::DefaultItemSpot(spot, 1.8f), false), weaponId, m_VRScale);
 		draw.scale = m_SmallBodyItems ? kChestItemSmallScale : 1.0f;
+		draw.hasCenter = true;
+		draw.center = ChestItemCenter(weaponId);
 		BuildBodyModelBones(studioHeader, draw, outBones);
 		return true;
 	}

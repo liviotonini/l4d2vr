@@ -43,6 +43,10 @@ namespace
 	const float kHoldThumbCurl = 0.6f;
 	// From the knuckles to the middle of the fist, meters
 	const float kGripPalmOffset = 0.022f;
+	const float kKnifeLeanDegrees = 20.0f;
+	// A thumbstick click shorter than this is a click; held this long it drops what the hand holds
+	const unsigned long long kStickTapMs = 500;
+	const unsigned long long kStickDropMs = 3000;
 	// Hooks::TraceMeleeSwing turns the aim by this, degrees
 	const float kServerMeleeTraceTilt = 50.0f;
 
@@ -281,7 +285,7 @@ bool VR::GetLeftItemDraw(BodyModelDraw &draw)
 
 	// The adrenaline's model has its cap on. With the trigger held, ready to be stabbed in, it's the first person one
 	// instead, which shows the needle (out by the little finger).
-	if (m_LeftItemId == C_WeaponCSBase::ADRENALINE && m_LeftUseActive && m_LeftTriggerDown)
+	if (m_LeftItemId == C_WeaponCSBase::ADRENALINE && m_LeftTriggerDown)
 	{
 		if (const void *syringe = GetSyringeModel())
 		{
@@ -290,7 +294,23 @@ bool VR::GetLeftItemDraw(BodyModelDraw &draw)
 			draw.syringe = true;
 		}
 	}
-	return GetLeftGripFrame(draw.frame);
+	if (!GetLeftGripFrame(draw.frame))
+		return false;
+
+	// The game's animation holds the knife in the right hand with its blade leaning 20 degrees towards the fingers (the
+	// katana about 6, which the fist's grip already gives). Measured with l4d2vr_dual_test vmgrip.
+	if (m_LeftItemId == C_WeaponCSBase::MELEE)
+	{
+		const char *name = m_Game->m_ModelInfo->GetModelName((void *)model);
+		if (name && strstr(name, "knife"))
+		{
+			const float radians = kKnifeLeanDegrees * 3.14159265f / 180.0f;
+			const Vec3 grip = Axis(draw.frame, 1), fingers = Axis(draw.frame, 2);
+			SetAxis(draw.frame, 1, grip * cosf(radians) + fingers * sinf(radians));
+			SetAxis(draw.frame, 2, fingers * cosf(radians) - grip * sinf(radians));
+		}
+	}
+	return true;
 }
 
 // The left hand's fist in the world: y along the grip, out by the thumb, z where the fingers point (HandRig::GripFrame)
@@ -473,8 +493,9 @@ void VR::UpdateDualWield(C_BasePlayer *local, int activeWeaponId, float deltaSec
 	}
 }
 
-// The trigger of the left hand uses its grenade, pills or adrenaline: they're taken as the active weapon, and the
-// trigger is the attack until it's used (UpdateGrenadeThrow, ProcessInput)
+// The trigger of the left hand throws its grenade: it's taken as the active weapon, and the trigger is the attack until
+// it's thrown (UpdateGrenadeThrow, ProcessInput). Pills and adrenaline are used without that, at the mouth or against
+// the body (VR::UpdateItemUse).
 void VR::UpdateLeftUse(unsigned long long now, int activeIndex, const InventoryItem *items, int count)
 {
 	const bool trigger = PressedDigitalAction(m_ActionSecondaryAttack);
@@ -483,7 +504,7 @@ void VR::UpdateLeftUse(unsigned long long now, int activeIndex, const InventoryI
 
 	if (!m_LeftUseActive)
 	{
-		if (pressed && LeftHandHoldsItem() && m_LeftItemId != C_WeaponCSBase::MELEE && !m_ScopeZoomTookTrigger && activeIndex != m_LeftItemIndex)
+		if (pressed && LeftHandHoldsItem() && IsThrowableWeapon(m_LeftItemId) && !m_ScopeZoomTookTrigger && activeIndex != m_LeftItemIndex)
 		{
 			m_LeftUseActive = true;
 			m_LeftUseWasActive = false;
@@ -585,6 +606,80 @@ QAngle VR::GetLeftSwingAim() const
 	QAngle aim;
 	QAngle::VectorAngles(forward, up, aim);
 	return aim;
+}
+
+// A thumbstick click: true for a short one, when it's let go. Held, it vibrates more and more, and at 3 seconds it drops
+// what the hand holds and the click does nothing else.
+bool VR::UpdateStickHold(StickHold &hold, bool down, bool weaponHand)
+{
+	const unsigned long long now = NowMs();
+	if (down && !hold.down)
+	{
+		hold = StickHold();
+		hold.down = true;
+		hold.pressedMs = now;
+		return false;
+	}
+	if (!down)
+	{
+		const bool tap = hold.down && !hold.dropped && now - hold.pressedMs < kStickTapMs;
+		hold.down = false;
+		return tap;
+	}
+	if (hold.dropped)
+		return false;
+
+	const unsigned long long held = now - hold.pressedMs;
+	const Haptics::Hand hand = weaponHand ? Haptics::Hand::WeaponHand : Haptics::Hand::OtherHand;
+	if (held >= kStickDropMs)
+	{
+		hold.dropped = true;
+		DropFromHand(weaponHand);
+		m_Haptics.Play(hand, HapticEffects::Click);
+	}
+	else if (held >= kStickTapMs && now - hold.pulseMs >= kHandSwapPulseMs)
+	{
+		hold.pulseMs = now;
+		const float amplitude = 0.1f + 0.5f * (float)(held - kStickTapMs) / (float)(kStickDropMs - kStickTapMs);
+		m_Haptics.Play(hand, { { 0.0f, 0.04f, 150.0f, amplitude } });
+	}
+	return false;
+}
+
+// What a hand holds goes to the ground (DualWield::ServerDropItem): the right hand's weapon, after which the game takes
+// another one, or the left hand's item, which leaves the hand empty. Needs the mod on the host.
+void VR::DropFromHand(bool weaponHand)
+{
+	if (!m_Game->m_PoseRelay->IsServerCapable())
+	{
+		Diagnostics::Log("dual wield: dropping needs the mod on the host");
+		return;
+	}
+
+	int index = 0;
+	if (!weaponHand)
+	{
+		index = m_LeftItemIndex;
+	}
+	else if (!m_LeftUseActive)
+	{
+		C_BasePlayer *local = (C_BasePlayer *)m_Game->GetClientEntity(m_Game->m_EngineClient->GetLocalPlayer());
+		InventoryItem items[64];
+		const int count = local ? GetInventory(local, items, 64) : 0;
+		for (int i = 0; i < count; ++i)
+		{
+			if (items[i].weapon == (void *)local->GetActiveWeapon() && items[i].index != m_LeftItemIndex)
+				index = items[i].index;
+		}
+	}
+	if (!index)
+		return;
+
+	// It falls from where it is, without being thrown
+	char command[64];
+	snprintf(command, sizeof(command), "l4d2vr_drop %d 0 0 0", index);
+	m_Game->m_EngineClient->ServerCmd(command, true);
+	Diagnostics::Log("dual wield: dropping entity %d from the %s hand", index, weaponHand ? "right" : "left");
 }
 
 // The hands together and the grab of the hand without the item held for 2 seconds: the item changes hands
@@ -763,6 +858,37 @@ void VR::DualWieldTest(const char *action)
 		return;
 	}
 
+	// useitem: the pills or adrenaline carried used at once, as the gesture does; drop/dropleft: what a hand holds drops
+	if (strcmp(action, "useitem") == 0)
+	{
+		InventoryItem items[64];
+		const int count = GetInventory(local, items, 64);
+		for (int i = 0; i < count; ++i)
+		{
+			if (items[i].id == C_WeaponCSBase::PAIN_PILLS || items[i].id == C_WeaponCSBase::ADRENALINE)
+			{
+				char command[48];
+				snprintf(command, sizeof(command), "l4d2vr_use_item %d", items[i].index);
+				m_Game->m_EngineClient->ServerCmd(command, true);
+				Diagnostics::Log("dual wield test: %s", command);
+				break;
+			}
+		}
+		return;
+	}
+	if (strcmp(action, "drop") == 0 || strcmp(action, "dropleft") == 0)
+	{
+		DropFromHand(strcmp(action, "drop") == 0);
+		return;
+	}
+
+	// vmgrip: how the weapon's animation holds it in the right hand, in the log
+	if (strcmp(action, "vmgrip") == 0)
+	{
+		m_LogViewmodelGrip = 1;
+		return;
+	}
+
 	// needle: the adrenaline's first person model, for its needle
 	if (strcmp(action, "needle") == 0)
 	{
@@ -906,6 +1032,127 @@ namespace
 		RebuildExtraSlots();
 		Diagnostics::Log("dual wield: player %d %s", playerIndex, weapon ? "carries a melee weapon in the extra slot" : "has no melee weapon in the extra slot");
 	}
+
+	// The end of the game's use of pills and adrenaline, once their animation is over (the item's frame, Offsets::
+	// ItemUseFinish): the player down or dead uses nothing, then the item's effect (virtual, the item's), the player's
+	// buttons as they were, the player's Weapon_Drop of it (virtual) and UTIL_Remove. The offsets of the virtuals are read
+	// from that code, so they follow the game.
+	struct ItemUseCode
+	{
+		bool found = false;
+		int incapacitated = 0, alive = 0, effect = 0, drop = 0, buttons = 0;
+		void(__cdecl *remove)(void *entity) = nullptr;
+	};
+
+	const ItemUseCode &GetItemUseCode()
+	{
+		static ItemUseCode code;
+		static bool read = false;
+		if (read)
+			return code;
+		read = true;
+
+		const uint8_t *at = (const uint8_t *)g_ServerGame->m_Offsets->ItemUseFinish.address;
+		if (!at)
+		{
+			Diagnostics::Log("dual wield: the end of the use of pills wasn't found, they're used the game's way");
+			return code;
+		}
+		code.incapacitated = *(const int *)(at + 4);
+		code.alive = *(const int *)(at + 20);
+		code.effect = *(const int *)(at + 36);
+		code.drop = *(const int *)(at + 52);
+		code.buttons = *(const int *)(at + 62);
+		code.remove = (void(__cdecl *)(void *))(at + 77 + *(const int *)(at + 73));
+		const auto vtableOffset = [](int offset) { return offset > 0 && offset < 0x2000 && offset % 4 == 0; };
+		code.found = vtableOffset(code.incapacitated) && vtableOffset(code.alive) && vtableOffset(code.effect) && vtableOffset(code.drop)
+			&& code.buttons > 0 && code.buttons < 0x4000;
+		Diagnostics::Log("dual wield: the end of the use of pills %s (effect 0x%X, drop 0x%X, buttons 0x%X)", code.found ? "found" : "NOT understood",
+			code.effect, code.drop, code.buttons);
+		return code;
+	}
+
+	template <typename T>
+	T Virtual(void *object, int offset)
+	{
+		return (T)(*(void ***)object)[offset / 4];
+	}
+
+	bool UseItemNowUnsafe(void *player, void *item, const ItemUseCode &code)
+	{
+		typedef bool(__thiscall *tTest)(void *thisptr);
+		if (Virtual<tTest>(player, code.incapacitated)(player) || !Virtual<tTest>(player, code.alive)(player))
+			return false;
+
+		int *buttons = (int *)((uint8_t *)player + code.buttons);
+		const int savedButtons = *buttons;
+		typedef void(__thiscall *tEffect)(void *thisptr, void *user);
+		Virtual<tEffect>(item, code.effect)(item, player);
+		*buttons = savedButtons;
+
+		typedef void(__thiscall *tDrop)(void *thisptr, void *weapon, const Vector *target, const Vector *velocity);
+		Virtual<tDrop>(player, code.drop)(player, item, nullptr, nullptr);
+		code.remove(item);
+		return true;
+	}
+
+	bool DropNowUnsafe(void *player, void *weapon, const ItemUseCode &code, const Vector &velocity)
+	{
+		typedef void(__thiscall *tDrop)(void *thisptr, void *weapon, const Vector *target, const Vector *velocity);
+		Virtual<tDrop>(player, code.drop)(player, weapon, nullptr, &velocity);
+		return true;
+	}
+}
+
+// The player's pills or adrenaline used at once, as the game does once its animation is over: from the hand that
+// brought them to the mouth or stabbed them in (VR::ItemUseGestureReady), whether they're the active weapon or not
+void DualWield::ServerUseItem(edict_t *edict, int playerIndex, int itemIndex)
+{
+	if (!g_ServerGame || !edict || !edict->m_pUnk)
+		return;
+	void *player = edict->m_pUnk->GetBaseEntity();
+	void *item = PlayersWeapon(player, itemIndex);
+	const int id = item ? ((Server_WeaponCSBase *)item)->GetWeaponID() : 0;
+	if (id != C_WeaponCSBase::PAIN_PILLS && id != C_WeaponCSBase::ADRENALINE)
+		return;
+	const ItemUseCode &code = GetItemUseCode();
+	if (!code.found)
+		return;
+
+	bool used = false;
+	__try
+	{
+		used = UseItemNowUnsafe(player, item, code);
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		Diagnostics::Log("dual wield: using the item of player %d failed", playerIndex);
+		return;
+	}
+	Diagnostics::Log("dual wield: player %d %s %s", playerIndex, used ? "used" : "can't use", id == C_WeaponCSBase::PAIN_PILLS ? "pills" : "adrenaline");
+}
+
+// The player drops one of their weapons (held with the stick pressed, VR::UpdateStickHold), with the hand's speed
+void DualWield::ServerDropItem(edict_t *edict, int playerIndex, int weaponIndex, const Vector &velocity)
+{
+	if (!g_ServerGame || !edict || !edict->m_pUnk)
+		return;
+	void *player = edict->m_pUnk->GetBaseEntity();
+	void *weapon = PlayersWeapon(player, weaponIndex);
+	const ItemUseCode &code = GetItemUseCode();
+	if (!weapon || !code.found)
+		return;
+
+	__try
+	{
+		DropNowUnsafe(player, weapon, code, velocity);
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		Diagnostics::Log("dual wield: dropping the weapon of player %d failed", playerIndex);
+		return;
+	}
+	Diagnostics::Log("dual wield: player %d dropped weapon %d", playerIndex, ((Server_WeaponCSBase *)weapon)->GetWeaponID());
 }
 
 void DualWield::ServerInit(Game *game)

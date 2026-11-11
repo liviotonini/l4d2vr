@@ -365,6 +365,7 @@ public:
 	Vector m_BodyFacing = { 1, 0, 0 };
 	// Pills or adrenaline in the hand that uses them are at the mouth or against the body (ItemUseGestureReady)
 	bool m_ItemGestureReady = false;
+	int m_LogViewmodelGrip = 0;             // l4d2vr_dual_test vmgrip: draws of the weapon to log the bones of (hooks.cpp)
 	bool m_ViewmodelHasTwoWeapons = false;  // dual pistols shown as such, both hands are holding one
 	bool m_OnePistolDoubled = true;         // the second pistol isn't shown: one pistol that does double damage, with a mark
 	bool m_DualAsOnePistol = false;         // holding two pistols now, shown as one
@@ -409,6 +410,7 @@ public:
 		HandMath::Vec3 center;
 		bool alignWeaponBone = false; // the model's "weapon_bone" is at the frame instead, like in a hand
 		bool syringe = false;         // the adrenaline's first person model, uncapped: its syringe held like the weapon bone
+		bool onePistol = false;       // the model of two pistols shows only one
 	};
 	// A weapon the player carries
 	struct InventoryItem
@@ -611,6 +613,18 @@ public:
 	HandMath::Vec3 GetFistPoint(bool weaponHand) const;
 	void UpdateBodyYaw(float deltaSeconds);
 	bool ItemUseGestureReady(bool leftHand, int weaponId);
+	bool UpdateItemUse();
+	// The thumbstick clicks: a short click, or held to drop what the hand holds (UpdateStickHold)
+	struct StickHold
+	{
+		bool down = false;
+		bool dropped = false;
+		unsigned long long pressedMs = 0;
+		unsigned long long pulseMs = 0;
+	};
+	StickHold m_LeftStickHold, m_RightStickHold;
+	bool UpdateStickHold(StickHold &hold, bool down, bool weaponHand);
+	void DropFromHand(bool weaponHand);
 	bool IsAtTwoHandSpot(bool &known) const;
 	const void *ApplyItemInHand(const void *studioHeader, const void *customBones, void *storage);
 	HandMath::Vec3 GetLeftPalm() const;

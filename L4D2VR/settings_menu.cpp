@@ -24,10 +24,40 @@ namespace
 	constexpr float kFontSize = 26.0f;
 	constexpr float kUiScale = 1.5f;
 
-	constexpr auto kFrameInterval = std::chrono::milliseconds(22);      // ~45 fps while the laser is used on the tab
+	constexpr auto kFrameInterval = std::chrono::milliseconds(50);      // 20 fps while the laser is used on the tab
 	constexpr auto kIdleFrameInterval = std::chrono::milliseconds(250); // while the tab is open but nobody points at it
 	constexpr auto kInputActiveTime = std::chrono::seconds(1);          // how long after the last input to keep the full rate
-	constexpr auto kSaveDelay = std::chrono::milliseconds(750);   // wait for the user to stop changing values before writing config.txt
+	constexpr auto kRetryUploadDelay = std::chrono::seconds(1);   // after SteamVR refused an image
+	constexpr int kFailuresBeforeRemaking = 3;                     // refusals in a row before the overlay is made again
+	constexpr auto kIgnoreClicksAfterShown = std::chrono::milliseconds(400);
+
+	// What ImGui draws, to know whether the image changed (FNV-1a)
+	unsigned long long HashDrawData(const ImDrawData *data)
+	{
+		unsigned long long hash = 14695981039346656037ull;
+		auto add = [&hash](const void *bytes, size_t size)
+		{
+			const unsigned char *p = (const unsigned char *)bytes;
+			for (size_t i = 0; i < size; ++i)
+				hash = (hash ^ p[i]) * 1099511628211ull;
+		};
+		if (!data)
+			return hash;
+		for (int list = 0; list < data->CmdListsCount; ++list)
+		{
+			const ImDrawList *drawList = data->CmdLists[list];
+			add(drawList->VtxBuffer.Data, drawList->VtxBuffer.Size * sizeof(ImDrawVert));
+			add(drawList->IdxBuffer.Data, drawList->IdxBuffer.Size * sizeof(ImDrawIdx));
+			for (const ImDrawCmd &command : drawList->CmdBuffer)
+			{
+				add(&command.ClipRect, sizeof(command.ClipRect));
+				add(&command.ElemCount, sizeof(command.ElemCount));
+				add(&command.IdxOffset, sizeof(command.IdxOffset));
+				add(&command.VtxOffset, sizeof(command.VtxOffset));
+			}
+		}
+		return hash;
+	}
 
 	typedef HRESULT(WINAPI *CreateDXGIFactory1Fn)(REFIID riid, void **factory);
 
@@ -189,20 +219,18 @@ void SettingsMenu::Update()
 		m_NeedsRedraw = false;
 	}
 
-	// Every frame is read back and uploaded through the CPU, so only draw at full rate while the menu is being used
+	// Every frame is read back and uploaded through the CPU, so only draw at full rate while the menu is being used, and
+	// only while it's seen: SteamVR keeps what's sent to a hidden overlay (see m_UploadedHash)
 	const auto now = std::chrono::steady_clock::now();
 	const bool inUse = now - m_LastInputTime < kInputActiveTime || ImGui::IsAnyItemActive();
 	const auto frameInterval = inUse ? kFrameInterval : kIdleFrameInterval;
 
-	if (m_PendingFrames > 0 || (tabVisible && now - m_LastFrameTime >= frameInterval))
+	if (tabVisible && (m_PendingFrames > 0 || now - m_LastFrameTime >= frameInterval))
 	{
 		Render();
 		if (m_PendingFrames > 0)
 			m_PendingFrames--;
 	}
-
-	// Save right away when the dashboard is closed
-	SaveIfNeeded(!dashboardVisible);
 }
 
 bool SettingsMenu::Init()
@@ -227,10 +255,20 @@ bool SettingsMenu::Init()
 		return false;
 	}
 
+	if (!CreateOverlay())
+		return false;
+
+	return InitImGui();
+}
+
+// The dashboard tab and its thumbnail
+bool SettingsMenu::CreateOverlay()
+{
+	vr::IVROverlay *overlay = vr::VROverlay();
 	const vr::EVROverlayError createError = overlay->CreateDashboardOverlay(kOverlayKey, kOverlayName, &m_OverlayHandle, &m_ThumbnailHandle);
 	if (createError != vr::VROverlayError_None)
 	{
-		Log("Init: CreateDashboardOverlay failed: %s (%d)", overlay->GetOverlayErrorNameFromEnum(createError), (int)createError);
+		Log("CreateDashboardOverlay failed: %s (%d)", overlay->GetOverlayErrorNameFromEnum(createError), (int)createError);
 		m_OverlayHandle = vr::k_ulOverlayHandleInvalid;
 		m_ThumbnailHandle = vr::k_ulOverlayHandleInvalid;
 		return false;
@@ -250,7 +288,10 @@ bool SettingsMenu::Init()
 	if (FileExists(thumbnailPath))
 		overlay->SetOverlayFromFile(m_ThumbnailHandle, thumbnailPath);
 
-	return InitImGui();
+	m_UploadedValid = false;
+	m_UploadFailures = 0;
+	m_NeedsRedraw = true;
+	return true;
 }
 
 bool SettingsMenu::InitImGui()
@@ -383,6 +424,9 @@ void SettingsMenu::ProcessOverlayEvents()
 		case vr::VREvent_MouseButtonDown:
 		case vr::VREvent_MouseButtonUp:
 		{
+			// A click as the tab opens is the one that opened it, or the trigger already held: it would grab a slider
+			if (event.eventType == vr::VREvent_MouseButtonDown && std::chrono::steady_clock::now() - m_ShownTime < kIgnoreClicksAfterShown)
+				break;
 			int button = ToImGuiMouseButton(event.data.mouse.button);
 			if (button >= 0)
 			{
@@ -405,6 +449,7 @@ void SettingsMenu::ProcessOverlayEvents()
 		case vr::VREvent_OverlayShown:
 			Log("event: OverlayShown");
 			m_NeedsRedraw = true;
+			m_ShownTime = std::chrono::steady_clock::now();
 			break;
 
 		case vr::VREvent_OverlayHidden:
@@ -429,6 +474,11 @@ void SettingsMenu::Render()
 	ImGui::NewFrame();
 	DrawMenu();
 	ImGui::Render();
+
+	// Only a new image is sent, and not right after SteamVR refused one
+	const unsigned long long hash = HashDrawData(ImGui::GetDrawData());
+	if ((m_UploadedValid && hash == m_UploadedHash) || now < m_RetryUploadTime)
+		return;
 
 	const ImVec4 &background = ImGui::GetStyle().Colors[ImGuiCol_WindowBg];
 	const float clearColor[4] = { background.x, background.y, background.z, 1.0f };
@@ -467,6 +517,28 @@ void SettingsMenu::Render()
 		Log("SetOverlayRaw: %s (%d) on frame %d, read back and upload took %.2f ms", vr::VROverlay()->GetOverlayErrorNameFromEnum(error), (int)error, m_FramesDrawn, uploadMs);
 		m_LastTextureError = error;
 	}
+
+	if (error == vr::VROverlayError_None)
+	{
+		m_UploadedHash = hash;
+		m_UploadedValid = true;
+		m_UploadFailures = 0;
+		return;
+	}
+
+	// Refused (too many blocks of shared memory waiting): try again a bit later, and after a few times make the overlay
+	// again, which gives back the blocks SteamVR keeps for it
+	m_UploadedValid = false;
+	m_RetryUploadTime = std::chrono::steady_clock::now() + kRetryUploadDelay;
+	if (++m_UploadFailures >= kFailuresBeforeRemaking)
+	{
+		Log("SteamVR refused %d images in a row: the dashboard tab is made again", m_UploadFailures);
+		vr::VROverlay()->DestroyOverlay(m_OverlayHandle);
+		m_OverlayHandle = vr::k_ulOverlayHandleInvalid;
+		m_ThumbnailHandle = vr::k_ulOverlayHandleInvalid;
+		if (!CreateOverlay())
+			m_Initialized = false;
+	}
 }
 
 void SettingsMenu::DrawMenu()
@@ -482,8 +554,8 @@ void SettingsMenu::DrawMenu()
 	ImGui::TextUnformatted("L4D2VR Settings");
 	ImGui::PopFont();
 
-	// Space for the separator and the status line at the bottom
-	const float footerHeight = ImGui::GetTextLineHeight() + style.ItemSpacing.y * 2.0f + 1.0f;
+	// Space for the separator and the buttons at the bottom
+	const float footerHeight = ImGui::GetFrameHeight() + style.ItemSpacing.y * 2.0f + 1.0f;
 
 	VR &settings = *m_VR;
 	if (ImGui::BeginTabBar("SettingsTabs"))
@@ -540,7 +612,7 @@ void SettingsMenu::DrawMenu()
 			DrawSlider("Grenade: forward", "Where the grenade is carried: how far in front of your eyes. Negative is behind.", settings.m_ItemSpotForward[1], -0.4f, 0.5f, 0.01f, "%.2f m");
 			DrawSlider("Grenade: to the side", "Where the grenade is carried: how far to the side of your eyes. Positive is the side of the weapon hand, negative the other side.", settings.m_ItemSpotSide[1], -0.5f, 0.5f, 0.01f, "%.2f m");
 			DrawSlider("Grenade: below the eyes", "Where the grenade is carried: how far below your eyes. About 0.6 m is the belt.", settings.m_ItemSpotBelowEyes[1], 0.1f, 1.1f, 0.01f, "%.2f m");
-			DrawCheckbox("Items in the left hand", "The left hand holds a melee weapon, a grenade, pills or adrenaline while the right hand holds a weapon. Take them with the left grip: on your chest, or where they lie (a melee weapon taken with the left hand doesn't replace your pistol). Swing the melee weapon to hit. Hold the left trigger to throw the grenade with your arm, to drink the pills by bringing them to your mouth, or to stab the adrenaline into your body with the needle (it shows while the trigger is held). To change hands, hold the hands together and keep the grip of the empty hand pressed for 2 seconds. The host needs this version of the mod.", settings.m_DualWieldEnabled);
+			DrawCheckbox("Items in the left hand", "The left hand holds a melee weapon, a grenade, pills or adrenaline while the right hand holds a weapon. Take them with the left grip: on your chest, or where they lie (a melee weapon taken with the left hand doesn't replace your pistol). Swing the melee weapon to hit. Hold the left trigger to throw the grenade with your arm, to drink the pills by bringing them to your mouth, or to stab the adrenaline into your body with the needle (it shows while the trigger is held). To change hands, hold the hands together and keep the grip of the empty hand pressed for 2 seconds. Keep a thumbstick pressed for 3 seconds to drop what that hand holds. The host needs this version of the mod.", settings.m_DualWieldEnabled);
 			DrawCheckbox("Interact with your hand", "Doors, items and teammates are used by pointing your weapon hand at them instead of looking at them. In a game you joined, the host needs this version of the mod.", settings.m_InteractWithHand);
 			DrawCheckbox("Shove by swinging", "Shove by swinging the left controller (or the right one when not holding a melee weapon).", settings.m_IsTrackingManualPush);
 			DrawSlider("Melee swing speed", "How fast the controller has to move to hit with a melee weapon.", settings.m_MeleeSwingVelocityRequired, 0.5f, 4.0f, 0.05f, "%.2f m/s");
@@ -583,8 +655,20 @@ void SettingsMenu::DrawMenu()
 		ImGui::EndTabBar();
 	}
 
+	// Changes apply at once, to try them, but are only written to config.txt with Save: a slider moved by accident goes
+	// away with Discard, or when the game is closed
 	ImGui::Separator();
-	ImGui::TextDisabled("Changes apply immediately and are saved to VR\\config.txt");
+	ImGui::BeginDisabled(!m_HasUnsavedChanges);
+	if (ImGui::Button("Save"))
+		Save();
+	ImGui::SameLine();
+	if (ImGui::Button("Discard changes"))
+	{
+		m_VR->ParseConfigFile();
+		m_HasUnsavedChanges = false;
+		m_LastSaveFailed = false;
+	}
+	ImGui::EndDisabled();
 
 	const char *status = nullptr;
 	ImVec4 statusColor;
@@ -595,20 +679,23 @@ void SettingsMenu::DrawMenu()
 	}
 	else if (m_HasUnsavedChanges)
 	{
-		status = "Saving...";
-		statusColor = style.Colors[ImGuiCol_TextDisabled];
+		status = "Changed, not saved";
+		statusColor = ImVec4(0.95f, 0.75f, 0.30f, 1.0f);
 	}
 	else if (m_SavedOnce)
 	{
 		status = "Saved";
 		statusColor = ImVec4(0.45f, 0.80f, 0.45f, 1.0f);
 	}
-
-	if (status)
+	else
 	{
-		ImGui::SameLine(ImGui::GetWindowWidth() - style.WindowPadding.x - ImGui::CalcTextSize(status).x);
-		ImGui::TextColored(statusColor, "%s", status);
+		status = "Changes apply at once, Save keeps them";
+		statusColor = style.Colors[ImGuiCol_TextDisabled];
 	}
+
+	ImGui::SameLine(ImGui::GetWindowWidth() - style.WindowPadding.x - ImGui::CalcTextSize(status).x);
+	ImGui::AlignTextToFramePadding();
+	ImGui::TextColored(statusColor, "%s", status);
 
 	ImGui::End();
 }
@@ -686,26 +773,12 @@ void SettingsMenu::DrawDescription(const char *description)
 void SettingsMenu::MarkChanged()
 {
 	m_HasUnsavedChanges = true;
-	m_LastChangeTime = std::chrono::steady_clock::now();
 }
 
-void SettingsMenu::SaveIfNeeded(bool force)
+void SettingsMenu::Save()
 {
-	if (!m_HasUnsavedChanges)
-		return;
-
-	if (!force)
-	{
-		if (std::chrono::steady_clock::now() - m_LastChangeTime < kSaveDelay)
-			return;
-
-		// Still dragging a slider or holding a +/- button
-		if (ImGui::IsAnyItemActive())
-			return;
-	}
-
 	m_LastSaveFailed = !m_VR->SaveConfigFile();
 	m_SavedOnce = m_SavedOnce || !m_LastSaveFailed;
-	m_HasUnsavedChanges = false;
+	m_HasUnsavedChanges = m_LastSaveFailed;
 	m_NeedsRedraw = true; // update the status line
 }

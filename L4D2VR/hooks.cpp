@@ -921,6 +921,30 @@ void Hooks::DrawModelForVR(void *ecx, void *state, const ModelRenderInfo_t &info
 	if ((kind == ModelKind::Viewmodel || kind == ModelKind::DualPistolsViewmodel) && m_VR->m_LeftUseActive)
 		return;
 
+	// l4d2vr_dual_test vmgrip: how the weapon's animation holds it, relative to the right hand (to hold it the same way in
+	// the left one)
+	if (kind == ModelKind::Viewmodel && pCustomBoneToWorld && m_VR->m_LogViewmodelGrip > 0)
+	{
+		--m_VR->m_LogViewmodelGrip;
+		const void *studioHeader = *(const void **)state;
+		const HandMath::Mat34 *bones = (const HandMath::Mat34 *)pCustomBoneToWorld;
+		const int count = Studio::BoneCount(studioHeader);
+		const int hand = Studio::FindBone(studioHeader, "ValveBiped.Bip01_R_Hand");
+		if (hand >= 0 && hand < count)
+		{
+			const HandMath::Mat34 toHand = HandMath::InvertRigid(bones[hand]);
+			for (int i = 0; i < count; ++i)
+			{
+				const char *name = Studio::BoneName(studioHeader, i);
+				if (!strstr(name, "weapon") && !strstr(name, "Finger1") && !strstr(name, "Finger4") && !strstr(name, "Finger0") && i != hand)
+					continue;
+				const HandMath::Mat34 m = HandMath::Multiply(toHand, bones[i]);
+				Diagnostics::Log("viewmodel grip: %s %s: origin %.2f %.2f %.2f, x %.2f %.2f %.2f, y %.2f %.2f %.2f, z %.2f %.2f %.2f", Studio::ModelName(studioHeader), name,
+					m.m[0][3], m.m[1][3], m.m[2][3], m.m[0][0], m.m[1][0], m.m[2][0], m.m[0][1], m.m[1][1], m.m[2][1], m.m[0][2], m.m[1][2], m.m[2][2]);
+			}
+		}
+	}
+
 	// The weapon and the hand keep their pose while throwing with the arm, instead of the game's wind-up animation
 	alignas(16) unsigned char throwPose[sizeof(HandMath::Mat34) * Studio::kMaxBones];
 	if (pCustomBoneToWorld && (kind == ModelKind::Viewmodel || kind == ModelKind::FirstPersonArms))

@@ -88,6 +88,11 @@ public:
     // grenade launcher's fire: the grenade leaves from the eyes the game's way, the hook takes it to the weapon
     Offset GrenadeLauncherCreateCall =   { "server.dll", 0x3CF420, "52 8B 90 34 02 00 00 8B CE F3 0F 11 45 90 F3 0F 11 45 94 F3 0F 11 45 98 FF D2 50 8D 45 AC 50 E8", 31, true };
 
+    // The end of the use of pills and adrenaline, in their frame: owner->IsIncapacitated(), owner->IsAlive(),
+    // this->ApplyEffect(owner), the owner's buttons restored, owner->Weapon_Drop(this, 0, 0), UTIL_Remove(this). The
+    // offsets of those virtuals are read from it (DualWield::ServerUseItem).
+    Offset ItemUseFinish =               { "server.dll", 0x3C26E5, "8B 17 8B 82 ? ? ? ? 8B CF FF D0 84 C0 75 ? 8B 17 8B 82 ? ? ? ? 8B CF FF D0 84 C0 74 ? 8B 16 8B 82 ? ? ? ? 57 8B CE FF D0 8B 4D FC 8B 17 8B 82 ? ? ? ? 6A 00 6A 00 89 8F ? ? ? ? 56 8B CF FF D0 56 E8", 0, true };
+
     Offset ServerFireTerrorBullets =     { "server.dll", 0x3C78B0, "55 8B EC 81 EC ? ? ? ? A1 ? ? ? ? 33 C5 89 45 FC 8B 45 08 8B 4D 10" };
     Offset ReadUserCmd =                 { "server.dll", 0x205710, "55 8B EC 53 8B 5D 10 56 57 8B 7D 0C 53" };
     // CBaseCSGrenade::StartGrenadeThrow, called when the trigger is let go: m_fThrowTime = curtime + 0.2

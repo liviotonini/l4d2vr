@@ -27,6 +27,7 @@ public:
 private:
 	bool Init();
 	bool CreateDevice();
+	bool CreateOverlay();
 	bool InitImGui();
 	void Shutdown();
 
@@ -38,7 +39,7 @@ private:
 	void DrawDescription(const char *description);
 
 	void MarkChanged();
-	void SaveIfNeeded(bool force);
+	void Save();
 
 	VR *m_VR = nullptr;
 	bool m_InitAttempted = false;
@@ -58,8 +59,18 @@ private:
 	bool m_ImGuiRendererInitialized = false;
 
 	bool m_NeedsRedraw = true;
-	int m_PendingFrames = 0; // frames to draw even when the dashboard is closed
+	int m_PendingFrames = 0; // frames to draw right away, once the tab is visible
 	std::chrono::steady_clock::time_point m_LastFrameTime;
+
+	// Every SetOverlayRaw takes a block of shared memory that SteamVR gives back once it has used it. With too many of
+	// them waiting (201) it refuses every upload of the game, the wrist HUD's too. So the image is only sent when it
+	// changed, and after a refusal the overlay is made again, which gives its blocks back.
+	unsigned long long m_UploadedHash = 0;
+	bool m_UploadedValid = false;
+	int m_UploadFailures = 0;
+	std::chrono::steady_clock::time_point m_RetryUploadTime;
+	// Clicks right after the tab opens are ignored: the laser can already be pressed on a slider
+	std::chrono::steady_clock::time_point m_ShownTime;
 
 	// Diagnostics, written to VR\settings_menu_log.txt
 	int m_FramesDrawn = 0;
@@ -70,8 +81,8 @@ private:
 	// Last laser pointer input on the tab, to draw at full rate only while it's being used
 	std::chrono::steady_clock::time_point m_LastInputTime;
 
+	// Changes are applied at once and written to config.txt with the Save button only
 	bool m_HasUnsavedChanges = false;
 	bool m_SavedOnce = false;
 	bool m_LastSaveFailed = false;
-	std::chrono::steady_clock::time_point m_LastChangeTime;
 };

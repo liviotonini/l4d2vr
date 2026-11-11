@@ -38,6 +38,10 @@ namespace DualWield
 	void ServerSetLeftItem(edict_t *edict, int playerIndex, int itemIndex);
 	// `from`: where the swing started, with kLeftHandNewSwing
 	void ServerSetLeftHand(int playerIndex, const Vector &position, const QAngle &angles, int flags, const QAngle *from);
+	// Pills or adrenaline used at once, without the game's animation, from either hand
+	void ServerUseItem(edict_t *edict, int playerIndex, int itemIndex);
+	// A weapon or item dropped from a hand
+	void ServerDropItem(edict_t *edict, int playerIndex, int weaponIndex, const Vector &velocity);
 
 	// Flags of l4d2vr_left_hand
 	constexpr int kLeftHandSwinging = 1;

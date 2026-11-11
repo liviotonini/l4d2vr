@@ -551,6 +551,29 @@ bool PoseRelay::HandleServerCommand(edict_t *player, const void *commandObject)
 		return true;
 	}
 
+	// Pills or adrenaline used at once (entity index), or a weapon dropped (entity index and the hand's velocity)
+	if (strcmp(name, "l4d2vr_use_item") == 0 || strcmp(name, "l4d2vr_drop") == 0)
+	{
+		const int index = ServerPlayerIndex(m_Game, player);
+		const bool use = name[7] == 'u';
+		if (m_Game->IsValidPlayerIndex(index) && args.Count() == (use ? 2 : 5))
+		{
+			const int item = std::clamp(atoi(args.Arg(1)), 0, 4095);
+			if (use)
+			{
+				DualWield::ServerUseItem(player, index, item);
+			}
+			else
+			{
+				Vector velocity((float)atof(args.Arg(2)), (float)atof(args.Arg(3)), (float)atof(args.Arg(4)));
+				if (!std::isfinite(velocity.x) || !std::isfinite(velocity.y) || !std::isfinite(velocity.z) || VectorLength(velocity) > 1000.0f)
+					velocity = Vector(0, 0, 0);
+				DualWield::ServerDropItem(player, index, item, velocity);
+			}
+		}
+		return true;
+	}
+
 	// The left hand while it swings a melee weapon: x y z pitch yaw roll flags, and pitch yaw roll where the swing
 	// started on its first pose
 	if (strcmp(name, "l4d2vr_left_hand") == 0)

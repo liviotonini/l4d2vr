@@ -24,6 +24,7 @@ namespace
 	// animation has it on the weapon (closer than this to the right hand)
 	const float kTwoHandGrabMeters = 0.12f;
 	const float kTwoHandSpanMeters = 0.6f;
+	const float kTwoHandOnePistolMeters = 0.15f; // between the wrists
 
 	// The pose of the weapon and the hand before the throw started, relative to the weapon's frame, per model
 	std::unordered_map<const void *, std::vector<Mat34>> g_ThrowPoses;
@@ -31,8 +32,12 @@ namespace
 	std::unordered_map<const void *, int> g_ViewmodelRightHands;
 	// The bones of the left pistol in the dual pistols model
 	std::unordered_map<const void *, std::vector<int>> g_SecondPistolBones;
-	// The syringe of the adrenaline's first person model ("weapon_clip"), -1 if none
-	std::unordered_map<const void *, int> g_ViewmodelSyringes;
+	// The syringe of the adrenaline's first person model ("weapon_clip") and the pieces of its cap, -1 if none
+	struct ViewmodelSyringe
+	{
+		int syringe = -1, capPieces[2] = { -1, -1 };
+	};
+	std::unordered_map<const void *, ViewmodelSyringe> g_ViewmodelSyringes;
 	// After the throw the hand stays as it was until the game changes weapon
 	const auto kThrownGrenadeTime = std::chrono::milliseconds(1500);
 
@@ -182,18 +187,33 @@ const void *VR::ApplyItemInHand(const void *studioHeader, const void *customBone
 		bones[i] = Multiply(move, source[i]);
 
 	// The adrenaline's needle, to stab it into the body (ItemUseGestureReady): the syringe is the "weapon_clip" bone, the
-	// needle at its end along -y
+	// needle at its end along -y. With the trigger held the cap is off, ready to be stabbed in.
 	if (m_ActiveWeaponId == C_WeaponCSBase::ADRENALINE)
 	{
-		auto syringe = g_ViewmodelSyringes.find(studioHeader);
-		if (syringe == g_ViewmodelSyringes.end())
-			syringe = g_ViewmodelSyringes.emplace(studioHeader, Studio::FindBone(studioHeader, "ValveBiped.weapon_clip")).first;
-		if (syringe->second >= 0 && syringe->second < boneCount)
+		auto found = g_ViewmodelSyringes.find(studioHeader);
+		if (found == g_ViewmodelSyringes.end())
 		{
-			const Mat34 &clip = bones[syringe->second];
+			ViewmodelSyringe syringe;
+			syringe.syringe = Studio::FindBone(studioHeader, "ValveBiped.weapon_clip");
+			syringe.capPieces[0] = Studio::FindBone(studioHeader, "ValveBiped.weapon_bolt");
+			syringe.capPieces[1] = Studio::FindBone(studioHeader, "ValveBiped.weapon_trigger");
+			found = g_ViewmodelSyringes.emplace(studioHeader, syringe).first;
+		}
+		const ViewmodelSyringe &syringe = found->second;
+		if (syringe.syringe >= 0 && syringe.syringe < boneCount)
+		{
+			const Mat34 &clip = bones[syringe.syringe];
 			m_RightNeedleDir = Normalized(Axis(clip, 1)) * -1.0f;
 			m_RightNeedleTip = Origin(clip) + m_RightNeedleDir * kSyringeNeedleUnits;
 			m_RightNeedleMs = GetTickCount64();
+			if (PressedDigitalAction(m_ActionPrimaryAttack))
+			{
+				for (int piece : syringe.capPieces)
+				{
+					if (piece >= 0 && piece < boneCount)
+						bones[piece] = CollapsedAt(Origin(clip));
+				}
+			}
 		}
 	}
 	return bones;
@@ -218,6 +238,11 @@ bool VR::WantsLeftHandOnController() const
 	if (LeftHandShowsItem() || m_LeftUseActive)
 		return true;
 
+	// Two pistols shown as one held with both hands: the animation's left hand is on the hidden pistol, so the hand stays
+	// where it is, around the one seen
+	if (isHoldingWeapon2Handed && m_DualAsOnePistol)
+		return true;
+
 	if (isHoldingWeapon2Handed || m_ViewmodelHasTwoWeapons || NeedsBothHands(m_ActiveWeaponId))
 		return false;
 
@@ -231,6 +256,13 @@ bool VR::IsAtTwoHandSpot(bool &known) const
 	known = false;
 	if (GetTickCount64() - m_AnimatedHandsMs > 250)
 		return false;
+	// Two pistols shown as one: the animation's left hand holds the hidden one. The left hand takes the one seen around
+	// the right hand, like a single pistol.
+	if (m_DualAsOnePistol)
+	{
+		known = true;
+		return Length(m_LeftHandWrist - m_AnimatedHand[HandRig::Right]) < kTwoHandOnePistolMeters * m_VRScale;
+	}
 	const Vec3 &spot = m_AnimatedHand[HandRig::Left];
 	if (Length(spot - m_AnimatedHand[HandRig::Right]) > kTwoHandSpanMeters * m_VRScale)
 		return false;
