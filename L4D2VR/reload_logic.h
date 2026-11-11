@@ -37,6 +37,8 @@ namespace Reload
 		HandMath::Vec3 magazineBase; // the end of the magazine that sticks out: it can be taken anywhere from there to the socket
 		HandMath::Vec3 boltGrab;    // what the hand takes to pull the bolt
 		HandMath::Vec3 boltAxis;    // the bolt is pulled against this direction
+		HandMath::Vec3 weaponPoint; // moves with the weapon: the bolt's pull is how the hand moved relative to it, so
+		                            // walking doesn't add to it or take from it
 		HandMath::Vec3 waist;
 		float unitsPerMeter = 43.2f;
 		float boltTravel = 2.5f;    // game units
@@ -167,7 +169,7 @@ namespace Reload
 					// Any time, not only when it's needed: it's seen moving either way. The hand holding the pump takes it
 					// as soon as the trigger is held, without pressing it again.
 					m_State = State::HoldingBolt;
-					m_BoltGrabPalm = in.palm;
+					m_BoltGrabOffset = in.palm - in.weaponPoint;
 					m_BoltPull = 0.0f;
 					m_BoltPulledThisGrab = false;
 					events |= Event_GrabbedBolt;
@@ -243,11 +245,12 @@ namespace Reload
 
 			case State::HoldingBolt:
 			{
-				float pulled = Dot(in.palm - m_BoltGrabPalm, in.boltAxis) * -1.0f;
+				// Relative to the weapon, which moves with the player
+				float pulled = Dot((in.palm - in.weaponPoint) - m_BoltGrabOffset, in.boltAxis) * -1.0f;
 				if (pulled < 0.0f)
 				{
 					// The hand went further forward than where it took it: the pull counts from there
-					m_BoltGrabPalm = m_BoltGrabPalm - in.boltAxis * pulled;
+					m_BoltGrabOffset = m_BoltGrabOffset - in.boltAxis * pulled;
 					pulled = 0.0f;
 				}
 				m_BoltPull = std::min(pulled, in.boltTravel);
@@ -296,7 +299,7 @@ namespace Reload
 		float m_BoltPull = 0.0f;
 		float m_BoltTravel = 0.0f;
 		bool m_BoltPulledThisGrab = false;
-		HandMath::Vec3 m_BoltGrabPalm;
+		HandMath::Vec3 m_BoltGrabOffset; // from the weapon point to the hand, where the pull counts from
 		bool m_GripWasDown = false;
 		bool m_TriggerWasDown = false;
 		bool m_PressUsed = false;

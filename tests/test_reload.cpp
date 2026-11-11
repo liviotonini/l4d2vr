@@ -226,6 +226,53 @@ namespace
 		r.trigger(false);
 	}
 
+	// The player walks while pulling: the weapon and the hand both move with the player, a few units every frame
+	void TestBoltWhileWalking()
+	{
+		printf("manual reload: bolt pulled while walking\n");
+		const float step = 2.4f; // 220 units/s at 90 frames per second
+
+		for (int direction = -1; direction <= 1; direction += 2)
+		{
+			Rig r(30, 30, 100, false);
+			r.in.clip = 0;
+			r.step();
+			r.in.clip = 30;
+			r.step();
+			CHECK(r.machine.NeedsCycle());
+
+			// Taken where it is
+			Vec3 walked(0.0f, 0.0f, 0.0f);
+			r.moveTo(kBolt);
+			r.trigger(true);
+			CHECK(r.machine.GetState() == State::HoldingBolt);
+
+			// Walking with the hand still on the weapon pulls nothing, forward or back
+			for (int frame = 0; frame < 10; ++frame)
+			{
+				walked = walked + r.in.boltAxis * (step * direction);
+				r.in.weaponPoint = walked;
+				r.moveTo(kBolt + walked);
+				CHECK(!(r.events & Event_BoltPulled));
+			}
+			CHECK_NEAR(r.machine.BoltPull(), r.in.boltTravel, 0.001f); // drawn locked back, as before
+			CHECK(r.machine.NeedsCycle());
+
+			// Pulled back along the weapon a little every frame while walking: it's pulled
+			bool pulled = false;
+			for (int frame = 1; frame <= 6 && !pulled; ++frame)
+			{
+				walked = walked + r.in.boltAxis * (step * direction);
+				r.in.weaponPoint = walked;
+				r.moveTo(kBolt + walked - r.in.boltAxis * (0.6f * frame));
+				pulled = (r.events & Event_BoltPulled) != 0;
+			}
+			CHECK(pulled);
+			CHECK(!r.machine.NeedsCycle());
+			r.trigger(false);
+		}
+	}
+
 	void TestMagazineFromWaist()
 	{
 		printf("manual reload: new magazine straight from the waist\n");
@@ -605,6 +652,7 @@ void RunReloadTests()
 	TestEmptyAndBolt();
 	TestMagazineFromWaist();
 	TestPumpEveryShot();
+	TestBoltWhileWalking();
 	TestShells();
 	TestEdges();
 }

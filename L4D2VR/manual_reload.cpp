@@ -132,6 +132,9 @@ namespace
 	Vec3 g_Socket;
 	Vec3 g_MagazineBase;
 	Vec3 g_BoltGrab;
+	// Where the weapon was drawn from. The hand (GetLeftPalm) is from the same tracking update, so walking moves both
+	// the same way.
+	Vec3 g_WeaponPoint;
 	bool g_HaveBolt = false;
 	ULONGLONG g_LastViewmodelDraw = 0;
 	int g_LastWeaponId = 0;
@@ -469,6 +472,7 @@ void VR::UpdateManualReload()
 	inputs.magazineBase = g_MagazineBase;
 	inputs.boltGrab = g_BoltGrab;
 	inputs.boltAxis = ToVec3(m_ViewmodelForward);
+	inputs.weaponPoint = g_WeaponPoint;
 	inputs.waist = m_WaistWorld;
 	inputs.unitsPerMeter = m_VRScale;
 	inputs.boltTravel = profile->boltTravel;
@@ -654,6 +658,7 @@ bool VR::BuildReloadViewmodel(const void *studioHeader, const void *customBones,
 	g_MagazineWorld = source[ids.magazine];
 	g_Socket = TransformPoint(g_MagazineWorld, ArrayToVec3(profile->magazineCenter));
 	g_MagazineBase = g_Socket - ToVec3(m_ViewmodelUp) * (profile->magazineLength * 0.5f + 0.5f);
+	g_WeaponPoint = ToVec3(GetRecommendedViewmodelAbsPos());
 	g_HaveBolt = ids.bolt >= 0;
 	if (g_HaveBolt)
 	{
