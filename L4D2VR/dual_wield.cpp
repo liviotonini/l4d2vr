@@ -992,6 +992,20 @@ void VR::DualWieldTest(const char *action)
 			had ? "" : "(none)", beforeAngles.x, beforeAngles.y, has ? "" : "(none)", afterAngles.x, afterAngles.y);
 		return;
 	}
+	// magazine: the right hand takes one for the left hand's gun, and puts it in at once; ammoleft: ammo taken for it
+	if (strcmp(action, "magazine") == 0)
+	{
+		const LeftGun::GunData *gun = LeftGun::Find(m_LeftItemId);
+		m_RightMagazine = m_RightMagazineTest = gun && m_RightHandEmpty && LeftGunNeedsAmmo(*gun);
+		m_RightMagazineIndex = m_LeftItemIndex;
+		Diagnostics::Log("dual wield test: the right hand %s a magazine for the left hand's gun", m_RightMagazine ? "takes" : "can't take");
+		return;
+	}
+	if (strcmp(action, "ammoleft") == 0)
+	{
+		GiveLeftGunAmmo();
+		return;
+	}
 	// fireleft: a shot of the left hand's gun from the eyes, where they look (no controllers)
 	if (strcmp(action, "fireleft") == 0)
 	{

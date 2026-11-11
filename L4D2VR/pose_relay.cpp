@@ -569,6 +569,20 @@ bool PoseRelay::HandleServerCommand(edict_t *player, const void *commandObject)
 		return true;
 	}
 
+	// The left hand's gun loaded by the right hand, or its ammo taken in the world: the ammo type (left_gun.cpp)
+	if (strcmp(name, "l4d2vr_left_reload") == 0 || strcmp(name, "l4d2vr_left_ammo") == 0)
+	{
+		const int index = ServerPlayerIndex(m_Game, player);
+		if (m_Game->IsValidPlayerIndex(index) && args.Count() == 2)
+		{
+			if (name[12] == 'r')
+				LeftGun::ServerReload(player, index, atoi(args.Arg(1)));
+			else
+				LeftGun::ServerAmmo(player, index, atoi(args.Arg(1)));
+		}
+		return true;
+	}
+
 	// One weapon entity taken out by the player's hand (dual wield): of two pistols, the one meant
 	if (strcmp(name, "l4d2vr_select") == 0)
 	{

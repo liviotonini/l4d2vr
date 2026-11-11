@@ -19,6 +19,9 @@ namespace LeftGun
 		const char *shotSound;   // the script's single_shot
 		bool pistolClick;        // the empty click of a pistol, otherwise a rifle's
 		bool twoHanded;          // a long gun, which the right hand can hold too
+		bool shells;             // loaded a shell at a time
+		int reserveMax;          // the most ammo carried for it (the game's ammo_*_max), 0 for pistols and the M60
+		const char *loadSound;   // its magazine put in, null if none
 	};
 
 	// Null for what isn't fired that way (melee weapons, the chainsaw, the grenade launcher)
@@ -26,4 +29,8 @@ namespace LeftGun
 
 	// The server: one shot of the player's left hand, from `origin` towards `angles`
 	void ServerFire(edict_t *edict, int playerIndex, const Vector &origin, const QAngle &angles, int seed);
+	// The right hand put a magazine (or a shell) in the left hand's gun, from the ammo of `ammoType`
+	void ServerReload(edict_t *edict, int playerIndex, int ammoType);
+	// The right hand took ammo in the world: the left hand's gun's ammo is full too
+	void ServerAmmo(edict_t *edict, int playerIndex, int ammoType);
 }

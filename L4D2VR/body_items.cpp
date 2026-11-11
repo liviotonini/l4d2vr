@@ -481,7 +481,19 @@ void VR::UpdateBodyItems()
 	// The left hand's item
 	BodyModelDraw leftItem;
 	if (m_BodyDrawCount < kMaxBodyDraws && GetLeftItemDraw(leftItem))
+	{
+		leftItem.leftGun = LeftGun::Find(m_LeftItemId) != nullptr;
 		m_BodyDraws[m_BodyDrawCount++] = leftItem;
+		// The magazine the empty right hand takes for it, in its fist
+		if (m_RightMagazine && leftItem.leftGun && m_BodyDrawCount < kMaxBodyDraws && GetTickCount64() - m_RightGripMs < 250)
+		{
+			BodyModelDraw magazine;
+			magazine.model = leftItem.model;
+			magazine.frame = m_RightGripFrame;
+			magazine.magazine = true;
+			m_BodyDraws[m_BodyDrawCount++] = magazine;
+		}
+	}
 
 	// The pistol on the thigh of the weapon hand, pointing down along it, where the grab takes it (IsAtHolster). Its
 	// weapon bone has y along the grip and z along the barrel: the grip sticks out backwards.
@@ -779,6 +791,32 @@ namespace
 		return bone;
 	}
 
+	// A weapon's magazine in its world model: "weapon_bone_Clip", and the bullets in it, -1 if none
+	struct ClipBones
+	{
+		int clip = -1, bullets = -1;
+	};
+
+	const ClipBones &ClipBonesOf(const void *studioHeader)
+	{
+		static std::unordered_map<const void *, ClipBones> s_Found;
+		auto found = s_Found.find(studioHeader);
+		if (found != s_Found.end())
+			return found->second;
+		ClipBones bones;
+		const int count = Studio::BoneCount(studioHeader);
+		for (int i = 0; i < count; ++i)
+		{
+			const char *name = Studio::BoneName(studioHeader, i);
+			const size_t length = strlen(name);
+			if (length >= 16 && strcmp(name + length - 16, "weapon_bone_Clip") == 0 && bones.clip < 0)
+				bones.clip = i;
+			else if (length >= 24 && strcmp(name + length - 24, "weapon_bone_Clip_Bullets") == 0 && bones.bullets < 0)
+				bones.bullets = i;
+		}
+		return s_Found[studioHeader] = bones;
+	}
+
 	// The adrenaline's first person model: the syringe is "weapon_clip", centered on its y axis like the weapon bone of
 	// the capped one, and the pieces of the cap are "weapon_bolt" and "weapon_trigger"
 	struct SyringeBones
@@ -830,12 +868,27 @@ void VR::BuildBodyModelBones(const void *studioHeader, const BodyModelDraw &draw
 
 	// Held: the bone the model is held by goes where the hand holds it
 	const SyringeBones *syringe = draw.syringe ? &SyringeBonesOf(studioHeader) : nullptr;
-	const int heldBone = syringe ? syringe->syringe : draw.alignWeaponBone ? WeaponBoneOf(studioHeader) : -1;
+	const ClipBones *clip = draw.magazine || draw.leftGun ? &ClipBonesOf(studioHeader) : nullptr;
+	const int heldBone = syringe ? syringe->syringe : draw.magazine ? clip->clip : draw.alignWeaponBone ? WeaponBoneOf(studioHeader) : -1;
 	if (heldBone >= 0 && heldBone < boneCount)
 	{
 		const Mat34 placed = Multiply(draw.frame, Studio::PoseToBone(studioHeader, heldBone));
 		for (int i = 0; i < boneCount; ++i)
 			bones[i] = Multiply(placed, InvertRigid(Studio::PoseToBone(studioHeader, i)));
+		// Only the magazine: the rest of the weapon folded away in it
+		if (draw.magazine)
+		{
+			for (int i = 0; i < boneCount; ++i)
+			{
+				if (i != clip->clip && i != clip->bullets)
+					bones[i] = CollapsedAt(Origin(draw.frame));
+			}
+		}
+		if (draw.leftGun && clip->clip >= 0 && clip->clip < boneCount)
+		{
+			m_LeftGunWell = Origin(bones[clip->clip]);
+			m_LeftGunWellMs = GetTickCount64();
+		}
 		if (syringe)
 		{
 			for (int piece : syringe->capPieces)
@@ -1209,6 +1262,9 @@ bool VR::TryGrabWorld(const Vec3 &handWorld, bool leftHand)
 	char command[128];
 	snprintf(command, sizeof(command), "l4d2vr_use_aim %.2f %.2f %.2f %.2f %.2f %.2f %d", m_GrabUseOrigin.x, m_GrabUseOrigin.y, m_GrabUseOrigin.z, m_GrabUseAngles.x, m_GrabUseAngles.y, m_GrabUseAngles.z, toLeftHand ? 1 : 0);
 	m_Game->m_EngineClient->ServerCmd(command, true);
+	// The ammo is for the left hand's gun too
+	if (target.ammo)
+		GiveLeftGunAmmo();
 
 	void *model = m_Game->m_ModelInfo->GetModel(target.modelIndex);
 	const char *modelName = model ? m_Game->m_ModelInfo->GetModelName(model) : nullptr;

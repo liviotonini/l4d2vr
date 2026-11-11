@@ -26,26 +26,27 @@ namespace
 {
 	const LeftGun::GunData kGuns[] =
 	{
-		{ C_WeaponCSBase::PISTOL, 0.15f, LeftGun::Semi, 1.5f, "Pistol.Fire", true, false },
-		{ C_WeaponCSBase::MAGNUM, 0.15f, LeftGun::Semi, 1.25f, "Magnum.Fire", true, false },
-		{ C_WeaponCSBase::UZI, 0.0625f, LeftGun::Auto, 1.0f, "SMG.Fire", false, true },
-		{ C_WeaponCSBase::MAC10, 0.0625f, LeftGun::Auto, 1.2f, "SMG_Silenced.Fire", false, true },
-		{ C_WeaponCSBase::MP5, 0.075f, LeftGun::Auto, 1.1f, "Weapon_MP5Navy.Single", false, true },
+		{ C_WeaponCSBase::PISTOL, 0.15f, LeftGun::Semi, 1.5f, "Pistol.Fire", true, false, false, 0, "Pistol.ClipIn" },
+		{ C_WeaponCSBase::MAGNUM, 0.15f, LeftGun::Semi, 1.25f, "Magnum.Fire", true, false, false, 0, "Magnum.ClipIn" },
+		{ C_WeaponCSBase::UZI, 0.0625f, LeftGun::Auto, 1.0f, "SMG.Fire", false, true, false, 650, "SMG.ClipIn" },
+		{ C_WeaponCSBase::MAC10, 0.0625f, LeftGun::Auto, 1.2f, "SMG_Silenced.Fire", false, true, false, 650, "SMG_Silenced.ClipIn" },
+		{ C_WeaponCSBase::MP5, 0.075f, LeftGun::Auto, 1.1f, "Weapon_MP5Navy.Single", false, true, false, 650, "SMG.ClipIn" },
 		// The pump shotguns are pumped between shots
-		{ C_WeaponCSBase::PUMPSHOTGUN, 0.8f, LeftGun::Semi, 0.8f, "Shotgun.Fire", false, true },
-		{ C_WeaponCSBase::SHOTGUN_CHROME, 0.8f, LeftGun::Semi, 0.8f, "Shotgun_Chrome.Fire", false, true },
-		{ C_WeaponCSBase::AUTOSHOTGUN, 0.15f, LeftGun::Semi, 0.8f, "AutoShotgun.Fire", false, true },
-		{ C_WeaponCSBase::SPAS, 0.15f, LeftGun::Semi, 0.75f, "AutoShotgun_Spas.Fire", false, true },
-		{ C_WeaponCSBase::M16A1, 0.0875f, LeftGun::Auto, 0.4f, "Rifle.Fire", false, true },
-		{ C_WeaponCSBase::SCAR, 0.07f, LeftGun::Burst, 0.35f, "Rifle_Desert.Fire", false, true },
-		{ C_WeaponCSBase::AK47, 0.13f, LeftGun::Auto, 1.0f, "AK47.Fire", false, true },
-		{ C_WeaponCSBase::SG552, 0.0825f, LeftGun::Auto, 0.4f, "Weapon_SG552.Single", false, true },
-		{ C_WeaponCSBase::M60, 0.11f, LeftGun::Auto, 1.0f, "M60.Fire", false, true },
-		{ C_WeaponCSBase::HUNTING_RIFLE, 0.25f, LeftGun::Semi, 0.1f, "HuntingRifle.Fire", false, true },
-		{ C_WeaponCSBase::SNIPER_MILITARY, 0.25f, LeftGun::Semi, 0.5f, "Sniper_Military.Fire", false, true },
+		{ C_WeaponCSBase::PUMPSHOTGUN, 0.8f, LeftGun::Semi, 0.8f, "Shotgun.Fire", false, true, true, 56, nullptr },
+		{ C_WeaponCSBase::SHOTGUN_CHROME, 0.8f, LeftGun::Semi, 0.8f, "Shotgun_Chrome.Fire", false, true, true, 56, nullptr },
+		{ C_WeaponCSBase::AUTOSHOTGUN, 0.15f, LeftGun::Semi, 0.8f, "AutoShotgun.Fire", false, true, true, 90, nullptr },
+		{ C_WeaponCSBase::SPAS, 0.15f, LeftGun::Semi, 0.75f, "AutoShotgun_Spas.Fire", false, true, true, 90, nullptr },
+		{ C_WeaponCSBase::M16A1, 0.0875f, LeftGun::Auto, 0.4f, "Rifle.Fire", false, true, false, 360, "Rifle.ClipIn" },
+		{ C_WeaponCSBase::SCAR, 0.07f, LeftGun::Burst, 0.35f, "Rifle_Desert.Fire", false, true, false, 360, "Rifle_Desert.ClipIn" },
+		{ C_WeaponCSBase::AK47, 0.13f, LeftGun::Auto, 1.0f, "AK47.Fire", false, true, false, 360, "AK47.ClipIn" },
+		{ C_WeaponCSBase::SG552, 0.0825f, LeftGun::Auto, 0.4f, "Weapon_SG552.Single", false, true, false, 360, "Rifle.ClipIn" },
+		// The M60 isn't reloaded, as in the game
+		{ C_WeaponCSBase::M60, 0.11f, LeftGun::Auto, 1.0f, "M60.Fire", false, true, false, 0, nullptr },
+		{ C_WeaponCSBase::HUNTING_RIFLE, 0.25f, LeftGun::Semi, 0.1f, "HuntingRifle.Fire", false, true, false, 150, "HuntingRifle.ClipIn" },
+		{ C_WeaponCSBase::SNIPER_MILITARY, 0.25f, LeftGun::Semi, 0.5f, "Sniper_Military.Fire", false, true, false, 180, "Sniper_Military.ClipIn" },
 		// The bolt action rifles are worked between shots
-		{ C_WeaponCSBase::AWP, 1.05f, LeftGun::Semi, 0.1f, "Weapon_AWP.Single", false, true },
-		{ C_WeaponCSBase::SCOUT, 0.9f, LeftGun::Semi, 0.1f, "Weapon_Scout.Single", false, true },
+		{ C_WeaponCSBase::AWP, 1.05f, LeftGun::Semi, 0.1f, "Weapon_AWP.Single", false, true, false, 180, "HuntingRifle.ClipIn" },
+		{ C_WeaponCSBase::SCOUT, 0.9f, LeftGun::Semi, 0.1f, "Weapon_Scout.Single", false, true, false, 180, "HuntingRifle.ClipIn" },
 	};
 
 	const int kBurstShots = 3;
@@ -64,9 +65,14 @@ namespace
 	const float kMaxShotFromEyes = 120.0f;
 	const float kServerCycleShare = 0.7f;
 
-	// m_iClip1 of a weapon, on the client and on the server
+	// m_iClip1 of a weapon, on the client and on the server; m_iPrimaryAmmoType of a weapon and m_iAmmo of a player
 	const int kClientClipOffset = 0x984;
 	const int kServerClipOffset = 0x1414;
+	const int kClientAmmoTypeOffset = 0x97C;
+	const int kClientAmmoArrayOffset = 0xF24;
+	const int kServerAmmoArrayOffset = 0x1874;
+	// The right hand puts the magazine in within this of where it goes, meters
+	const float kMagazineWellReach = 0.1f;
 
 	const HapticEffect kShotHaptic = { { 0.0f, 0.03f, 190.0f, 0.55f } };
 
@@ -130,6 +136,80 @@ bool VR::TryRightHoldLeftGun()
 	return true;
 }
 
+// The left hand's gun takes ammo now: its magazine isn't full, and there's ammo for it
+bool VR::LeftGunNeedsAmmo(const LeftGun::GunData &gun) const
+{
+	const int capacity = GetReloadCapacity(gun.weaponId);
+	if (capacity <= 0 || m_LeftGunClip >= capacity || m_LeftGunClipIndex != m_LeftItemIndex)
+		return false;
+	if (ReloadHasUnlimitedReserve(gun.weaponId))
+		return true;
+	const void *weapon = m_Game->GetClientEntity(m_LeftItemIndex);
+	const void *local = m_Game->GetClientEntity(m_Game->m_EngineClient->GetLocalPlayer());
+	const int ammoType = weapon ? Read<int>(weapon, kClientAmmoTypeOffset) : -1;
+	return local && ammoType >= 0 && ammoType < 32 && Read<int>(local, kClientAmmoArrayOffset + ammoType * 4) > 0;
+}
+
+// Where the left hand's gun takes its magazine, as it was last drawn (BuildBodyModelBones)
+bool VR::AtLeftGunWell(const Vec3 &point) const
+{
+	return GetTickCount64() - m_LeftGunWellMs < 250 && Length(point - m_LeftGunWell) < kMagazineWellReach * m_VRScale;
+}
+
+// The empty right hand reloads the left hand's gun (on the right grab, UpdateTracking): with the reload by hand it takes a
+// magazine (a shell) from the ammo bag, put in where the gun's goes (UpdateLeftGun); otherwise a grab there loads it.
+// True if the grab was for that.
+bool VR::TryRightReloadLeftGun()
+{
+	const LeftGun::GunData *gun = LeftHandHoldsItem() ? LeftGun::Find(m_LeftItemId) : nullptr;
+	if (!m_RightHandEmpty || !gun || !LeftGunNeedsAmmo(*gun))
+		return false;
+	const Vec3 fist = GetFistPoint(true);
+	if (!m_ManualReloadEnabled)
+	{
+		if (!AtLeftGunWell(fist))
+			return false;
+		LoadLeftGun(*gun);
+		return true;
+	}
+	if (Length(fist - m_WaistWorld) > Reload::kPouchRadius * m_VRScale)
+		return false;
+	m_RightMagazine = true;
+	m_RightMagazineIndex = m_LeftItemIndex;
+	m_Haptics.Play(Haptics::Hand::WeaponHand, HapticEffects::Take);
+	Diagnostics::Log("left gun: the right hand took a %s for it", gun->shells ? "shell" : "magazine");
+	return true;
+}
+
+// The magazine goes in: the server loads the gun from the ammo carried (LeftGun::ServerReload)
+void VR::LoadLeftGun(const LeftGun::GunData &gun)
+{
+	const void *weapon = m_Game->GetClientEntity(m_LeftItemIndex);
+	const int ammoType = weapon ? Read<int>(weapon, kClientAmmoTypeOffset) : -1;
+	char command[64];
+	snprintf(command, sizeof(command), "l4d2vr_left_reload %d", ammoType);
+	m_Game->m_EngineClient->ServerCmd(command, true);
+	if (gun.loadSound)
+	{
+		snprintf(command, sizeof(command), "playgamesound %s", gun.loadSound);
+		m_Game->ClientCmd_Unrestricted(command);
+	}
+	m_Haptics.Play(Haptics::Hand::BothHands, HapticEffects::Click);
+	Diagnostics::Log("left gun: loaded by the right hand");
+}
+
+// Ammo taken in the world (TryGrabWorld): the left hand's gun's ammo is full too, whatever the game gave the right hand's
+void VR::GiveLeftGunAmmo()
+{
+	const LeftGun::GunData *gun = m_LeftItemIndex ? LeftGun::Find(m_LeftItemId) : nullptr;
+	const void *weapon = gun && gun->reserveMax > 0 ? m_Game->GetClientEntity(m_LeftItemIndex) : nullptr;
+	if (!weapon)
+		return;
+	char command[48];
+	snprintf(command, sizeof(command), "l4d2vr_left_ammo %d", Read<int>(weapon, kClientAmmoTypeOffset));
+	m_Game->m_EngineClient->ServerCmd(command, true);
+}
+
 // Where the left hand's gun shoots from and towards: along its barrel as it's drawn (GetLeftItemDraw puts the weapon bone,
 // barrel along z, in the fist), or the controller's when the hand isn't drawn
 bool VR::GetLeftGunAim(Vector &origin, QAngle &angles) const
@@ -160,6 +240,20 @@ void VR::UpdateLeftGun(unsigned long long now)
 		m_RightHoldsLeftGun = false;
 		m_RightHoldsLeftGunTest = false;
 		Diagnostics::Log("left gun: let go by the right hand");
+	}
+	// A magazine in the right hand goes in where the gun's goes, or back in the bag when the grab is let go
+	if (m_RightMagazine)
+	{
+		if (!gun || !m_RightHandEmpty || m_LeftItemIndex != m_RightMagazineIndex || (!PressedDigitalAction(m_RightHandGrab) && !m_RightMagazineTest))
+		{
+			m_RightMagazine = m_RightMagazineTest = false;
+			Diagnostics::Log("left gun: the right hand's magazine went back");
+		}
+		else if (AtLeftGunWell(GetFistPoint(true)) || m_RightMagazineTest)
+		{
+			m_RightMagazine = m_RightMagazineTest = false;
+			LoadLeftGun(*gun);
+		}
 	}
 	const bool trigger = gun && PressedDigitalAction(m_ActionSecondaryAttack) && !m_ScopeZoomTookTrigger;
 	const bool pressed = trigger && !m_LeftGunTriggerDown;
@@ -239,6 +333,69 @@ void VR::FireLeftGun(const LeftGun::GunData &gun, const Vector &origin, const QA
 // ---------------------------------------------------------------------------------------------------------------
 // Server
 // ---------------------------------------------------------------------------------------------------------------
+
+namespace
+{
+	// The player's left hand's gun, null if it holds none
+	void *ServerLeftGun(edict_t *edict, int playerIndex, void *&player, const LeftGun::GunData *&data)
+	{
+		data = nullptr;
+		player = nullptr;
+		if (!g_Game || !g_Game->IsValidPlayerIndex(playerIndex) || !edict || !edict->m_pUnk)
+			return nullptr;
+		player = edict->m_pUnk->GetBaseEntity();
+		const Player &vrPlayer = g_Game->m_PlayersVRInfo[playerIndex];
+		void *gun = vrPlayer.leftItemIndex ? DualWield::ServerPlayersWeapon(player, vrPlayer.leftItemIndex) : nullptr;
+		data = gun ? LeftGun::Find(((Server_WeaponCSBase *)gun)->GetWeaponID()) : nullptr;
+		return data ? gun : nullptr;
+	}
+}
+
+void LeftGun::ServerReload(edict_t *edict, int playerIndex, int ammoType)
+{
+	void *player;
+	const GunData *data;
+	void *gun = ServerLeftGun(edict, playerIndex, player, data);
+	const int capacity = data ? VR::GetReloadCapacity(data->weaponId) : 0;
+	if (!gun || capacity <= 0)
+		return;
+	int &clip = *(int *)((uint8_t *)gun + kServerClipOffset);
+	if (clip < 0 || clip >= capacity)
+		return;
+
+	if (VR::ReloadHasUnlimitedReserve(data->weaponId))
+	{
+		clip = capacity;
+	}
+	else
+	{
+		if (ammoType < 0 || ammoType >= 32)
+			return;
+		int &reserve = *(int *)((uint8_t *)player + kServerAmmoArrayOffset + ammoType * 4);
+		const int taken = std::min(data->shells ? 1 : capacity - clip, reserve);
+		if (taken <= 0)
+			return;
+		clip += taken;
+		reserve -= taken;
+		DualWield::ServerNetworkChanged(player);
+	}
+	DualWield::ServerNetworkChanged(gun);
+	Diagnostics::Log("left gun: player %d loaded weapon %d, %d in it", playerIndex, data->weaponId, clip);
+}
+
+void LeftGun::ServerAmmo(edict_t *edict, int playerIndex, int ammoType)
+{
+	void *player;
+	const GunData *data;
+	if (!ServerLeftGun(edict, playerIndex, player, data) || data->reserveMax <= 0 || ammoType < 0 || ammoType >= 32)
+		return;
+	int &reserve = *(int *)((uint8_t *)player + kServerAmmoArrayOffset + ammoType * 4);
+	if (reserve >= data->reserveMax)
+		return;
+	reserve = data->reserveMax;
+	DualWield::ServerNetworkChanged(player);
+	Diagnostics::Log("left gun: player %d took ammo for weapon %d", playerIndex, data->weaponId);
+}
 
 void LeftGun::ServerFire(edict_t *edict, int playerIndex, const Vector &origin, const QAngle &angles, int seed)
 {

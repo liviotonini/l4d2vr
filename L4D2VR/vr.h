@@ -415,6 +415,8 @@ public:
 		bool alignWeaponBone = false; // the model's "weapon_bone" is at the frame instead, like in a hand
 		bool syringe = false;         // the adrenaline's first person model, uncapped: its syringe held like the weapon bone
 		bool onePistol = false;       // the model of two pistols shows only one
+		bool leftGun = false;         // the left hand's gun: where its magazine goes is kept (m_LeftGunWell)
+		bool magazine = false;        // only the weapon's magazine, held by its "weapon_bone_Clip" at the frame
 	};
 	// A weapon the player carries
 	struct InventoryItem
@@ -484,6 +486,11 @@ public:
 	int m_LeftGunClipIndex = 0;
 	bool m_RightHoldsLeftGun = false;      // the empty right hand holds the left hand's gun too (TryRightHoldLeftGun)
 	bool m_RightHoldsLeftGunTest = false;  // held so by l4d2vr_dual_test, without the grab
+	bool m_RightMagazine = false;          // the empty right hand holds a magazine for the left hand's gun
+	bool m_RightMagazineTest = false;
+	int m_RightMagazineIndex = 0;          // the gun it's for
+	HandMath::Vec3 m_LeftGunWell;          // where the left hand's gun takes its magazine, as last drawn
+	unsigned long long m_LeftGunWellMs = 0;
 	bool m_LeftSwinging = false;
 	QAngle m_LeftSwingPrevAim = { 0, 0, 0 }; // the aim sent for the swing, from the last update
 	bool m_LeftSwingAimValid = false;
@@ -632,6 +639,11 @@ public:
 	bool GetLeftGunAim(Vector &origin, QAngle &angles) const;
 	bool GetLeftItemFrame(HandMath::Mat34 &frame) const;
 	bool TryRightHoldLeftGun();
+	bool TryRightReloadLeftGun();
+	bool LeftGunNeedsAmmo(const LeftGun::GunData &gun) const;
+	bool AtLeftGunWell(const HandMath::Vec3 &point) const;
+	void LoadLeftGun(const LeftGun::GunData &gun);
+	void GiveLeftGunAmmo();
 	void GiveToLeftHand(int activeIndex, int activeWeaponId, const InventoryItem *items, int count);
 	void GiveToRightHand(const InventoryItem *items, int count);
 	bool GetLeftItemDraw(BodyModelDraw &draw);

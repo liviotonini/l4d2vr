@@ -2434,8 +2434,8 @@ void VR::UpdateTracking()
         {
             if (isPressingRightGrab == false)
             {
-                // The empty right hand on the left hand's long gun holds it too (left_gun.cpp)
-                if (!TryRightHoldLeftGun())
+                // The empty right hand reloads the left hand's gun, or holds it too when on its barrel (left_gun.cpp)
+                if (!TryRightReloadLeftGun() && !TryRightHoldLeftGun())
                     UpdateBodyGrab(true, rightControllerPosLocalInWorld, weaponId);
 
                 isPressingRightGrab = true;
