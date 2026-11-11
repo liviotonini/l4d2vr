@@ -257,7 +257,7 @@ bool VR::LeftShoulderGrab()
 // person
 bool VR::GetLeftItemDraw(BodyModelDraw &draw)
 {
-	if (!LeftHandHoldsItem() || !m_LeftGripValid || !m_ArmsRig || m_LeftHandFollow < 1.0f)
+	if (!LeftHandHoldsItem() || m_LeftHandFollow < 1.0f)
 		return false;
 
 	const void *entity = m_Game->GetClientEntity(m_LeftItemIndex);
@@ -265,24 +265,23 @@ bool VR::GetLeftItemDraw(BodyModelDraw &draw)
 	if (!model)
 		return false;
 
+	// A melee weapon's weapon bone has y along the blade and z towards the edge: the blade comes out of the fist by the
+	// thumb, like a sword held, with the edge on the side of the fingers
+	draw = BodyModelDraw();
+	draw.model = model;
+	draw.alignWeaponBone = true;
+	return GetLeftGripFrame(draw.frame);
+}
+
+// The left hand's fist in the world: y along the grip, out by the thumb, z where the fingers point (HandRig::GripFrame)
+bool VR::GetLeftGripFrame(Mat34 &frame) const
+{
+	if (!m_LeftGripValid || !m_ArmsRig)
+		return false;
 	const Mat34 hand = GetLeftHandBone(*m_ArmsRig);
 	if (!IsFinite(hand))
 		return false;
-
-	draw = BodyModelDraw();
-	draw.model = model;
-	draw.frame = Multiply(hand, m_LeftGripInHand);
-	draw.alignWeaponBone = true;
-
-	// A melee weapon points where the controller aims, like the right hand's, with the edge down. Its weapon bone has
-	// y along the blade and z towards the edge.
-	if (m_LeftItemId == C_WeaponCSBase::MELEE)
-	{
-		const Vec3 blade = Normalized(Vec3(m_LeftControllerForward.x, m_LeftControllerForward.y, m_LeftControllerForward.z));
-		const Vec3 up(m_LeftControllerUp.x, m_LeftControllerUp.y, m_LeftControllerUp.z);
-		const Vec3 edge = Normalized(up - blade * Dot(up, blade), Vec3(0.0f, 0.0f, 1.0f)) * -1.0f;
-		draw.frame = FromAxes(Cross(blade, edge), blade, edge, Origin(draw.frame));
-	}
+	frame = Multiply(hand, m_LeftGripInHand);
 	return true;
 }
 
@@ -518,10 +517,21 @@ void VR::UpdateLeftSwing(unsigned long long now)
 		return;
 	m_LeftHandSentMs = now;
 
-	// The server traces 50 degrees up from the aim it gets (made for the right hand's weapons): this one is sent turned
-	// down by as much, so the traces go along the blade as it's drawn (GetLeftItemDraw)
-	const Vector forward = VectorRotate(m_LeftControllerForward, m_LeftControllerRight, -kServerMeleeTraceTilt);
-	const Vector up = VectorRotate(m_LeftControllerUp, m_LeftControllerRight, -kServerMeleeTraceTilt);
+	// The server traces 50 degrees up from the aim it gets (made for the right hand's weapons, held up from the aim).
+	// The aim sent is the blade as it's drawn (GetLeftItemDraw) turned by as much towards its edge, with "up" towards
+	// the blade, so the traces go along it.
+	Vector forward = VectorRotate(m_LeftControllerForward, m_LeftControllerRight, -kServerMeleeTraceTilt);
+	Vector up = VectorRotate(m_LeftControllerUp, m_LeftControllerRight, -kServerMeleeTraceTilt);
+	Mat34 grip;
+	if (GetLeftGripFrame(grip))
+	{
+		const Vec3 blade = Normalized(Axis(grip, 1)), edge = Normalized(Axis(grip, 2));
+		const float radians = kServerMeleeTraceTilt * 3.14159265f / 180.0f;
+		const Vec3 aimForward = blade * cosf(radians) + edge * sinf(radians);
+		const Vec3 aimUp = blade * sinf(radians) - edge * cosf(radians);
+		forward = Vector(aimForward.x, aimForward.y, aimForward.z);
+		up = Vector(aimUp.x, aimUp.y, aimUp.z);
+	}
 	QAngle aim;
 	QAngle::VectorAngles(forward, up, aim);
 
@@ -691,6 +701,21 @@ void VR::DualWieldTest(const char *action)
 	if (strcmp(action, "shoulder") == 0)
 	{
 		Diagnostics::Log("dual wield test: left shoulder %s", LeftShoulderGrab() ? "did something" : "did nothing");
+		return;
+	}
+
+	// thigh: the weapon hand's grab where the pistol is on the thigh
+	if (strcmp(action, "thigh") == 0)
+	{
+		if (!m_HolsterValid)
+		{
+			Diagnostics::Log("dual wield test: no place on the thigh yet");
+			return;
+		}
+		const Vector feet = m_CameraAnchor - Vector(0, 0, 64);
+		Diagnostics::Log("dual wield test: thigh %.1f %.1f %.1f units from the eyes, which are %.2f m above the floor",
+			m_HolsterPoint.x - m_HmdPosAbs.x, m_HolsterPoint.y - m_HmdPosAbs.y, m_HolsterPoint.z - m_HmdPosAbs.z, m_HmdPosLocalInWorld.z / m_VRScale);
+		UpdateBodyGrab(true, Vector(m_HolsterPoint.x - feet.x, m_HolsterPoint.y - feet.y, m_HolsterPoint.z - feet.z), m_ActiveWeaponId);
 		return;
 	}
 

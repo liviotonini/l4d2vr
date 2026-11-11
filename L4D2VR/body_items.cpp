@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstring>
 #include <unordered_map>
+#include "body_layout.h"
 #include "dual_wield.h"
 #include "sdk.h"
 #include "game.h"
@@ -263,15 +264,11 @@ namespace
 		}
 	}
 
-	// Meters from the eyes looking straight ahead, for a right handed player of 1.8 m: forward, to the left, up.
-	// Pills by the left shoulder, the grenade on the right one.
-	const Vec3 kChestSpots[2] = { Vec3(0.11f, 0.13f, -0.37f), Vec3(0.10f, -0.16f, -0.34f) };
+	// Where the pills and the grenade go: m_ItemSpot* (config.txt), BodyLayout::DefaultItemSpot
 	const float kChestGrabRadius = 0.12f; // meters
 	const float kChestViewCosine = 0.2f;
-	// The pistol's holster, per meter of the player's height, from the same place as the body items: the middle of the
-	// place where the weapon hand takes the secondary weapon (vr.cpp: 22.5 and 21.5 units at 43.2 units per meter, from
-	// the eyes and below them, to the side)
-	const Vec3 kHolsterSpot(0.0f, -0.1535f, -0.4977f);
+	// The weapon hand takes the secondary weapon this close to the pistol's place on the thigh, whether it's there or not
+	const float kHolsterGrabRadius = 0.16f; // meters
 
 	// The fist of another player's left hand from the wrist they send, meters: along the fingers, towards the palm
 	const float kRemoteFistForward = 0.075f;
@@ -293,14 +290,10 @@ namespace
 		return FromAxes(facing, Cross(up, facing), up, reference);
 	}
 
-	// An item standing upright on the chest, facing forward. The adrenaline's model lies along its y axis.
-	Mat34 ChestItemFrame(const Mat34 &body, int spot, int weaponId, bool leftHanded, float playerHeight, float unitsPerMeter)
+	// An item standing upright on the body, facing forward, `offset` meters away in the body frame. The adrenaline's
+	// model lies along its y axis.
+	Mat34 ChestItemFrame(const Mat34 &body, const Vec3 &offset, int weaponId, float unitsPerMeter)
 	{
-		Vec3 offset = kChestSpots[spot];
-		offset.z *= playerHeight / 1.8f;
-		if (leftHanded)
-			offset.y = -offset.y;
-
 		const Vec3 point = TransformPoint(body, offset * unitsPerMeter);
 		const Vec3 forward = Axis(body, 0), up(0.0f, 0.0f, 1.0f);
 		if (weaponId == C_WeaponCSBase::ADRENALINE)
@@ -343,6 +336,8 @@ void VR::UpdateBodyItems()
 	m_BodyDrawCount = 0;
 	m_AmmoBagDrawn = false;
 	m_ChestItemIds[0] = m_ChestItemIds[1] = 0;
+	m_ChestSpotsValid = false;
+	m_HolsterValid = false;
 
 	if (!m_Game->m_EngineClient->IsInGame())
 		return;
@@ -411,17 +406,29 @@ void VR::UpdateBodyItems()
 	}
 
 	const Mat34 body = BodyFrame(ToVec3(m_HmdPosAbs), ToVec3(m_HmdForward), ToVec3(m_HmdUp), m_VRScale);
+	Vec3 spotOffsets[2];
 	for (int spot = 0; spot < 2; ++spot)
-		m_ChestSpotPoints[spot] = Origin(ChestItemFrame(body, spot, C_WeaponCSBase::PAIN_PILLS, m_LeftHanded, m_PlayerHeightInMeters, m_VRScale));
+	{
+		const BodyLayout::ItemSpot itemSpot = { m_ItemSpotForward[spot], m_ItemSpotSide[spot], m_ItemSpotBelowEyes[spot] };
+		spotOffsets[spot] = BodyLayout::ItemSpotOffset(itemSpot, m_LeftHanded);
+		m_ChestSpotPoints[spot] = TransformPoint(body, spotOffsets[spot] * m_VRScale);
+	}
 	m_ChestSpotsValid = true;
+
+	// The pistol's place on the thigh, from the height of the eyes above the floor of the play area (the body frame's
+	// origin, in tracking space)
+	const float floorZ = m_HmdPosAbs.z - m_HmdPosLocalInWorld.z;
+	const BodyLayout::Holster holster = BodyLayout::HolsterOnThigh(m_PlayerHeightInMeters, (Origin(body).z - floorZ) / m_VRScale, m_LeftHanded);
+	m_HolsterPoint = TransformPoint(body, holster.point * m_VRScale);
+	m_HolsterValid = true;
 
 	// The left hand's item
 	BodyModelDraw leftItem;
 	if (m_BodyDrawCount < kMaxBodyDraws && GetLeftItemDraw(leftItem))
 		m_BodyDraws[m_BodyDrawCount++] = leftItem;
 
-	// The pistol on the thigh of the weapon hand, pointing down, where the grab takes it (the "secondary weapon (leg)"
-	// place in vr.cpp). Its weapon bone has y along the grip and z along the barrel: the grip sticks out backwards.
+	// The pistol on the thigh of the weapon hand, pointing down along it, where the grab takes it (IsAtHolster). Its
+	// weapon bone has y along the grip and z along the barrel: the grip sticks out backwards.
 	for (int i = 0; i < g_MyWeaponsCount && m_BodyDrawCount < kMaxBodyDraws; ++i)
 	{
 		const int handle = Read<int>(local, g_MyWeaponsOffset + i * 4);
@@ -434,18 +441,14 @@ void VR::UpdateBodyItems()
 		if (weaponId != C_WeaponCSBase::PISTOL && weaponId != C_WeaponCSBase::MAGNUM)
 			continue;
 
-		Vec3 offset = kHolsterSpot * m_PlayerHeightInMeters;
-		if (m_LeftHanded)
-			offset.y = -offset.y;
-		const Vec3 point = TransformPoint(body, offset * m_VRScale);
 		const void *model = GetEntityModel(weapon);
-		const bool inView = Dot(Normalized(point - ToVec3(m_HmdPosAbs)), ToVec3(m_HmdForward)) > kChestViewCosine;
+		const bool inView = Dot(Normalized(m_HolsterPoint - ToVec3(m_HmdPosAbs)), ToVec3(m_HmdForward)) > kChestViewCosine;
 		if (model && inView)
 		{
-			const Vec3 facing = Axis(body, 0), down(0.0f, 0.0f, -1.0f);
+			const Vec3 slide = RotateVector(body, holster.slide), barrel = RotateVector(body, holster.barrel);
 			BodyModelDraw draw;
 			draw.model = model;
-			draw.frame = FromAxes(Cross(facing, down), facing, down, point);
+			draw.frame = FromAxes(Cross(slide, barrel), slide, barrel, m_HolsterPoint);
 			draw.alignWeaponBone = true;
 			m_BodyDraws[m_BodyDrawCount++] = draw;
 		}
@@ -457,7 +460,7 @@ void VR::UpdateBodyItems()
 		const int weaponId = m_ChestItemIds[spot];
 		if (!weaponId)
 			continue;
-		const Mat34 frame = ChestItemFrame(body, spot, weaponId, m_LeftHanded, m_PlayerHeightInMeters, m_VRScale);
+		const Mat34 frame = ChestItemFrame(body, spotOffsets[spot], weaponId, m_VRScale);
 		m_ChestItemPoints[spot] = Origin(frame);
 
 		const void *model = GetModel(m_Game, ModelOfItem(weaponId));
@@ -502,6 +505,12 @@ int VR::GetChestSpotAt(const Vec3 &handWorld) const
 			return spot;
 	}
 	return -1;
+}
+
+// The hand is where the pistol goes on the thigh, with or without it
+bool VR::IsAtHolster(const Vec3 &handWorld) const
+{
+	return m_HolsterValid && Length(handWorld - m_HolsterPoint) < kHolsterGrabRadius * m_VRScale;
 }
 
 // The weapons a player carries. Returns how many were written.
@@ -628,10 +637,9 @@ bool VR::BuildRemoteItemBones(int entityIndex, const void *weapon, const void *s
 			const Vec3 palm = Cross(fingers, thumb);
 			const Vec3 wrist = pose.leftWrist.position + m_RemoteHeadOffset[player];
 			const Vec3 fist = wrist + (fingers * kRemoteFistForward + palm * kRemoteFistPalm) * m_VRScale;
-			// Weapon bone: y along the grip, z where the fingers point. A melee weapon points forward, edge down.
-			const bool melee = ((C_WeaponCSBase *)weapon)->GetWeaponID() == C_WeaponCSBase::MELEE;
+			// Weapon bone: y along the grip, z where the fingers point. A melee weapon's blade comes out by the thumb.
 			BodyModelDraw draw;
-			draw.frame = melee ? FromAxes(Cross(fingers, thumb * -1.0f), fingers, thumb * -1.0f, fist) : FromAxes(Cross(thumb, fingers), thumb, fingers, fist);
+			draw.frame = FromAxes(Cross(thumb, fingers), thumb, fingers, fist);
 			draw.alignWeaponBone = true;
 			BuildBodyModelBones(studioHeader, draw, outBones);
 			return true;
@@ -648,7 +656,8 @@ bool VR::BuildRemoteItemBones(int entityIndex, const void *weapon, const void *s
 
 		const Mat34 body = BodyFrame(pose.head.position + m_RemoteHeadOffset[player], pose.head.forward, pose.head.up, m_VRScale);
 		BodyModelDraw draw;
-		draw.frame = ChestItemFrame(body, spot, weaponId, false, 1.8f, m_VRScale);
+		// Where they are by default for someone of 1.8 m: their own settings aren't sent
+		draw.frame = ChestItemFrame(body, BodyLayout::ItemSpotOffset(BodyLayout::DefaultItemSpot(spot, 1.8f), false), weaponId, m_VRScale);
 		draw.scale = m_SmallBodyItems ? kChestItemSmallScale : 1.0f;
 		BuildBodyModelBones(studioHeader, draw, outBones);
 		return true;

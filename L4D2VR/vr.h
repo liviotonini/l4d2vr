@@ -411,6 +411,15 @@ public:
 	HandMath::Vec3 m_ChestItemPoints[2];
 	HandMath::Vec3 m_ChestSpotPoints[2];   // where they go, with or without them
 	bool m_ChestSpotsValid = false;
+	// Where the pills (0) and the grenade (1) are carried, meters from the eyes looking straight ahead: forward, to the
+	// weapon hand's side (negative is the other side) and below. Only in config.txt (PillsForward, GrenadeSide...); the
+	// defaults follow the player's height (BodyLayout::DefaultItemSpot).
+	float m_ItemSpotForward[2] = { 0.11f, 0.10f };
+	float m_ItemSpotSide[2] = { -0.13f, 0.16f };
+	float m_ItemSpotBelowEyes[2] = { 0.37f, 0.34f };
+	// The pistol's place on the thigh, follows the leg when crouching (BodyLayout::HolsterOnThigh)
+	HandMath::Vec3 m_HolsterPoint;
+	bool m_HolsterValid = false;
 
 	// Dual wield (dual_wield.cpp): the left hand holds a melee weapon, a grenade, pills or adrenaline. DualWield in
 	// config.txt.
@@ -540,6 +549,7 @@ public:
 	int GetInventory(C_BasePlayer *player, InventoryItem *items, int max);
 	const void *GetEntityModel(const void *entity);
 	int GetChestSpotAt(const HandMath::Vec3 &handWorld) const;
+	bool IsAtHolster(const HandMath::Vec3 &handWorld) const;
 	// Dual wield (dual_wield.cpp)
 	void UpdateDualWield(C_BasePlayer *local, int activeWeaponId, float deltaSeconds);
 	void UpdateLeftUse(unsigned long long now, int activeIndex, const InventoryItem *items, int count);
@@ -552,6 +562,7 @@ public:
 	bool LeftHandChestGrab(const HandMath::Vec3 &handWorld);
 	bool LeftShoulderGrab();
 	bool GetLeftItemDraw(BodyModelDraw &draw);
+	bool GetLeftGripFrame(HandMath::Mat34 &frame) const;
 	HandMath::Mat34 GetLeftHandBone(const HandRig &rig) const;
 	void HoldLeftItem(const HandRig &rig, float curls[HandRig::FingerCount]);
 	void KeepLeftGrip(const HandRig &rig, const HandMath::Mat34 *bones);

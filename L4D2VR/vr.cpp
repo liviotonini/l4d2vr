@@ -19,6 +19,7 @@
 #include "diagnostics.h"
 #include "pose_relay.h"
 #include "reload_logic.h"
+#include "body_layout.h"
 
 VR::VR(Game *game) 
 {
@@ -1980,8 +1981,7 @@ namespace
     {
         { "primary weapon (behind the shoulder)", true, 1, 2, [](const HandOnBody &hand, float)
             { return InRange(hand.distance, Tuned(12.0f), Tuned(2.0f)) && hand.side >= 0.1f && hand.forward <= -0.7f; } },
-        { "secondary weapon (leg)", true, 2, 1, [](const HandOnBody &hand, float height)
-            { return InRange(hand.distance, Tuned(22.5f) * height, Tuned(5.0f)) && hand.side >= 0.8f && InRange(hand.drop, Tuned(21.5f) * height, Tuned(5.0f)); } },
+        // The secondary weapon is taken from the thigh, where the pistol is seen (VR::IsAtHolster)
         { "medkit (back)", true, 4, 4, [](const HandOnBody &hand, float height)
             { return hand.forward < -0.9f && InRange(hand.drop, Tuned(11.9f) * height, Tuned(5.0f)); } },
 
@@ -2079,6 +2079,20 @@ void VR::UpdateBodyGrab(bool weaponHand, const Vector &handPosLocalInWorld, int 
         m_Haptics.Play(weaponHand ? Haptics::Hand::WeaponHand : Haptics::Hand::OtherHand, HapticEffects::Take);
         WriteBodyGrabLog("%s: %.2f m away, side %.2f, forward %.2f, %.2f m below, head pitched %.0f deg down: %s on the chest, %s",
             handName, hand.distance, hand.side, hand.forward, hand.drop, headPitchDown, chestSlot == 3 ? "grenade" : "pills or adrenaline", command);
+        return;
+    }
+
+    // The pistol's place on the thigh (body_items.cpp), which follows the leg when crouching: the secondary weapon, or
+    // the primary one when the secondary is in the hand
+    if (weaponHand && IsAtHolster(HandMath::Vec3(handWorld.x, handWorld.y, handWorld.z)))
+    {
+        const int slot = GetWeaponSlot(weaponId) == 2 ? 1 : 2;
+        char command[16];
+        snprintf(command, sizeof(command), "slot%d", slot);
+        m_Game->ClientCmd_Unrestricted(command);
+        m_Haptics.Play(Haptics::Hand::WeaponHand, HapticEffects::Confirm);
+        WriteBodyGrabLog("%s: %.2f m away, side %.2f, forward %.2f, %.2f m below, head pitched %.0f deg down: secondary weapon (thigh), %s",
+            handName, hand.distance, hand.side, hand.forward, hand.drop, headPitchDown, command);
         return;
     }
 
@@ -2587,6 +2601,17 @@ void VR::ParseConfigFile()
     m_MagazinePouchForward = readFloat("MagazinePouchForward", m_MagazinePouchForward, -0.3f, 0.5f);
     m_MagazinePouchBelowEyes = readFloat("MagazinePouchBelowEyes", kMagazinePouchBelowEyesPerHeight * m_PlayerHeightInMeters, 0.2f, 1.2f);
 
+    // Where the pills and the grenade are on the body, only by editing config.txt. Far enough to reach the belt.
+    const char *const itemSpotNames[2] = { "Pills", "Grenade" };
+    for (int spot = 0; spot < 2; ++spot)
+    {
+        const BodyLayout::ItemSpot defaults = BodyLayout::DefaultItemSpot(spot, m_PlayerHeightInMeters);
+        const std::string name = itemSpotNames[spot];
+        m_ItemSpotForward[spot] = readFloat((name + "Forward").c_str(), defaults.forward, -0.4f, 0.5f);
+        m_ItemSpotSide[spot] = readFloat((name + "Side").c_str(), defaults.side, -0.5f, 0.5f);
+        m_ItemSpotBelowEyes[spot] = readFloat((name + "BelowEyes").c_str(), defaults.below, 0.1f, 1.1f);
+    }
+
     // Fine tuning of the hand, only by editing config.txt
     Vector handOffset = m_HandOffsetMeters;
     if (sscanf_s(userConfig["HandOffsetMeters"].c_str(), "%f,%f,%f", &handOffset.x, &handOffset.y, &handOffset.z) == 3)
@@ -2666,6 +2691,12 @@ bool VR::SaveConfigFile()
         { "MagazinePouchSide", ConfigFloatString(m_MagazinePouchSide) },
         { "MagazinePouchForward", ConfigFloatString(m_MagazinePouchForward) },
         { "MagazinePouchBelowEyes", ConfigFloatString(m_MagazinePouchBelowEyes) },
+        { "PillsForward", ConfigFloatString(m_ItemSpotForward[0]) },
+        { "PillsSide", ConfigFloatString(m_ItemSpotSide[0]) },
+        { "PillsBelowEyes", ConfigFloatString(m_ItemSpotBelowEyes[0]) },
+        { "GrenadeForward", ConfigFloatString(m_ItemSpotForward[1]) },
+        { "GrenadeSide", ConfigFloatString(m_ItemSpotSide[1]) },
+        { "GrenadeBelowEyes", ConfigFloatString(m_ItemSpotBelowEyes[1]) },
         { "ShareBodyMovement", ConfigBoolString(m_ShareBodyMovement) },
         { "ShowOtherPlayersMovement", ConfigBoolString(m_ShowOtherPlayersMovement) },
     };

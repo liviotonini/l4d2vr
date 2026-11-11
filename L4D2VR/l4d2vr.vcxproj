@@ -456,6 +456,7 @@
     <ClInclude Include="haptics.h" />
     <ClInclude Include="pose_relay.h" />
     <ClInclude Include="reload_logic.h" />
+    <ClInclude Include="body_layout.h" />
     <ClInclude Include="settings_menu.h" />
     <ClInclude Include="stability.h" />
     <ClInclude Include="sigscanner.h" />
