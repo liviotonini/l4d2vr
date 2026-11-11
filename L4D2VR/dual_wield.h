@@ -50,6 +50,10 @@ namespace DualWield
 	void ServerDropItem(edict_t *edict, int playerIndex, int weaponIndex, const Vector &velocity);
 	// The player's weapon is taken out. False if it failed.
 	bool ServerTakeOut(void *player, void *weapon);
+	// The weapon `index` of `player`, null if the player doesn't have it
+	void *ServerPlayersWeapon(void *player, int index);
+	// A field of the entity written by the mod goes to the players (CBaseEntity::NetworkStateChanged)
+	void ServerNetworkChanged(void *entity);
 
 	// Flags of l4d2vr_left_hand
 	constexpr int kLeftHandSwinging = 1;

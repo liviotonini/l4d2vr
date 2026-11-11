@@ -2,6 +2,7 @@
 #include "openvr.h"
 #include "vector.h"
 #include "haptics.h"
+#include "left_gun.h"
 #include <atomic>
 #include <chrono>
 #include <deque>
@@ -473,6 +474,14 @@ public:
 	unsigned long long m_LeftUseStartMs = 0;
 	unsigned long long m_LeftUseReleaseMs = 0;
 	bool m_LeftTriggerDown = false;
+	// The left hand's gun (left_gun.cpp): the trigger, the next shot, and its magazine as seen here
+	bool m_LeftGunTriggerDown = false;
+	bool m_LeftGunPull = false;            // a pull not fired yet (a gun that fires once per pull)
+	unsigned long long m_LeftGunNextShotMs = 0;
+	int m_LeftGunBurstLeft = 0;
+	int m_LeftGunClip = 0;                 // the game's, less the shots it hasn't counted yet
+	int m_LeftGunClipSeen = 0;
+	int m_LeftGunClipIndex = 0;
 	bool m_LeftSwinging = false;
 	QAngle m_LeftSwingPrevAim = { 0, 0, 0 }; // the aim sent for the swing, from the last update
 	bool m_LeftSwingAimValid = false;
@@ -615,6 +624,10 @@ public:
 	bool LeftHandChestGrab(const HandMath::Vec3 &handWorld);
 	bool LeftShoulderGrab();
 	bool LeftHandKitGrab();
+	// The left hand's gun (left_gun.cpp)
+	void UpdateLeftGun(unsigned long long now);
+	void FireLeftGun(const LeftGun::GunData &gun, const Vector &origin, const QAngle &angles);
+	bool GetLeftGunAim(Vector &origin, QAngle &angles) const;
 	void GiveToLeftHand(int activeIndex, int activeWeaponId, const InventoryItem *items, int count);
 	void GiveToRightHand(const InventoryItem *items, int count);
 	bool GetLeftItemDraw(BodyModelDraw &draw);

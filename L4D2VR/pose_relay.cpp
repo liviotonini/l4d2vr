@@ -12,6 +12,7 @@
 #include "vr_pose_protocol.h"
 #include "diagnostics.h"
 #include "dual_wield.h"
+#include "left_gun.h"
 
 using namespace HandMath;
 
@@ -551,6 +552,19 @@ bool PoseRelay::HandleServerCommand(edict_t *player, const void *commandObject)
 					velocity = Vector(0, 0, 0);
 				DualWield::ServerDropItem(player, index, item, velocity);
 			}
+		}
+		return true;
+	}
+
+	// A shot of the left hand's gun: x y z pitch yaw roll seed (left_gun.cpp)
+	if (strcmp(name, "l4d2vr_left_fire") == 0)
+	{
+		const int index = ServerPlayerIndex(m_Game, player);
+		if (m_Game->IsValidPlayerIndex(index) && args.Count() == 8)
+		{
+			const Vector origin((float)atof(args.Arg(1)), (float)atof(args.Arg(2)), (float)atof(args.Arg(3)));
+			const QAngle angles((float)atof(args.Arg(4)), (float)atof(args.Arg(5)), (float)atof(args.Arg(6)));
+			LeftGun::ServerFire(player, index, origin, angles, atoi(args.Arg(7)));
 		}
 		return true;
 	}

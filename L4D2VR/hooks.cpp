@@ -427,6 +427,32 @@ int Hooks::dClientFireTerrorBullets(int playerId, const Vector &vecOrigin, const
 }
 
 
+int Hooks::FireServerBullets(int playerIndex, const Vector &origin, const QAngle &angles, int weaponId, int seed, float spread)
+{
+	__try
+	{
+		return hkServerFireTerrorBullets.fOriginal(playerIndex, origin, angles, weaponId, 0, seed, spread);
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		Diagnostics::Log("left gun: the server's shot of player %d failed", playerIndex);
+		return 0;
+	}
+}
+
+// The hits and tracers of the shot here, at once (the server's go to the other players)
+int Hooks::FireClientBullets(int playerIndex, const Vector &origin, const QAngle &angles, int weaponId, int seed, float spread)
+{
+	__try
+	{
+		return hkClientFireTerrorBullets.fOriginal(playerIndex, origin, angles, weaponId, 0, seed, spread);
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		return 0;
+	}
+}
+
 float __fastcall Hooks::dProcessUsercmds(void *ecx, void *edx, edict_t *player, void *buf, int numcmds, int totalcmds, int dropped_packets, bool ignore, bool paused)
 {
 	// Function pointer for CBaseEntity::entindex
@@ -597,6 +623,9 @@ int Hooks::dReadUsercmd(void *buf, CUserCmd *move, CUserCmd *from)
 	{
 		m_Game->m_PlayersVRInfo[i].isUsingVR = false;
 	}
+	static_assert(sizeof(CUserCmd) <= sizeof(Player::lastCmd), "the copy of the usercmd is too small");
+	memcpy(m_Game->m_PlayersVRInfo[i].lastCmd, move, sizeof(CUserCmd));
+	m_Game->m_PlayersVRInfo[i].hasLastCmd = true;
 	return 1;
 }
 

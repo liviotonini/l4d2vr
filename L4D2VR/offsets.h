@@ -93,6 +93,9 @@ public:
     // offsets of those virtuals are read from it (DualWield::ServerUseItem).
     Offset ItemUseFinish =               { "server.dll", 0x3C26E5, "8B 17 8B 82 ? ? ? ? 8B CF FF D0 84 C0 75 ? 8B 17 8B 82 ? ? ? ? 8B CF FF D0 84 C0 74 ? 8B 16 8B 82 ? ? ? ? 57 8B CE FF D0 8B 4D FC 8B 17 8B 82 ? ? ? ? 6A 00 6A 00 89 8F ? ? ? ? 56 8B CF FF D0 56 E8", 0, true };
 
+    // CBasePlayer::m_pCurrentCommand, read by CLagCompensationManager::StartLagCompensation, which goes on with it null
+    // after a warning: a shot fired outside the player's usercmds is given one (LeftGun::ServerFire). Points at the offset.
+    Offset ServerCurrentCommand =        { "server.dll", 0x187EDC, "8B 9F ? ? ? ? 89 5D EC 85 DB 75 0E 68", 2, true };
     // CTerrorGun::Use, a player taking the gun. A pistol is made a pair with the pistol the player has (below) when it
     // can be: this->CanBeDualWielded(), the virtual at +0x42 in it (Hooks::HookCanBeDual).
     Offset ServerGunUse =                { "server.dll", 0x3E8700, "55 8B EC 83 EC 08 56 57 8B 7D 08 8B F1 85 FF 0F 84 ? ? ? ? 8B 07 8B 90 ? ? ? ? 8B CF FF D2 84 C0 0F 84 ? ? ? ? 8B 07 8B 90 ? ? ? ? 56 8B CF FF D2 84 C0 0F 84 ? ? ? ? 8B 06 8B 90 ? ? ? ? 8B CE FF D2 84 C0 74", 0, true };

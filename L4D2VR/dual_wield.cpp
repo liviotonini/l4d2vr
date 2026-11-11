@@ -515,6 +515,7 @@ void VR::UpdateDualWield(C_BasePlayer *local, int activeWeaponId, float deltaSec
 	}
 
 	UpdateLeftUse(now, activeIndex, items, count);
+	UpdateLeftGun(now);
 
 	// The left hand's item became the active weapon without being used (the game takes a weapon picked up in its hand):
 	// back to the right hand's. Not while the right hand is empty: what the game has out then isn't seen.
@@ -977,6 +978,22 @@ void VR::DualWieldTest(const char *action)
 	if (strcmp(action, "shoulder") == 0)
 	{
 		Diagnostics::Log("dual wield test: left shoulder %s", LeftShoulderGrab() ? "did something" : "did nothing");
+		return;
+	}
+	// fireleft: a shot of the left hand's gun from the eyes, where they look (no controllers)
+	if (strcmp(action, "fireleft") == 0)
+	{
+		const LeftGun::GunData *gun = LeftGun::Find(m_LeftItemId);
+		const void *weapon = gun ? m_Game->GetClientEntity(m_LeftItemIndex) : nullptr;
+		if (!weapon)
+		{
+			Diagnostics::Log("dual wield test: the left hand has no gun");
+			return;
+		}
+		QAngle view;
+		m_Game->m_EngineClient->GetViewAngles(view);
+		FireLeftGun(*gun, m_SetupOrigin, view);
+		Diagnostics::Log("dual wield test: the left hand's gun fired, its magazine had %d", *(const int *)((const uint8_t *)weapon + 0x984));
 		return;
 	}
 	if (strcmp(action, "kit") == 0)
@@ -1477,6 +1494,28 @@ bool DualWield::ServerTakeOut(void *player, void *weapon)
 	{
 		return false;
 	}
+}
+
+void *DualWield::ServerPlayersWeapon(void *player, int index)
+{
+	return PlayersWeapon(player, index);
+}
+
+// As the game's code does it: the entity's edict is flagged changed, all of it compared (FL_EDICT_CHANGED |
+// FL_FULL_EDICT_CHANGED), or, while it can't be, the entity remembers it for later
+void DualWield::ServerNetworkChanged(void *entity)
+{
+	const int kNetworkPending = 0x64, kNetworkPendingFlags = 0x68, kEdict = 0x28;
+	if (!entity)
+		return;
+	uint8_t *bytes = (uint8_t *)entity;
+	if (bytes[kNetworkPending])
+	{
+		bytes[kNetworkPendingFlags] |= 1;
+		return;
+	}
+	if (uint32_t *edictFlags = *(uint32_t **)(bytes + kEdict))
+		*edictFlags |= 0x101;
 }
 
 void DualWield::ServerSelectWeapon(edict_t *edict, int playerIndex, int weaponIndex)

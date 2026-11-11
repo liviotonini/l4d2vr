@@ -61,6 +61,10 @@ struct Player
     QAngle leftSwingPrevAngle = { 0,0,0 };
     unsigned long long leftHandUntil = 0;   // the pose is recent
     unsigned long long leftSwingUntil = 0;  // swinging
+    unsigned long long leftFireMs = 0;      // the last shot of the left hand's gun (left_gun.cpp)
+    // The last usercmd received, as decoded (Hooks::dReadUsercmd): a copy of the game's CUserCmd, zeros after it
+    alignas(4) uint8_t lastCmd[128] = {};
+    bool hasLastCmd = false;
     bool leftSwingNew = true;
     bool leftSwingTraced = true;            // the last pose received has been used
 
