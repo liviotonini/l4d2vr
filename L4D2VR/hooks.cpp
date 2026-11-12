@@ -108,8 +108,12 @@ Hooks::Hooks(Game *game)
 		hkServerGetSlot.enableHook();
 	if (hkServerAddDualWeapon.pTarget)
 		hkServerAddDualWeapon.enableHook();
-	if (hkServerGunUse.pTarget)
-		hkServerGunUse.enableHook();
+	if (hkServerWeaponOfId.pTarget)
+		hkServerWeaponOfId.enableHook();
+	if (hkServerWeaponById.pTarget)
+		hkServerWeaponById.enableHook();
+	if (hkClientParticleTracer.pTarget)
+		hkClientParticleTracer.enableHook();
 	if (hkGrenadeLauncherCreate.pTarget)
 		hkGrenadeLauncherCreate.enableHook();
 }
@@ -440,17 +444,21 @@ int Hooks::FireServerBullets(int playerIndex, const Vector &origin, const QAngle
 	}
 }
 
-// The hits and tracers of the shot here, at once (the server's go to the other players)
+// The hits and tracers of the shot here, at once (the server's go to the other players). The game draws the tracers
+// from the weapon in the right hand: they leave from `origin` instead (dClientParticleTracer).
 int Hooks::FireClientBullets(int playerIndex, const Vector &origin, const QAngle &angles, int weaponId, int seed, float spread)
 {
+	m_LeftShotStart = &origin;
+	int result = 0;
 	__try
 	{
-		return hkClientFireTerrorBullets.fOriginal(playerIndex, origin, angles, weaponId, 0, seed, spread);
+		result = hkClientFireTerrorBullets.fOriginal(playerIndex, origin, angles, weaponId, 0, seed, spread);
 	}
 	__except (EXCEPTION_EXECUTE_HANDLER)
 	{
-		return 0;
 	}
+	m_LeftShotStart = nullptr;
+	return result;
 }
 
 float __fastcall Hooks::dProcessUsercmds(void *ecx, void *edx, edict_t *player, void *buf, int numcmds, int totalcmds, int dropped_packets, bool ignore, bool paused)
@@ -1178,10 +1186,14 @@ void Hooks::initWeaponStateHooks()
 	{
 		Diagnostics::Log("dual wield: GetSlot not found in this game version, a weapon in the left hand replaces the right hand's of its slot");
 	}
-	if (offsets->ServerAddDualWeapon.address && offsets->ServerGunUse.address)
+	if (offsets->ServerAddDualWeapon.address && offsets->ServerWeaponOfId.address)
 	{
 		hkServerAddDualWeapon.createHook((LPVOID)offsets->ServerAddDualWeapon.address, &dServerAddDualWeapon);
-		hkServerGunUse.createHook((LPVOID)offsets->ServerGunUse.address, &dServerGunUse);
+		hkServerWeaponOfId.createHook((LPVOID)offsets->ServerWeaponOfId.address, &dServerWeaponOfId);
+		if (offsets->ServerWeaponById.address)
+			hkServerWeaponById.createHook((LPVOID)offsets->ServerWeaponById.address, &dServerWeaponById);
+		else
+			Diagnostics::Log("dual wield: the weapon spawns' pistol lookup wasn't found in this game version, a pistol spawn doesn't give a second one");
 	}
 	else
 	{
@@ -1189,16 +1201,10 @@ void Hooks::initWeaponStateHooks()
 	}
 	if (!offsets->ServerSelectItem.address)
 		Diagnostics::Log("dual wield: SelectItem not found in this game version, the hands can't change weapons");
-	// CanBeDualWielded: its offset in the vtable, from the gun's Use (+0x40  mov edx, [eax + offset])
-	if (offsets->ServerGunUse.address)
-	{
-		const uint8_t *code = (const uint8_t *)offsets->ServerGunUse.address;
-		const int offset = *(const int32_t *)(code + 0x42);
-		if (code[0x40] == 0x8B && code[0x41] == 0x90 && offset > 0 && offset < 0x2000 && offset % 4 == 0)
-			m_CanBeDualVtableOffset = offset;
-	}
-	if (!m_CanBeDualVtableOffset)
-		Diagnostics::Log("dual wield: CanBeDualWielded wasn't found in this game version, a second pistol does nothing");
+	if (offsets->ClientParticleTracer.address)
+		hkClientParticleTracer.createHook((LPVOID)offsets->ClientParticleTracer.address, &dClientParticleTracer);
+	else
+		Diagnostics::Log("left gun: the tracers weren't found in this game version, the left hand's shots show none");
 
 	// The grenade launcher's grenade from the weapon in the hand: the target of the call found by its signature
 	const uintptr_t createCall = offsets->GrenadeLauncherCreateCall.address;
@@ -1268,23 +1274,15 @@ int __fastcall Hooks::dServerGetSlot(void *ecx, void *edx)
 
 namespace
 {
-	// A VR player taking a gun (dServerGunUse)
-	void *g_GunUsePlayer = nullptr;
-
-	// Gun classes whose CanBeDualWielded was replaced, with the original function
-	struct CanBeDualHook
-	{
-		void **vtable;
-		tAddDualWeapon original;
-	};
-	CanBeDualHook g_CanBeDualHooks[32];
-	int g_CanBeDualHookCount = 0;
+	// A VR player using something (dPlayerUse)
+	void *g_VRUsePlayer = nullptr;
 }
 
 // A player who has a pistol and takes another one gets a pair of pistols. VR players hold the second one in the other
 // hand, as a weapon of its own (dual_wield.cpp), and the left hand's slot can have any gun: theirs is never made a pair.
-// Taking a pistol, they take it like any other weapon (dServerGunUse, dCanBeDual): it takes the place of the weapon of its
-// slot, which goes to the ground. Other ways to a pair (the "give" command, a pair carried to the next map) do nothing.
+// Taking a pistol, the one they have isn't found (dServerWeaponOfId): it's taken like any other weapon and takes the place
+// of the weapon of its slot, which goes to the ground. Other ways to a pair (the "give" command, a pair carried to the
+// next map) do nothing.
 bool __fastcall Hooks::dServerAddDualWeapon(void *ecx, void *edx)
 {
 	const int playerIndex = m_GetGrenadeOwner ? GetServerEntityIndex(m_GetGrenadeOwner(ecx)) : -1;
@@ -1295,59 +1293,48 @@ bool __fastcall Hooks::dServerAddDualWeapon(void *ecx, void *edx)
 	return false;
 }
 
-void __fastcall Hooks::dServerGunUse(void *ecx, void *edx, void *activator, void *caller, int useType, float value)
+void *__fastcall Hooks::dServerWeaponOfId(void *ecx, void *edx, int weaponId)
 {
-	bool isLocalPlayer;
-	const int playerIndex = GetServerEntityIndex(activator);
-	if (g_GunUsePlayer || playerIndex < 1 || playerIndex >= DualWield::kMaxPlayers || !IsVRThrower(playerIndex, isLocalPlayer))
-	{
-		hkServerGunUse.fOriginal(ecx, activator, caller, useType, value);
-		return;
-	}
-
-	HookCanBeDual(ecx);
-	g_GunUsePlayer = activator;
-	hkServerGunUse.fOriginal(ecx, activator, caller, useType, value);
-	g_GunUsePlayer = nullptr;
-	Diagnostics::Log("dual wield: player %d used gun %d, %s", playerIndex, GetServerEntityIndex(ecx),
-		m_GetGrenadeOwner && m_GetGrenadeOwner(ecx) == activator ? "taken" : "not taken");
+	if (weaponId == C_WeaponCSBase::PISTOL && ecx == g_VRUsePlayer)
+		return nullptr;
+	return hkServerWeaponOfId.fOriginal(ecx, weaponId);
 }
 
-// The pistol says it can't be made a pair while a VR player takes it (dServerGunUse): the game takes it like any other
-// gun. Replaced in the vtable of each gun class taken, like HookEmitGrenade. Only called from the server (game thread).
-void Hooks::HookCanBeDual(void *gun)
+// The same for a weapon spawn (CWeaponSpawn::Use): it gives a new pistol instead
+void *__fastcall Hooks::dServerWeaponById(void *ecx, void *edx, int weaponId)
 {
-	if (!gun || !m_CanBeDualVtableOffset)
-		return;
-	void **vtable = *(void ***)gun;
-	for (int i = 0; i < g_CanBeDualHookCount; ++i)
-	{
-		if (g_CanBeDualHooks[i].vtable == vtable)
-			return;
-	}
-	if (g_CanBeDualHookCount == ARRAYSIZE(g_CanBeDualHooks))
-		return;
-
-	void **slot = (void **)((uintptr_t)vtable + m_CanBeDualVtableOffset);
-	DWORD oldProtect;
-	if (!VirtualProtect(slot, sizeof(void *), PAGE_READWRITE, &oldProtect))
-		return;
-	g_CanBeDualHooks[g_CanBeDualHookCount++] = { vtable, (tAddDualWeapon)*slot };
-	*slot = (void *)&dCanBeDual;
-	VirtualProtect(slot, sizeof(void *), oldProtect, &oldProtect);
+	if (weaponId == C_WeaponCSBase::PISTOL && ecx == g_VRUsePlayer)
+		return nullptr;
+	return hkServerWeaponById.fOriginal(ecx, weaponId);
 }
 
-bool __fastcall Hooks::dCanBeDual(void *ecx, void *edx)
+// The tracers of the left hand's gun's shot leave from its muzzle, not from the weapon in the right hand (FireClientBullets)
+void __cdecl Hooks::dClientParticleTracer(const char *name, const Vector &start, const Vector &end, int entityIndex, int attachment, bool whiz)
 {
-	if (g_GunUsePlayer)
-		return false;
-	void **vtable = *(void ***)ecx;
-	for (int i = 0; i < g_CanBeDualHookCount; ++i)
+	if (m_LeftShotStart)
 	{
-		if (g_CanBeDualHooks[i].vtable == vtable)
-			return g_CanBeDualHooks[i].original(ecx);
+		static bool s_Logged = false;
+		if (!s_Logged)
+			Diagnostics::Log("left gun: its tracer (%s) leaves from its muzzle", name ? name : "?");
+		s_Logged = true;
+		hkClientParticleTracer.fOriginal(name, *m_LeftShotStart, end, 0, -1, whiz);
 	}
-	return false;
+	else
+		hkClientParticleTracer.fOriginal(name, start, end, entityIndex, attachment, whiz);
+}
+
+// The tracer's effect makes the particle at its start, turned towards its end
+void Hooks::ClientParticle(const char *name, const Vector &origin, const Vector &toward)
+{
+	if (!hkClientParticleTracer.pTarget || !name)
+		return;
+	__try
+	{
+		hkClientParticleTracer.fOriginal(name, origin, toward, 0, -1, false);
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+	}
 }
 
 bool Hooks::IsLocalPlayerWeapon(void *weapon)
@@ -1496,6 +1483,12 @@ void __fastcall Hooks::dPlayerUse(void *ecx, void *edx, void *useEntity)
 	const int playerIndex = GetServerEntityIndex(ecx);
 	DualWield::ServerBeginUse(ecx, playerIndex);
 
+	// A pistol taken by a VR player isn't made a pair with theirs (dServerWeaponOfId)
+	bool isLocalPlayer;
+	void *const usingBefore = g_VRUsePlayer;
+	if (playerIndex > 0 && IsVRThrower(playerIndex, isLocalPlayer))
+		g_VRUsePlayer = ecx;
+
 	Vector origin;
 	QAngle angles;
 	if (GetServerHandAim(ecx, origin, angles))
@@ -1508,6 +1501,7 @@ void __fastcall Hooks::dPlayerUse(void *ecx, void *edx, void *useEntity)
 		hkPlayerUse.fOriginal(ecx, useEntity);
 	}
 
+	g_VRUsePlayer = usingBefore;
 	DualWield::ServerEndUse(ecx, playerIndex);
 }
 

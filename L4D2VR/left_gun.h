@@ -22,6 +22,7 @@ namespace LeftGun
 		bool shells;             // loaded a shell at a time
 		int reserveMax;          // the most ammo carried for it (the game's ammo_*_max), 0 for pistols and the M60
 		const char *loadSound;   // its magazine put in, null if none
+		const char *muzzleFlash; // the script's MuzzleFlashEffect_3rdPerson
 	};
 
 	// Null for what isn't fired that way (melee weapons, the chainsaw, the grenade launcher)

@@ -491,6 +491,9 @@ public:
 	int m_RightMagazineIndex = 0;          // the gun it's for
 	HandMath::Vec3 m_LeftGunWell;          // where the left hand's gun takes its magazine, as last drawn
 	unsigned long long m_LeftGunWellMs = 0;
+	mutable unsigned long long m_LeftGunWellNearLogMs = 0;
+	HandMath::Vec3 m_LeftGunMuzzle;        // and its muzzle
+	unsigned long long m_LeftGunMuzzleMs = 0;
 	bool m_LeftSwinging = false;
 	QAngle m_LeftSwingPrevAim = { 0, 0, 0 }; // the aim sent for the swing, from the last update
 	bool m_LeftSwingAimValid = false;

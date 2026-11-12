@@ -96,9 +96,15 @@ public:
     // CBasePlayer::m_pCurrentCommand, read by CLagCompensationManager::StartLagCompensation, which goes on with it null
     // after a warning: a shot fired outside the player's usercmds is given one (LeftGun::ServerFire). Points at the offset.
     Offset ServerCurrentCommand =        { "server.dll", 0x187EDC, "8B 9F ? ? ? ? 89 5D EC 85 DB 75 0E 68", 2, true };
-    // CTerrorGun::Use, a player taking the gun. A pistol is made a pair with the pistol the player has (below) when it
-    // can be: this->CanBeDualWielded(), the virtual at +0x42 in it (Hooks::HookCanBeDual).
-    Offset ServerGunUse =                { "server.dll", 0x3E8700, "55 8B EC 83 EC 08 56 57 8B 7D 08 8B F1 85 FF 0F 84 ? ? ? ? 8B 07 8B 90 ? ? ? ? 8B CF FF D2 84 C0 0F 84 ? ? ? ? 8B 07 8B 90 ? ? ? ? 56 8B CF FF D2 84 C0 0F 84 ? ? ? ? 8B 06 8B 90 ? ? ? ? 8B CE FF D2 84 C0 74", 0, true };
+    // The player's weapon of a weapon ID (the weapons' virtual 0x634 is GetWeaponID): a pistol taken, from the ground or
+    // from a weapon spawn, looks there for the pistol to make a pair with (Hooks::dServerWeaponOfId)
+    Offset ServerWeaponOfId =            { "server.dll", 0x242B20, "55 8B EC 53 56 57 33 FF 8D 99 ? ? ? ? 8B FF 8B 03 83 F8 FF 74 ? 8B 15 ? ? ? ? 8B C8 81 E1 FF 0F 00 00 03 C9 8D 4C CA 04 85 C9 74 ? C1 E8 0C 39 41 04 75 ? 8B 31 85 F6 74 ? 8B 06 8B 90 ? ? ? ? 8B CE FF D2 39 45 08 74", 0, true };
+    // CTerrorPlayer's weapon of a weapon ID from its table by ID: where a weapon spawn looks for the pistol to make a pair
+    // with (Hooks::dServerWeaponOfId)
+    Offset ServerWeaponById =            { "server.dll", 0x2C98F0, "55 8B EC 8B 45 08 0F B6 84 08 ? ? ? ? 85 C0 74 ? 8B 84 81 ? ? ? ? 83 F8 FF 74 ? 8B 15 ? ? ? ? 8B C8 81 E1 FF 0F 00 00 03 C9 8D 4C CA 04 85 C9 74 ? C1 E8 0C 39 41 04 75 ? 8B 01 5D C2 04 00", 0, true };
+    // UTIL_ParticleTracer(name, start, end, entity, attachment, whiz): the bullets' tracers, from where the weapon in the
+    // right hand is. The left hand's gun's start from its own (Hooks::dClientParticleTracer).
+    Offset ClientParticleTracer =        { "client.dll", 0x1AD200, "55 8B EC 8B 45 08 50 E8 ? ? ? ? D9 EE 8B 4D 1C 8B 55 18 83 C4 04 50 8B 45 14 68 ? ? ? ? 51 51 8B 4D 10 D9 1C 24 52 8B 55 0C 50 51 52 E8", 0, true };
     // CTerrorGun's virtual that makes a pair of the pistol a player has when they take another one (m_hasDualWeapons):
     // VR players hold the second one in the other hand instead (Hooks::dServerAddDualWeapon)
     Offset ServerAddDualWeapon =         { "server.dll", 0x3E8350, "55 8B EC 83 EC 20 56 8B F1 80 BE ? ? ? ? 00 74 07 32 C0 5E 8B E5 5D C3 80 BE ? ? ? ? 00 75 F0 80 BE ? ? ? ? 01", 0, true };

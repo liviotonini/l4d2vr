@@ -808,7 +808,9 @@ void VR::UpdateHandSwap(unsigned long long now, float deltaSeconds, int activeIn
 {
 	int direction = 0;
 	const bool bothValid = m_LeftControllerDeviceIndex != vr::k_unTrackedDeviceIndexInvalid && m_RightControllerDeviceIndex != vr::k_unTrackedDeviceIndexInvalid;
-	if (bothValid && !m_LeftUseActive && VectorLength(m_LeftControllerPose.TrackedDevicePos - m_RightControllerPose.TrackedDevicePos) < kHandSwapDistance)
+	// Not while the hands hold a weapon together, or the right one loads the left one's: they're close then too
+	const bool handsBusy = m_LeftUseActive || isHoldingWeapon2Handed || m_RightHoldsLeftGun || m_RightMagazine;
+	if (bothValid && !handsBusy && VectorLength(m_LeftControllerPose.TrackedDevicePos - m_RightControllerPose.TrackedDevicePos) < kHandSwapDistance)
 	{
 		const bool leftGrab = PressedDigitalAction(m_LeftHandGrab), rightGrab = PressedDigitalAction(m_RightHandGrab);
 		if (!m_LeftItemIndex && activeIndex && !m_RightHandEmpty && DualWield::IsLeftHandItem(activeWeaponId) && leftGrab && !rightGrab)

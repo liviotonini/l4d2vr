@@ -791,10 +791,13 @@ namespace
 		return bone;
 	}
 
-	// A weapon's magazine in its world model: "weapon_bone_Clip", and the bullets in it, -1 if none
+	// A weapon's magazine in its world model: "weapon_bone_Clip", and the bullets in it, -1 if none. And its muzzle: the
+	// "muzzle_flash" attachment, on a bone.
 	struct ClipBones
 	{
 		int clip = -1, bullets = -1;
+		int muzzleBone = -1;
+		Mat34 muzzleOnBone;
 	};
 
 	const ClipBones &ClipBonesOf(const void *studioHeader)
@@ -813,6 +816,16 @@ namespace
 				bones.clip = i;
 			else if (length >= 24 && strcmp(name + length - 24, "weapon_bone_Clip_Bullets") == 0 && bones.bullets < 0)
 				bones.bullets = i;
+		}
+		const uint8_t *base = (const uint8_t *)studioHeader;
+		const int32_t attachments = *(const int32_t *)(base + 240), attachmentIndex = *(const int32_t *)(base + 244);
+		for (int i = 0; i < attachments && bones.muzzleBone < 0; ++i)
+		{
+			const uint8_t *attachment = base + attachmentIndex + i * 92;
+			if (_stricmp((const char *)attachment + *(const int32_t *)attachment, "muzzle_flash") != 0)
+				continue;
+			bones.muzzleBone = *(const int32_t *)(attachment + 8);
+			memcpy(&bones.muzzleOnBone, attachment + 12, sizeof(float) * 12);
 		}
 		return s_Found[studioHeader] = bones;
 	}
@@ -888,6 +901,11 @@ void VR::BuildBodyModelBones(const void *studioHeader, const BodyModelDraw &draw
 		{
 			m_LeftGunWell = Origin(bones[clip->clip]);
 			m_LeftGunWellMs = GetTickCount64();
+		}
+		if (draw.leftGun && clip->muzzleBone >= 0 && clip->muzzleBone < boneCount)
+		{
+			m_LeftGunMuzzle = Origin(Multiply(bones[clip->muzzleBone], clip->muzzleOnBone));
+			m_LeftGunMuzzleMs = GetTickCount64();
 		}
 		if (syringe)
 		{

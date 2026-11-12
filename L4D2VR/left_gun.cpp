@@ -26,27 +26,27 @@ namespace
 {
 	const LeftGun::GunData kGuns[] =
 	{
-		{ C_WeaponCSBase::PISTOL, 0.15f, LeftGun::Semi, 1.5f, "Pistol.Fire", true, false, false, 0, "Pistol.ClipIn" },
-		{ C_WeaponCSBase::MAGNUM, 0.15f, LeftGun::Semi, 1.25f, "Magnum.Fire", true, false, false, 0, "Magnum.ClipIn" },
-		{ C_WeaponCSBase::UZI, 0.0625f, LeftGun::Auto, 1.0f, "SMG.Fire", false, true, false, 650, "SMG.ClipIn" },
-		{ C_WeaponCSBase::MAC10, 0.0625f, LeftGun::Auto, 1.2f, "SMG_Silenced.Fire", false, true, false, 650, "SMG_Silenced.ClipIn" },
-		{ C_WeaponCSBase::MP5, 0.075f, LeftGun::Auto, 1.1f, "Weapon_MP5Navy.Single", false, true, false, 650, "SMG.ClipIn" },
+		{ C_WeaponCSBase::PISTOL, 0.15f, LeftGun::Semi, 1.5f, "Pistol.Fire", true, false, false, 0, "Pistol.ClipIn", "weapon_muzzle_flash_pistol" },
+		{ C_WeaponCSBase::MAGNUM, 0.15f, LeftGun::Semi, 1.25f, "Magnum.Fire", true, false, false, 0, "Magnum.ClipIn", "weapon_muzzle_flash_autoshotgun" },
+		{ C_WeaponCSBase::UZI, 0.0625f, LeftGun::Auto, 1.0f, "SMG.Fire", false, true, false, 650, "SMG.ClipIn", "weapon_muzzle_flash_smg" },
+		{ C_WeaponCSBase::MAC10, 0.0625f, LeftGun::Auto, 1.2f, "SMG_Silenced.Fire", false, true, false, 650, "SMG_Silenced.ClipIn", "weapon_muzzle_flash_smg_silenced" },
+		{ C_WeaponCSBase::MP5, 0.075f, LeftGun::Auto, 1.1f, "Weapon_MP5Navy.Single", false, true, false, 650, "SMG.ClipIn", "weapon_muzzle_flash_smg" },
 		// The pump shotguns are pumped between shots
-		{ C_WeaponCSBase::PUMPSHOTGUN, 0.8f, LeftGun::Semi, 0.8f, "Shotgun.Fire", false, true, true, 56, nullptr },
-		{ C_WeaponCSBase::SHOTGUN_CHROME, 0.8f, LeftGun::Semi, 0.8f, "Shotgun_Chrome.Fire", false, true, true, 56, nullptr },
-		{ C_WeaponCSBase::AUTOSHOTGUN, 0.15f, LeftGun::Semi, 0.8f, "AutoShotgun.Fire", false, true, true, 90, nullptr },
-		{ C_WeaponCSBase::SPAS, 0.15f, LeftGun::Semi, 0.75f, "AutoShotgun_Spas.Fire", false, true, true, 90, nullptr },
-		{ C_WeaponCSBase::M16A1, 0.0875f, LeftGun::Auto, 0.4f, "Rifle.Fire", false, true, false, 360, "Rifle.ClipIn" },
-		{ C_WeaponCSBase::SCAR, 0.07f, LeftGun::Burst, 0.35f, "Rifle_Desert.Fire", false, true, false, 360, "Rifle_Desert.ClipIn" },
-		{ C_WeaponCSBase::AK47, 0.13f, LeftGun::Auto, 1.0f, "AK47.Fire", false, true, false, 360, "AK47.ClipIn" },
-		{ C_WeaponCSBase::SG552, 0.0825f, LeftGun::Auto, 0.4f, "Weapon_SG552.Single", false, true, false, 360, "Rifle.ClipIn" },
+		{ C_WeaponCSBase::PUMPSHOTGUN, 0.8f, LeftGun::Semi, 0.8f, "Shotgun.Fire", false, true, true, 56, nullptr, "weapon_muzzle_flash_autoshotgun" },
+		{ C_WeaponCSBase::SHOTGUN_CHROME, 0.8f, LeftGun::Semi, 0.8f, "Shotgun_Chrome.Fire", false, true, true, 56, nullptr, "weapon_muzzle_flash_autoshotgun" },
+		{ C_WeaponCSBase::AUTOSHOTGUN, 0.15f, LeftGun::Semi, 0.8f, "AutoShotgun.Fire", false, true, true, 90, nullptr, "weapon_muzzle_flash_autoshotgun" },
+		{ C_WeaponCSBase::SPAS, 0.15f, LeftGun::Semi, 0.75f, "AutoShotgun_Spas.Fire", false, true, true, 90, nullptr, "weapon_muzzle_flash_autoshotgun" },
+		{ C_WeaponCSBase::M16A1, 0.0875f, LeftGun::Auto, 0.4f, "Rifle.Fire", false, true, false, 360, "Rifle.ClipIn", "weapon_muzzle_flash_assaultrifle" },
+		{ C_WeaponCSBase::SCAR, 0.07f, LeftGun::Burst, 0.35f, "Rifle_Desert.Fire", false, true, false, 360, "Rifle_Desert.ClipIn", "weapon_muzzle_flash_assaultrifle" },
+		{ C_WeaponCSBase::AK47, 0.13f, LeftGun::Auto, 1.0f, "AK47.Fire", false, true, false, 360, "AK47.ClipIn", "weapon_muzzle_flash_smg" },
+		{ C_WeaponCSBase::SG552, 0.0825f, LeftGun::Auto, 0.4f, "Weapon_SG552.Single", false, true, false, 360, "Rifle.ClipIn", "weapon_muzzle_flash_assaultrifle" },
 		// The M60 isn't reloaded, as in the game
-		{ C_WeaponCSBase::M60, 0.11f, LeftGun::Auto, 1.0f, "M60.Fire", false, true, false, 0, nullptr },
-		{ C_WeaponCSBase::HUNTING_RIFLE, 0.25f, LeftGun::Semi, 0.1f, "HuntingRifle.Fire", false, true, false, 150, "HuntingRifle.ClipIn" },
-		{ C_WeaponCSBase::SNIPER_MILITARY, 0.25f, LeftGun::Semi, 0.5f, "Sniper_Military.Fire", false, true, false, 180, "Sniper_Military.ClipIn" },
+		{ C_WeaponCSBase::M60, 0.11f, LeftGun::Auto, 1.0f, "M60.Fire", false, true, false, 0, nullptr, "weapon_muzzle_flash_assaultrifle" },
+		{ C_WeaponCSBase::HUNTING_RIFLE, 0.25f, LeftGun::Semi, 0.1f, "HuntingRifle.Fire", false, true, false, 150, "HuntingRifle.ClipIn", "weapon_muzzle_flash_huntingrifle" },
+		{ C_WeaponCSBase::SNIPER_MILITARY, 0.25f, LeftGun::Semi, 0.5f, "Sniper_Military.Fire", false, true, false, 180, "Sniper_Military.ClipIn", "weapon_muzzle_flash_huntingrifle" },
 		// The bolt action rifles are worked between shots
-		{ C_WeaponCSBase::AWP, 1.05f, LeftGun::Semi, 0.1f, "Weapon_AWP.Single", false, true, false, 180, "HuntingRifle.ClipIn" },
-		{ C_WeaponCSBase::SCOUT, 0.9f, LeftGun::Semi, 0.1f, "Weapon_Scout.Single", false, true, false, 180, "HuntingRifle.ClipIn" },
+		{ C_WeaponCSBase::AWP, 1.05f, LeftGun::Semi, 0.1f, "Weapon_AWP.Single", false, true, false, 180, "HuntingRifle.ClipIn", "weapon_muzzle_flash_huntingrifle" },
+		{ C_WeaponCSBase::SCOUT, 0.9f, LeftGun::Semi, 0.1f, "Weapon_Scout.Single", false, true, false, 180, "HuntingRifle.ClipIn", "weapon_muzzle_flash_huntingrifle" },
 	};
 
 	const int kBurstShots = 3;
@@ -72,7 +72,11 @@ namespace
 	const int kClientAmmoArrayOffset = 0xF24;
 	const int kServerAmmoArrayOffset = 0x1874;
 	// The right hand puts the magazine in within this of where it goes, meters
-	const float kMagazineWellReach = 0.1f;
+	const float kMagazineWellReach = 0.12f;
+	// Where the right hand is taken for near the ammo bag, in the log (meters)
+	const float kBagNearLog = 0.4f;
+	// The muzzle flash's length, units
+	const float kMuzzleFlashLength = 8.0f;
 
 	const HapticEffect kShotHaptic = { { 0.0f, 0.03f, 190.0f, 0.55f } };
 
@@ -153,6 +157,15 @@ bool VR::LeftGunNeedsAmmo(const LeftGun::GunData &gun) const
 // Where the left hand's gun takes its magazine, as it was last drawn (BuildBodyModelBones)
 bool VR::AtLeftGunWell(const Vec3 &point) const
 {
+	if (m_RightMagazine && GetTickCount64() - m_LeftGunWellMs < 250)
+	{
+		const float distance = Length(point - m_LeftGunWell) / m_VRScale;
+		if (distance < kMagazineWellReach * 2.0f && distance >= kMagazineWellReach && GetTickCount64() - m_LeftGunWellNearLogMs > 1000)
+		{
+			m_LeftGunWellNearLogMs = GetTickCount64();
+			Diagnostics::Log("left gun: the right hand's magazine is %.2f m from where it goes", distance);
+		}
+	}
 	return GetTickCount64() - m_LeftGunWellMs < 250 && Length(point - m_LeftGunWell) < kMagazineWellReach * m_VRScale;
 }
 
@@ -161,10 +174,20 @@ bool VR::AtLeftGunWell(const Vec3 &point) const
 // True if the grab was for that.
 bool VR::TryRightReloadLeftGun()
 {
+	const Vec3 fist = GetFistPoint(true);
 	const LeftGun::GunData *gun = LeftHandHoldsItem() ? LeftGun::Find(m_LeftItemId) : nullptr;
+	// Holding a magazine already: the grab puts it in there, or back
+	if (m_RightMagazine)
+	{
+		m_RightMagazine = false;
+		if (gun && AtLeftGunWell(fist))
+			LoadLeftGun(*gun);
+		else
+			Diagnostics::Log("left gun: the right hand put its magazine back");
+		return true;
+	}
 	if (!m_RightHandEmpty || !gun || !LeftGunNeedsAmmo(*gun))
 		return false;
-	const Vec3 fist = GetFistPoint(true);
 	if (!m_ManualReloadEnabled)
 	{
 		if (!AtLeftGunWell(fist))
@@ -172,8 +195,13 @@ bool VR::TryRightReloadLeftGun()
 		LoadLeftGun(*gun);
 		return true;
 	}
-	if (Length(fist - m_WaistWorld) > Reload::kPouchRadius * m_VRScale)
+	const float toBag = Length(fist - m_WaistWorld) / m_VRScale;
+	if (toBag > Reload::kPouchRadius)
+	{
+		if (toBag < kBagNearLog)
+			Diagnostics::Log("left gun: the right hand is %.2f m from the ammo bag, it takes a magazine within %.2f m", toBag, Reload::kPouchRadius);
 		return false;
+	}
 	m_RightMagazine = true;
 	m_RightMagazineIndex = m_LeftItemIndex;
 	m_Haptics.Play(Haptics::Hand::WeaponHand, HapticEffects::Take);
@@ -210,15 +238,17 @@ void VR::GiveLeftGunAmmo()
 	m_Game->m_EngineClient->ServerCmd(command, true);
 }
 
-// Where the left hand's gun shoots from and towards: along its barrel as it's drawn (GetLeftItemDraw puts the weapon bone,
-// barrel along z, in the fist), or the controller's when the hand isn't drawn
+// Where the left hand's gun shoots from and towards: from its muzzle (the model's "muzzle_flash", as it was last drawn)
+// along its barrel (GetLeftItemDraw puts the weapon bone, barrel along z, in the fist), or the controller's when the
+// hand isn't drawn
 bool VR::GetLeftGunAim(Vector &origin, QAngle &angles) const
 {
 	Mat34 grip;
 	if (GetLeftItemFrame(grip))
 	{
 		const Vec3 barrel = Normalized(Axis(grip, 2)), up = Normalized(Axis(grip, 1));
-		origin = ToVector(Origin(grip) + up * kMuzzleUp + barrel * kMuzzleForward);
+		const bool muzzle = GetTickCount64() - m_LeftGunMuzzleMs < 250;
+		origin = ToVector(muzzle ? m_LeftGunMuzzle : Origin(grip) + up * kMuzzleUp + barrel * kMuzzleForward);
 		QAngle::VectorAngles(ToVector(barrel), ToVector(up), angles);
 		return true;
 	}
@@ -241,10 +271,10 @@ void VR::UpdateLeftGun(unsigned long long now)
 		m_RightHoldsLeftGunTest = false;
 		Diagnostics::Log("left gun: let go by the right hand");
 	}
-	// A magazine in the right hand goes in where the gun's goes, or back in the bag when the grab is let go
+	// A magazine in the right hand stays there until it goes in where the gun's goes (another right grab puts it back)
 	if (m_RightMagazine)
 	{
-		if (!gun || !m_RightHandEmpty || m_LeftItemIndex != m_RightMagazineIndex || (!PressedDigitalAction(m_RightHandGrab) && !m_RightMagazineTest))
+		if (!gun || !m_RightHandEmpty || m_LeftItemIndex != m_RightMagazineIndex)
 		{
 			m_RightMagazine = m_RightMagazineTest = false;
 			Diagnostics::Log("left gun: the right hand's magazine went back");
@@ -323,6 +353,9 @@ void VR::FireLeftGun(const LeftGun::GunData &gun, const Vector &origin, const QA
 	char command[96];
 	snprintf(command, sizeof(command), "playgamesound %s", gun.shotSound);
 	m_Game->ClientCmd_Unrestricted(command);
+	Vector forward;
+	QAngle::AngleVectors(angles, &forward, nullptr, nullptr);
+	Hooks::ClientParticle(gun.muzzleFlash, origin, origin + forward * kMuzzleFlashLength);
 	Hooks::FireClientBullets(m_Game->m_EngineClient->GetLocalPlayer(), origin, angles, gun.weaponId, seed, gun.spread);
 
 	snprintf(command, sizeof(command), "l4d2vr_left_fire %.1f %.1f %.1f %.2f %.2f %.2f %d", origin.x, origin.y, origin.z, angles.x, angles.y, angles.z, seed);
