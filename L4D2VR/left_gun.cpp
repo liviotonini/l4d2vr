@@ -55,32 +55,36 @@ namespace
 	// is where shells go in, under the receiver. A bolt with vertices of its own is the middle of them; otherwise where the
 	// part is on the model (the slide's back, the charging handle, the bolt handle by the ejection port). The pump of the
 	// pump shotguns is their "weapon_bone_Clip", the forend.
+	// The grip is the middle of the pistol grip at mid height (the weapon bone is at its top, where the hand's web goes),
+	// and how much it leans; on the guns with a plain stock (the pump shotguns, the hunting rifle, the scout), the stock's
+	// wrist behind the trigger guard. Read off side views of the models drawn from their triangles.
 	const LeftGun::GunModel kGunModels[] =
 	{
-		{ "w_pistol_a.mdl", { 0.0f, -1.15f, 0.75f }, 2.85f, { 0.0f, 1.9f, 0.3f }, false },
-		{ "w_desert_eagle.mdl", { 0.0f, -1.0f, 0.75f }, 2.4f, { 0.0f, 2.0f, 0.7f }, false },
-		{ "w_smg_uzi.mdl", { 0.0f, -2.55f, 1.0f }, 3.75f, { 0.0f, 3.6f, 6.3f }, false },
-		{ "w_smg_a.mdl", { 0.0f, -1.9f, 0.9f }, 4.3f, { 0.0f, 4.0f, -2.5f }, false },
-		{ "w_smg_mp5.mdl", { 0.45f, -1.45f, 7.75f }, 4.15f, { 0.8f, 4.6f, 11.0f }, false },
-		{ "w_shotgun.mdl", { 0.0f, 0.8f, 5.0f }, 0.0f, { 0.2f, 2.5f, 14.3f }, true },
-		{ "w_pumpshotgun_a.mdl", { 0.0f, 0.8f, 5.0f }, 0.0f, { 0.2f, 2.4f, 14.2f }, true },
-		{ "w_autoshot_m4super.mdl", { 0.0f, 1.0f, 5.5f }, 0.0f, { -1.0f, 2.6f, 7.5f }, false },
-		{ "w_shotgun_spas.mdl", { 0.0f, 1.0f, 8.0f }, 0.0f, { -1.0f, 2.8f, 6.0f }, false },
-		{ "w_rifle_m16a2.mdl", { 0.0f, -1.4f, 6.05f }, 3.2f, { 0.0f, 3.4f, -0.8f }, false },
-		{ "w_desert_rifle.mdl", { 0.0f, -1.9f, 6.4f }, 4.0f, { 0.0f, 3.9f, 8.7f }, false },
-		{ "w_rifle_ak47.mdl", { 0.0f, -1.95f, 7.95f }, 4.55f, { -1.0f, 2.9f, 8.2f }, false },
-		{ "w_rifle_sg552.mdl", { 0.0f, -0.5f, 6.2f }, 3.3f, { -1.2f, 3.3f, 8.5f }, false },
-		{ "w_sniper_mini14.mdl", { 0.0f, 1.2f, 7.3f }, 1.7f, { -0.8f, 3.1f, 8.7f }, false },
-		{ "w_sniper_military.mdl", { 0.0f, 0.7f, 6.7f }, 3.4f, { 1.0f, 4.4f, 13.0f }, false },
-		{ "w_sniper_awp.mdl", { 0.25f, 0.4f, 7.0f }, 1.8f, { -1.2f, 2.8f, 5.0f }, false },
-		{ "w_sniper_scout.mdl", { 0.0f, 0.5f, 6.75f }, 1.7f, { -2.0f, 2.4f, 3.0f }, false },
+		{ "w_pistol_a.mdl", { 0.0f, -1.15f, 0.75f }, 2.85f, { 0.0f, 1.9f, 0.3f }, false, { 0.0f, -1.7f, 0.05f }, 12.0f },
+		{ "w_desert_eagle.mdl", { 0.0f, -1.0f, 0.75f }, 2.4f, { 0.0f, 2.0f, 0.7f }, false, { 0.0f, -1.6f, 0.0f }, 12.0f },
+		{ "w_smg_uzi.mdl", { 0.0f, -2.55f, 1.0f }, 3.75f, { 0.0f, 3.6f, 6.3f }, false, { 0.0f, -1.5f, 0.45f }, 6.0f },
+		{ "w_smg_a.mdl", { 0.0f, -1.9f, 0.9f }, 4.3f, { 0.0f, 4.0f, -2.5f }, false, { 0.0f, -1.6f, 0.3f }, 8.0f },
+		{ "w_smg_mp5.mdl", { 0.45f, -1.45f, 7.75f }, 4.15f, { 0.8f, 4.6f, 11.0f }, false, { 0.0f, -1.6f, -0.6f }, 32.0f },
+		{ "w_shotgun.mdl", { 0.0f, 0.8f, 5.0f }, 0.0f, { 0.2f, 2.5f, 14.3f }, true, { 0.0f, 1.0f, -1.0f }, 45.0f },
+		{ "w_pumpshotgun_a.mdl", { 0.0f, 0.8f, 5.0f }, 0.0f, { 0.2f, 2.4f, 14.2f }, true, { 0.0f, 1.0f, -1.0f }, 45.0f },
+		{ "w_autoshot_m4super.mdl", { 0.0f, 1.0f, 5.5f }, 0.0f, { -1.0f, 2.6f, 7.5f }, false, { 0.0f, -1.6f, -0.4f }, 25.0f },
+		{ "w_shotgun_spas.mdl", { 0.0f, 1.0f, 8.0f }, 0.0f, { -1.0f, 2.8f, 6.0f }, false, { 0.0f, -1.7f, -0.3f }, 22.0f },
+		{ "w_rifle_m16a2.mdl", { 0.0f, -1.4f, 6.05f }, 3.2f, { 0.0f, 3.4f, -0.8f }, false, { 0.0f, -1.6f, -0.4f }, 26.0f },
+		{ "w_desert_rifle.mdl", { 0.0f, -1.9f, 6.4f }, 4.0f, { 0.0f, 3.9f, 8.7f }, false, { 0.0f, -1.6f, -0.4f }, 28.0f },
+		{ "w_rifle_ak47.mdl", { 0.0f, -1.95f, 7.95f }, 4.55f, { -1.0f, 2.9f, 8.2f }, false, { 0.0f, -1.6f, -0.3f }, 22.0f },
+		{ "w_rifle_sg552.mdl", { 0.0f, -0.5f, 6.2f }, 3.3f, { -1.2f, 3.3f, 8.5f }, false, { 0.0f, -1.6f, -0.4f }, 26.0f },
+		{ "w_m60.mdl", { 0.0f, 0.0f, 0.0f }, 0.0f, { -1.5f, 4.0f, 3.0f }, false, { 0.0f, -1.6f, -0.3f }, 22.0f },
+		{ "w_sniper_mini14.mdl", { 0.0f, 1.2f, 7.3f }, 1.7f, { -0.8f, 3.1f, 8.7f }, false, { 0.0f, 1.0f, -1.0f }, 45.0f },
+		{ "w_sniper_military.mdl", { 0.0f, 0.7f, 6.7f }, 3.4f, { 1.0f, 4.4f, 13.0f }, false, { 0.0f, -1.4f, -0.6f }, 30.0f },
+		{ "w_sniper_awp.mdl", { 0.25f, 0.4f, 7.0f }, 1.8f, { -1.2f, 2.8f, 5.0f }, false, { 0.0f, -0.9f, -0.6f }, 35.0f },
+		{ "w_sniper_scout.mdl", { 0.0f, 0.5f, 6.75f }, 1.7f, { -2.0f, 2.4f, 3.0f }, false, { 0.0f, 0.6f, -1.0f }, 45.0f },
 	};
 
-	// The third person holds a weapon in the right hand by its weapon bone at the survivors' "ValveBiped.weapon_bone", a
-	// child of "Bip01_R_Hand". The left hand holds a gun the same way, mirrored (the hands' bones mirror each other with
-	// their z turned around), the gun itself not: where its weapon bone is in the left hand bone, from the models.
-	const Mat34 kLeftGunInHand = FromAxes(Vec3(0.0072f, 0.9631f, 0.2692f), Vec3(0.0676f, -0.2691f, 0.9608f), Vec3(0.9977f, 0.0113f, -0.0670f),
-		Vec3(2.8569f, -1.5362f, 0.9738f));
+	// The grip of a gun whose model isn't one of these
+	const Vec3 kDefaultGrip(0.0f, -1.6f, -0.3f);
+	const float kDefaultGripRake = 20.0f;
+
+	Vec3 ToVec3(const Vector &v) { return Vec3(v.x, v.y, v.z); }
 
 	// A shot throws the gun's muzzle up in the hand and back, and its bolt goes back and forward again (the slide of a
 	// pistol): for this long
@@ -159,33 +163,53 @@ const LeftGun::GunModel *LeftGun::FindModel(const char *modelName)
 // Client
 // ---------------------------------------------------------------------------------------------------------------
 
-// The frame the left hand's item is drawn in: its fist (y along the grip, z where the fingers point), or for a gun where
-// the third person holds it (kLeftGunInHand), turned to point at the right hand while that one holds the gun too
+// The grip of the left hand's gun in its frame (LeftGun::GunModel): y up the grip, leaning forward at the top, z towards
+// the muzzle, at its middle
+Mat34 VR::LeftGunGrip() const
+{
+	const LeftGun::GunModel *model = m_LeftGunModelIndex == m_LeftItemIndex ? m_LeftGunModel : nullptr;
+	const float radians = (model ? model->gripRake : kDefaultGripRake) * 3.14159265f / 180.0f;
+	const Vec3 up(0.0f, cosf(radians), sinf(radians)), forward(0.0f, -sinf(radians), cosf(radians));
+	return FromAxes(Cross(up, forward), up, forward, model ? model->grip : kDefaultGrip);
+}
+
+// The frame the left hand's item is drawn in: its fist (y along the grip, z where the fingers point). A gun points the
+// way the right hand's does (the controller turned by the aim's angle, ControllerAngleAdjustment), or at the right hand
+// while that one holds it too, with its grip where the fist is: the hand turns to hold it (GetLeftHandDrawn), as the
+// game's animation holds the right hand's weapon.
 bool VR::GetLeftItemFrame(Mat34 &frame) const
 {
-	if (LeftGun::Find(m_LeftItemId))
-	{
-		if (!m_LeftGripValid || !m_ArmsRig)
-			return false;
-		frame = Multiply(GetLeftHandBone(*m_ArmsRig), kLeftGunInHand);
-		if (!IsFinite(frame))
-			return false;
-	}
-	else if (!GetLeftGripFrame(frame))
-	{
+	if (!GetLeftGripFrame(frame))
 		return false;
-	}
-	if (!m_RightHoldsLeftGun)
+	if (!LeftGun::Find(m_LeftItemId))
 		return true;
 
-	const Vec3 toRight = GetFistPoint(true) - Origin(frame);
-	if (Length(toRight) < kSupportMinSpan)
-		return true;
-	const Vec3 forward = Normalized(toRight);
-	const Vec3 grip = Axis(frame, 1);
-	const Vec3 up = Normalized(grip - forward * Dot(grip, forward), Cross(forward, Axis(frame, 0)));
-	frame = FromAxes(Cross(up, forward), up, forward, Origin(frame));
-	return true;
+	const Vec3 fist = Origin(frame);
+	Vec3 forward = Normalized(ToVec3(m_LeftControllerForward)), up = Normalized(ToVec3(m_LeftControllerUp));
+	const Vec3 toRight = GetFistPoint(true) - fist;
+	if (m_RightHoldsLeftGun && Length(toRight) >= kSupportMinSpan)
+	{
+		const Vec3 left = Cross(up, forward);
+		forward = Normalized(toRight);
+		up = Normalized(up - forward * Dot(up, forward), Cross(forward, left));
+	}
+	frame = FromAxes(Cross(up, forward), up, forward, Vec3());
+	SetAxis(frame, 3, fist - RotateVector(frame, Origin(LeftGunGrip())));
+	return IsFinite(frame);
+}
+
+// The left hand bone as it's drawn (BuildFirstPersonHands): where its controller is, or closed on the grip of its gun
+// (GetLeftItemFrame), its fist where it would be
+Mat34 VR::GetLeftHandDrawn(const HandRig &rig) const
+{
+	Mat34 gun;
+	if (LeftHandShowsItem() && LeftGun::Find(m_LeftItemId) && m_LeftGripValid && GetLeftItemFrame(gun))
+	{
+		const Mat34 hand = Multiply(Multiply(gun, LeftGunGrip()), InvertRigid(m_LeftGripInHand));
+		if (IsFinite(hand))
+			return hand;
+	}
+	return GetLeftHandBone(rig);
 }
 
 // The empty right hand takes the left hand's long gun with a grab on its barrel (UpdateTracking), and holds it while the

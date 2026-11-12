@@ -261,6 +261,22 @@ void Hooks::initGrenadeThrowHooks()
 	m_AbsVelocityOffset = absVelocityOffset;
 	m_ThrowGrenade = (tThrowGrenade)throwGrenade;
 
+	// The grenade's ammo, which the game takes just before it throws: a throw made at once takes it too
+	// (dStartGrenadeThrow). Without it the throw is the game's, 0.2 s after the release.
+	if (const uint8_t *reached = (const uint8_t *)m_Game->m_Offsets->GrenadeThrowTimeReached.address)
+	{
+		const int ammoType = *(const int32_t *)(reached + 2), removeAmmo = *(const int32_t *)(reached + 10);
+		if (ammoType > 0 && ammoType < 0x4000 && removeAmmo > 0 && removeAmmo < 0x2000 && removeAmmo % 4 == 0)
+		{
+			m_GrenadeAmmoTypeOffset = ammoType;
+			m_RemoveAmmoVtableOffset = removeAmmo;
+		}
+	}
+	if (m_RemoveAmmoVtableOffset)
+		Diagnostics::Log("grenades: their ammo at 0x%X, the player's RemoveAmmo at 0x%X", m_GrenadeAmmoTypeOffset, m_RemoveAmmoVtableOffset);
+	else
+		Diagnostics::Log("grenades: the game's throw doesn't look as expected, a grenade thrown with the arm leaves 0.2 s after the release");
+
 	hkStartGrenadeThrow.createHook((LPVOID)startGrenadeThrow, &dStartGrenadeThrow);
 }
 
@@ -1622,8 +1638,9 @@ void __fastcall Hooks::dStartGrenadeThrow(void *ecx, void *edx)
 	// EmitGrenade gets the origin and velocity of the throw
 	HookEmitGrenade(ecx);
 
-	// Thrown with the arm: throw now instead of 0.2 s later, when the hand would be somewhere else.
-	// ThrowGrenade clears m_fThrowTime, so the game doesn't throw a second time.
+	// Thrown with the arm: throw now instead of 0.2 s later, when the hand would be somewhere else, taking the grenade's
+	// ammo first as the game does then (or it stays with the player, to be thrown again).
+	// ThrowGrenade clears m_fThrowTime, so the game doesn't throw a second time, nor take the ammo again.
 	bool armThrow;
 	if (isLocalPlayer)
 	{
@@ -1635,8 +1652,15 @@ void __fastcall Hooks::dStartGrenadeThrow(void *ecx, void *edx)
 		armThrow = HasJoinedPlayerThrow(player) && player.throwGesture;
 	}
 
-	if (armThrow)
+	void *owner = m_GetGrenadeOwner(ecx);
+	if (armThrow && owner && m_RemoveAmmoVtableOffset)
+	{
+		typedef void(__thiscall *tRemoveAmmo)(void *thisptr, int count, int ammoType);
+		const int ammoType = *(const int *)((const uint8_t *)ecx + m_GrenadeAmmoTypeOffset);
+		(*(tRemoveAmmo **)owner)[m_RemoveAmmoVtableOffset / 4](owner, 1, ammoType);
+		VR::WriteGrenadeThrowLog("player %d throws at once, the grenade's ammo (type %d) taken", playerIndex, ammoType);
 		m_ThrowGrenade(ecx);
+	}
 }
 
 namespace

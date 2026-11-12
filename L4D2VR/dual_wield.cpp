@@ -328,6 +328,14 @@ bool VR::GetLeftItemDraw(BodyModelDraw &draw)
 	draw.model = model;
 	draw.alignWeaponBone = true;
 
+	// Where a gun's grip is (GetLeftItemFrame)
+	if (model != m_LeftGunModelPtr || m_LeftGunModelIndex != m_LeftItemIndex)
+	{
+		m_LeftGunModelPtr = model;
+		m_LeftGunModelIndex = m_LeftItemIndex;
+		m_LeftGunModel = LeftGun::FindModel(m_Game->m_ModelInfo->GetModelName((void *)model));
+	}
+
 	// The adrenaline's model has its cap on. With the trigger held, ready to be stabbed in, it's the first person one
 	// instead, which shows the needle (out by the little finger).
 	if (m_LeftItemId == C_WeaponCSBase::ADRENALINE && m_LeftTriggerDown)
@@ -1089,6 +1097,44 @@ void VR::DualWieldTest(const char *action)
 	if (strcmp(action, "doors") == 0)
 	{
 		LogDoors(Vec3(m_SetupOrigin.x, m_SetupOrigin.y, m_SetupOrigin.z));
+		return;
+	}
+
+	// lefttrigger_<ms>, righttrigger_<ms>: the trigger held that long
+	if (strncmp(action, "lefttrigger", 11) == 0 || strncmp(action, "righttrigger", 12) == 0)
+	{
+		m_TestHeldAction = action[0] == 'l' ? &m_ActionSecondaryAttack : &m_ActionPrimaryAttack;
+		m_TestHeldUntil = NowMs() + (filter ? std::clamp(atoi(filter), 0, 10000) : 1500);
+		return;
+	}
+	// armthrow: a throw with the arm released now, which the game's next throw (-attack) uses (Hooks::dStartGrenadeThrow)
+	if (strcmp(action, "armthrow") == 0)
+	{
+		GrenadeThrow grenadeThrow;
+		grenadeThrow.pending = true;
+		grenadeThrow.gesture = true;
+		grenadeThrow.time = std::chrono::steady_clock::now();
+		grenadeThrow.handSpeed = 4.0f;
+		grenadeThrow.armVelocity = m_HmdForward * 500.0f;
+		m_GrenadeThrowSequence = m_GrenadeThrowSequence % 3 + 1;
+		grenadeThrow.sequence = m_GrenadeThrowSequence;
+		std::lock_guard<std::mutex> lock(m_GrenadeThrowMutex);
+		m_GrenadeThrow = grenadeThrow;
+		return;
+	}
+	// leftgrenade: the grenade carried goes to the left hand, as from the chest
+	if (strcmp(action, "leftgrenade") == 0)
+	{
+		InventoryItem items[64];
+		const int count = GetInventory(local, items, 64);
+		for (int i = 0; i < count; ++i)
+		{
+			if (IsThrowableWeapon(items[i].id))
+			{
+				TakeIntoLeftHand(items[i].index, items[i].id);
+				break;
+			}
+		}
 		return;
 	}
 

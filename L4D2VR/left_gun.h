@@ -42,6 +42,8 @@ namespace LeftGun
 		float magazineHalf;         // from there to the end of the magazine that sticks out, down the grip
 		HandMath::Vec3 bolt;        // where the slide, the charging handle, the bolt or the pump is taken
 		bool pumpIsClip;            // the pump is the model's "weapon_bone_Clip" (pump shotguns): it moves when pulled
+		HandMath::Vec3 grip;        // the middle of the pistol grip, or of the stock's wrist, where the fist closes
+		float gripRake;             // how much the grip leans back at its bottom, degrees from the weapon bone's y
 	};
 
 	// Null for a model that isn't one of the game's guns

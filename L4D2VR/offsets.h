@@ -118,6 +118,9 @@ public:
     Offset StartGrenadeThrow =           { "server.dll", 0x24E230, "55 8B EC 51 A1 ? ? ? ? F3 0F 10 40 0C F3 0F 58 05 ? ? ? ? 56 8B F1 F3 0F 10 8E ? ? ? ? 0F 2E C8" };
     // CBaseCSGrenade::ThrowGrenade, called when m_fThrowTime is reached. Calls the virtual EmitGrenade(origin, angles, velocity, angular impulse, owner)
     Offset ThrowGrenade =                { "server.dll", 0x24E2A0, "55 8B EC 81 EC 94 00 00 00 A1 ? ? ? ? 33 C5 89 45 FC 53 56 57 8B F9 E8 ? ? ? ? 8B F0 85 F6 0F 84 ? ? ? ? 8B 06 8B 90 68 01 00 00 8B CE FF D2 84 C0" };
+    // CBaseCSGrenade::ItemPostFrame once m_fThrowTime is reached: owner->RemoveAmmo(1, m_iPrimaryAmmoType) (virtual, its
+    // offset at +10, the ammo type's at +2), then ThrowGrenade. Without that the grenade stays with the player.
+    Offset GrenadeThrowTimeReached =     { "server.dll", 0x24E153, "8B 86 ? ? ? ? 8B 13 8B 92 ? ? ? ? 50 6A 01 8B CB FF D2 8B 06 8B 90 ? ? ? ? 8B CE FF D2", 0, true };
     Offset ProcessUsercmds =             { "server.dll", 0xEFB20, "55 8B EC B8 ? ? ? ? E8 ? ? ? ? A1 ? ? ? ? 33 C5 89 45 FC 8B 45 0C 8B 55 08" };
     Offset CBaseEntity_entindex =        { "server.dll", 0x253A0, "8B 41 28 85 C0 75 01 C3 8B 0D ? ? ? ? 2B 41 58 C1 F8 04 C3 CC CC CC CC CC CC CC CC CC CC CC 55"};
     Offset TestMeleeSwingServer =        { "server.dll", 0x3EB2E0, "24 FF D2 5B 5F 5E C3", 20};

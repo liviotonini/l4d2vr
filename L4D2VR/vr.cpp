@@ -466,6 +466,10 @@ void VR::GetViewParameters()
 
 bool VR::PressedDigitalAction(vr::VRActionHandle_t &actionHandle, bool checkIfActionChanged)
 {
+    // A trigger held by l4d2vr_dual_test (there are no controllers in those tests)
+    if (m_TestHeldAction == &actionHandle && GetTickCount64() < m_TestHeldUntil)
+        return !checkIfActionChanged;
+
     vr::InputDigitalActionData_t digitalActionData;
     vr::EVRInputError result = m_Input->GetDigitalActionData(actionHandle, &digitalActionData, sizeof(digitalActionData), vr::k_ulInvalidInputValueHandle);
     

@@ -443,6 +443,8 @@ public:
 	unsigned long long m_GrabUsePressAt = 0;
 	unsigned long long m_GrabUsePressUntil = 0;
 	unsigned long long m_TestUsePressAt = 0; // l4d2vr_dual_test grab: +use from the console when the grab presses it
+	vr::VRActionHandle_t *m_TestHeldAction = nullptr; // l4d2vr_dual_test lefttrigger/righttrigger: held until then
+	unsigned long long m_TestHeldUntil = 0;
 	static constexpr int kMaxBodyDraws = 6;
 	BodyModelDraw m_BodyDraws[kMaxBodyDraws];
 	int m_BodyDrawCount = 0;
@@ -532,6 +534,9 @@ public:
 	int m_LeftMarkKind = 0;                // the reload's mark on it: 1 the magazine to take out, 2 where one goes, 3 the bolt
 	vr::HmdMatrix34_t m_LeftMarkerTransform = {}; // relative to the left controller, from the last draw
 	bool m_LeftMarkerPlaced = false;
+	const LeftGun::GunModel *m_LeftGunModel = nullptr; // where the parts of the left hand's gun are (GetLeftItemDraw)
+	const void *m_LeftGunModelPtr = nullptr;
+	int m_LeftGunModelIndex = 0;
 	bool m_LeftSwinging = false;
 	QAngle m_LeftSwingPrevAim = { 0, 0, 0 }; // the aim sent for the swing, from the last update
 	bool m_LeftSwingAimValid = false;
@@ -681,6 +686,8 @@ public:
 	bool GetLeftGunAim(Vector &origin, QAngle &angles) const;
 	bool GetLeftItemFrame(HandMath::Mat34 &frame) const;
 	void ApplyLeftGunShot(HandMath::Mat34 &frame);
+	HandMath::Mat34 LeftGunGrip() const;
+	HandMath::Mat34 GetLeftHandDrawn(const HandRig &rig) const;
 	void PlaceLeftGunParts(const void *clipBones, const HandMath::Mat34 &frame, HandMath::Mat34 *bones, int boneCount);
 	bool IsLeftGunShot(int seed) const;
 	bool TryRightHoldLeftGun();

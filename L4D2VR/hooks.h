@@ -170,6 +170,9 @@ public:
 	static inline tThrowGrenade m_ThrowGrenade = nullptr;
 	static inline tGetPlayerOwner m_GetGrenadeOwner = nullptr;
 	static inline int m_EmitGrenadeVtableOffset = 0;
+	// Read from the game's throw when its time comes (Offsets::GrenadeThrowTimeReached): 0 if not found
+	static inline int m_RemoveAmmoVtableOffset = 0;
+	static inline int m_GrenadeAmmoTypeOffset = 0;
 	static inline const Vector *m_LeftShotStart = nullptr; // the left hand's gun's muzzle while its shot is shown
 	static inline int m_AbsVelocityOffset = 0; // CBaseEntity::m_vecAbsVelocity
 

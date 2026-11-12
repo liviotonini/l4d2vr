@@ -408,7 +408,7 @@ bool VR::BuildFirstPersonHands(const void *studioHeader, const void *customBones
 			HoldLeftItem(rig, curls);
 
 		// Hand turned by the optional fine tuning, around its own axes
-		const Mat34 hand = GetLeftHandBone(rig);
+		const Mat34 hand = GetLeftHandDrawn(rig);
 		if (!IsFinite(hand))
 			return false;
 
