@@ -697,7 +697,9 @@ void VR::ProcessInput()
     // button stops the game from throwing). Neither does the shove button press that cancelled a throw.
     // A melee weapon in the left hand hits instead of shoving, and its item being used doesn't shove (dual wield)
     const bool leftShoves = !ManualReloadUsesLeftHand() && !LeftHandHoldsMelee() && !m_LeftUseActive;
-    const bool shove = m_IsTrackingManualPush && !IsGrenadeThrowInProgress() && ((VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 4.0 && leftShoves) || ((rightHandEmpty || !m_Game->m_IsMeleeWeaponActive) && VectorLength(m_RightControllerPose.TrackedDeviceVel) > 4.0));
+    // Nor does the right arm while it works the left hand's gun (a quick pump is a fast swing)
+    const bool rightShoves = (rightHandEmpty || !m_Game->m_IsMeleeWeaponActive) && GetTickCount64() - m_RightHandHandledLeftGunMs > kNoShoveAfterLeftGunMs;
+    const bool shove = m_IsTrackingManualPush && !IsGrenadeThrowInProgress() && ((VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 4.0 && leftShoves) || (rightShoves && VectorLength(m_RightControllerPose.TrackedDeviceVel) > 4.0));
     SetGameButton(GameButton_Attack2, shove);
     // The game's shove animation isn't shown, the arm already swung (ApplyThrowPose)
     if (shove && !m_ShoveDown)
@@ -1282,79 +1284,101 @@ bool VR::UpdateScope()
             WriteScopeDebug(g_ScopeUpdateDebugTime, "update: not rendered, creating the overlays failed (error %d)", m_ScopeOverlayCreateError);
         return false;
     }
-    if (m_RightControllerDeviceIndex == vr::k_unTrackedDeviceIndexInvalid)
-        return skip("no right controller");
-
-    if (m_RightHandEmpty)
-        return skip("the right hand is empty");
-    const ScopeInfo *scope = FindScope(m_ActiveWeaponId);
-    if (!scope)
-        return skip("this weapon has no scope");
-
-    uintptr_t getViewModelAddress = m_Game->m_Offsets->GetViewModel.address;
-    if (!getViewModelAddress)
-        return skip("GetViewModel signature not found");
-
-    C_BasePlayer *localPlayer = (C_BasePlayer *)m_Game->GetClientEntity(m_Game->m_EngineClient->GetLocalPlayer());
-    if (!localPlayer)
-        return skip("no local player");
-
-    typedef void *(__thiscall *tGetViewModel)(void *player, int index);
-    void *viewModel = ((tGetViewModel)getViewModelAddress)(localPlayer, 0);
-    if (!viewModel)
-        return skip("no viewmodel");
-
-    // Same calls the game makes for the laser sight: IClientRenderable::LookupAttachment and GetAttachment of the viewmodel
-    void *renderable = (uint8_t *)viewModel + 4;
-    void **renderableVtable = *(void ***)renderable;
-    typedef int(__thiscall *tLookupAttachment)(void *renderable, const char *name);
-    typedef bool(__thiscall *tGetAttachment)(void *renderable, int number, Vector &origin, QAngle &angles);
-
-    int attachment = ((tLookupAttachment)renderableVtable[0x84 / 4])(renderable, "flashlight");
-    if (attachment <= 0)
-        return skip("the viewmodel has no flashlight attachment");
-
-    Vector attachmentOrigin;
-    QAngle attachmentAngles;
-    if (!((tGetAttachment)renderableVtable[0x8C / 4])(renderable, attachment, attachmentOrigin, attachmentAngles))
-        return skip("GetAttachment failed");
-
-    Vector attachmentForward, attachmentRight, attachmentUp;
-    QAngle::AngleVectors(attachmentAngles, &attachmentForward, &attachmentRight, &attachmentUp);
-
-    // While the fire animation of a bolt action isn't shown, the scope stays where the weapon is drawn
-    if (ManualReloadPumpsByHand())
+    // The scope of the right hand's weapon, or of the left hand's gun when the right hand's has none (left_gun.cpp)
+    const ScopeInfo *scope = m_RightHandEmpty ? nullptr : FindScope(m_ActiveWeaponId);
+    HandMath::Vec3 leftEyepiece;
+    QAngle leftAngles;
+    float leftRadius = 0.0f;
+    const bool left = !scope && GetLeftScope(leftEyepiece, leftAngles, leftRadius);
+    m_ScopeOnLeft = left;
+    if (!scope && !left)
     {
-        using namespace HandMath;
-        auto vec = [](const Vector &v) { return Vec3(v.x, v.y, v.z); };
-        auto toVector = [](const Vec3 &v) { return Vector(v.x, v.y, v.z); };
-        const Mat34 frame = FromAxes(vec(m_ViewmodelForward), vec(m_ViewmodelRight) * -1.0f, vec(m_ViewmodelUp), vec(GetRecommendedViewmodelAbsPos()));
-
-        if (!ManualReloadHoldsFirePose() || m_ScopeAttachmentWeaponId != m_ActiveWeaponId)
-        {
-            m_ScopeAttachmentInFrame = Multiply(InvertRigid(frame), FromAxes(vec(attachmentForward), vec(attachmentRight) * -1.0f, vec(attachmentUp), vec(attachmentOrigin)));
-            m_ScopeAttachmentWeaponId = m_ActiveWeaponId;
-        }
-        else
-        {
-            const Mat34 held = Multiply(frame, m_ScopeAttachmentInFrame);
-            attachmentForward = toVector(Axis(held, 0));
-            attachmentRight = toVector(Axis(held, 1) * -1.0f);
-            attachmentUp = toVector(Axis(held, 2));
-            attachmentOrigin = toVector(Origin(held));
-        }
+        m_ScopeBodyWeaponId = 0;
+        return skip("no weapon with a scope in the hands");
     }
+    if ((left ? m_LeftControllerDeviceIndex : m_RightControllerDeviceIndex) == vr::k_unTrackedDeviceIndexInvalid)
+        return skip("no controller for the hand with the scope");
 
-    Vector eyepiece = attachmentOrigin + attachmentForward * scope->eyepiece.x - attachmentRight * scope->eyepiece.y + attachmentUp * scope->eyepiece.z;
+    Vector eyepiece;
+    QAngle scopeAngles;
+    float scopeRadius;
+    int attachment = -1;
+    Vector attachmentOrigin;
+    if (left)
+    {
+        eyepiece = Vector(leftEyepiece.x, leftEyepiece.y, leftEyepiece.z);
+        scopeAngles = leftAngles;
+        scopeRadius = leftRadius;
+    }
+    else
+    {
+        scopeAngles = m_RightControllerAngAbs;
+        scopeRadius = scope->radius;
+
+        uintptr_t getViewModelAddress = m_Game->m_Offsets->GetViewModel.address;
+        if (!getViewModelAddress)
+            return skip("GetViewModel signature not found");
+
+        C_BasePlayer *localPlayer = (C_BasePlayer *)m_Game->GetClientEntity(m_Game->m_EngineClient->GetLocalPlayer());
+        if (!localPlayer)
+            return skip("no local player");
+
+        typedef void *(__thiscall *tGetViewModel)(void *player, int index);
+        void *viewModel = ((tGetViewModel)getViewModelAddress)(localPlayer, 0);
+        if (!viewModel)
+            return skip("no viewmodel");
+
+        // Same calls the game makes for the laser sight: IClientRenderable::LookupAttachment and GetAttachment of the viewmodel
+        void *renderable = (uint8_t *)viewModel + 4;
+        void **renderableVtable = *(void ***)renderable;
+        typedef int(__thiscall *tLookupAttachment)(void *renderable, const char *name);
+        typedef bool(__thiscall *tGetAttachment)(void *renderable, int number, Vector &origin, QAngle &angles);
+
+        attachment = ((tLookupAttachment)renderableVtable[0x84 / 4])(renderable, "flashlight");
+        if (attachment <= 0)
+            return skip("the viewmodel has no flashlight attachment");
+
+        QAngle attachmentAngles;
+        if (!((tGetAttachment)renderableVtable[0x8C / 4])(renderable, attachment, attachmentOrigin, attachmentAngles))
+            return skip("GetAttachment failed");
+
+        Vector attachmentForward, attachmentRight, attachmentUp;
+        QAngle::AngleVectors(attachmentAngles, &attachmentForward, &attachmentRight, &attachmentUp);
+
+        // While the fire animation of a bolt action isn't shown, the scope stays where the weapon is drawn
+        if (ManualReloadPumpsByHand())
+        {
+            using namespace HandMath;
+            auto vec = [](const Vector &v) { return Vec3(v.x, v.y, v.z); };
+            auto toVector = [](const Vec3 &v) { return Vector(v.x, v.y, v.z); };
+            const Mat34 frame = FromAxes(vec(m_ViewmodelForward), vec(m_ViewmodelRight) * -1.0f, vec(m_ViewmodelUp), vec(GetRecommendedViewmodelAbsPos()));
+
+            if (!ManualReloadHoldsFirePose() || m_ScopeAttachmentWeaponId != m_ActiveWeaponId)
+            {
+                m_ScopeAttachmentInFrame = Multiply(InvertRigid(frame), FromAxes(vec(attachmentForward), vec(attachmentRight) * -1.0f, vec(attachmentUp), vec(attachmentOrigin)));
+                m_ScopeAttachmentWeaponId = m_ActiveWeaponId;
+            }
+            else
+            {
+                const Mat34 held = Multiply(frame, m_ScopeAttachmentInFrame);
+                attachmentForward = toVector(Axis(held, 0));
+                attachmentRight = toVector(Axis(held, 1) * -1.0f);
+                attachmentUp = toVector(Axis(held, 2));
+                attachmentOrigin = toVector(Origin(held));
+            }
+        }
+
+        eyepiece = attachmentOrigin + attachmentForward * scope->eyepiece.x - attachmentRight * scope->eyepiece.y + attachmentUp * scope->eyepiece.z;
+    }
 
     // The scope looks where the bullets go
     Vector scopeForward, scopeRight, scopeUp;
-    QAngle::AngleVectors(m_RightControllerAngAbs, &scopeForward, &scopeRight, &scopeUp);
+    QAngle::AngleVectors(scopeAngles, &scopeForward, &scopeRight, &scopeUp);
 
     const Vector scopeFront = eyepiece + scopeForward * kScopeBodyLength;
     m_ScopeRear = HandMath::Vec3(eyepiece.x, eyepiece.y, eyepiece.z);
     m_ScopeFront = HandMath::Vec3(scopeFront.x, scopeFront.y, scopeFront.z);
-    m_ScopeBodyWeaponId = m_ActiveWeaponId;
+    m_ScopeBodyWeaponId = left ? 0 : m_ActiveWeaponId;
 
     // Only show (and render) the scope while an eye is behind the eyepiece
     const Vector eyes[2] = { GetViewOriginLeft(), GetViewOriginRight() };
@@ -1383,13 +1407,17 @@ bool VR::UpdateScope()
     if (m_ScopeDebug)
         alpha = 1.0f;
 
-    // Overlay transform relative to the (real) right controller, in its OpenVR frame (x right, y up, z back), meters
-    auto toController = [this](const Vector &v)
+    // Overlay transform relative to the (real) controller of the hand with the scope, in its OpenVR frame (x right, y up,
+    // z back), meters
+    const Vector &controllerRight = left ? m_LeftControllerRightRaw : m_RightControllerRightRaw;
+    const Vector &controllerUp = left ? m_LeftControllerUpRaw : m_RightControllerUpRaw;
+    const Vector &controllerForward = left ? m_LeftControllerForwardRaw : m_RightControllerForwardRaw;
+    auto toController = [&](const Vector &v)
     {
-        return Vector(DotProduct(v, m_RightControllerRightRaw), DotProduct(v, m_RightControllerUpRaw), -DotProduct(v, m_RightControllerForwardRaw));
+        return Vector(DotProduct(v, controllerRight), DotProduct(v, controllerUp), -DotProduct(v, controllerForward));
     };
 
-    Vector position = toController(eyepiece - m_RightControllerPosAbsRaw) * (1.0f / m_VRScale);
+    Vector position = toController(eyepiece - (left ? m_LeftControllerPosAbs : m_RightControllerPosAbsRaw)) * (1.0f / m_VRScale);
     Vector axisX = toController(scopeRight);
     Vector axisY = toController(scopeUp);
     Vector axisZ = toController(scopeForward * -1.0f); // the overlay faces the eye
@@ -1400,7 +1428,7 @@ bool VR::UpdateScope()
         axisX.y, axisY.y, axisZ.y, position.y,
         axisX.z, axisY.z, axisZ.z, position.z
     };
-    m_ScopeOverlayWidth = 2.0f * scope->radius / m_VRScale;
+    m_ScopeOverlayWidth = 2.0f * scopeRadius / m_VRScale;
 
     if (m_ScopeDebug)
     {
@@ -1420,7 +1448,7 @@ bool VR::UpdateScope()
     float magnification = std::max(m_ScopeZoomHigh ? m_ScopeMagnificationHigh : m_ScopeMagnification, 1.0f);
     m_ScopeFov = 2.0f * RAD2DEG(atanf(tanf(DEG2RAD(kScopeReferenceFov * 0.5f)) / magnification));
     m_ScopeCameraPos = eyepiece;
-    m_ScopeCameraAng = m_RightControllerAngAbs;
+    m_ScopeCameraAng = scopeAngles;
     m_ScopeAlpha = alpha;
 
     return true;
@@ -1431,6 +1459,28 @@ bool VR::UpdateScope()
 // trigger is for the bolt, and when the hand is closer to the bolt, too.
 bool VR::UpdateScopeZoom(bool haveBolt, const HandMath::Vec3 &boltGrab)
 {
+    // The left hand's gun's scope: the right trigger, with the empty right hand on it, closer to it than to the bolt
+    {
+        const bool rightTrigger = m_RightHandEmpty && PressedDigitalAction(m_ActionPrimaryAttack);
+        const bool rightPressed = rightTrigger && !m_LeftScopeTriggerDown;
+        m_LeftScopeTriggerDown = rightTrigger;
+        if (!rightTrigger)
+            m_LeftScopeTookTrigger = false;
+        if (rightPressed && m_ScopeEnabled && m_ScopeOnLeft)
+        {
+            const HandMath::Vec3 fist = GetFistPoint(true);
+            const float toScope = Reload::DistanceToSegment(fist, m_ScopeRear, m_ScopeFront);
+            const bool nearerThanBolt = !m_LeftGunHasBolt || !m_ManualReloadEnabled || toScope <= HandMath::Length(fist - m_LeftGunBolt);
+            if (toScope < kScopeZoomReach * m_VRScale && nearerThanBolt)
+            {
+                m_ScopeZoomHigh = !m_ScopeZoomHigh;
+                m_LeftScopeTookTrigger = true;
+                m_Haptics.Play(Haptics::Hand::WeaponHand, HapticEffects::Take);
+                PlayWeaponSound("weapons/awp/gunother/zoom.wav");
+            }
+        }
+    }
+
     const bool trigger = PressedDigitalAction(m_ActionSecondaryAttack);
     const bool pressed = trigger && !m_ScopeZoomTriggerDown;
     m_ScopeZoomTriggerDown = trigger;
@@ -1469,7 +1519,8 @@ void VR::SubmitScopeOverlays()
     bool rendered = m_ScopeRendered;
     m_ScopeRendered = false;
 
-    if (!rendered || m_ScopeAlpha < 0.01f || !m_VKScope.m_VRTexture.handle || m_RightControllerDeviceIndex == vr::k_unTrackedDeviceIndexInvalid)
+    const vr::TrackedDeviceIndex_t scopeDevice = m_ScopeOnLeft ? m_LeftControllerDeviceIndex : m_RightControllerDeviceIndex;
+    if (!rendered || m_ScopeAlpha < 0.01f || !m_VKScope.m_VRTexture.handle || scopeDevice == vr::k_unTrackedDeviceIndexInvalid)
     {
         if (m_ScopeDebug && rendered)
             WriteScopeDebug(g_ScopeSubmitDebugTime, "submit: hidden, alpha %.2f, scope texture %s, controller device %u",
@@ -1486,8 +1537,8 @@ void VR::SubmitScopeOverlays()
     vr::EVROverlayError textureError = m_Overlay->SetOverlayTexture(m_ScopeHandle, &m_VKScope.m_VRTexture);
     m_Overlay->SetOverlayWidthInMeters(m_ScopeHandle, m_ScopeOverlayWidth);
     m_Overlay->SetOverlayWidthInMeters(m_ScopeMaskHandle, m_ScopeOverlayWidth * kScopeMaskScale);
-    vr::EVROverlayError transformError = m_Overlay->SetOverlayTransformTrackedDeviceRelative(m_ScopeHandle, m_RightControllerDeviceIndex, &m_ScopeOverlayTransform);
-    m_Overlay->SetOverlayTransformTrackedDeviceRelative(m_ScopeMaskHandle, m_RightControllerDeviceIndex, &maskTransform);
+    vr::EVROverlayError transformError = m_Overlay->SetOverlayTransformTrackedDeviceRelative(m_ScopeHandle, scopeDevice, &m_ScopeOverlayTransform);
+    m_Overlay->SetOverlayTransformTrackedDeviceRelative(m_ScopeMaskHandle, scopeDevice, &maskTransform);
     m_Overlay->SetOverlayAlpha(m_ScopeHandle, m_ScopeAlpha);
     m_Overlay->SetOverlayAlpha(m_ScopeMaskHandle, m_ScopeAlpha);
     vr::EVROverlayError showError = m_Overlay->ShowOverlay(m_ScopeHandle);
@@ -2415,6 +2466,7 @@ void VR::UpdateTracking()
     Vector rightControllerRight_2handAdjust = m_RightControllerRight;
     Vector rightControllerUp_2handAdjust = m_RightControllerUp;
     UpdateManualReload();
+    UpdateLeftGunReload();
 
     if (PressedDigitalAction(m_RightHandGrab) || PressedDigitalAction(m_LeftHandGrab))
     {

@@ -423,6 +423,16 @@ int Hooks::dClientFireTerrorBullets(int playerId, const Vector &vecOrigin, const
 	
 	if (m_VR->m_IsVREnabled && playerId == m_Game->m_EngineClient->GetLocalPlayer())
 	{
+		// A shot of the left hand's gun, sent back by the server like the shots of other players: it was shown already
+		// (VR::FireLeftGun), and from here it would come out of the right hand
+		if (m_VR->IsLeftGunShot(a6))
+		{
+			static bool s_Logged = false;
+			if (!s_Logged)
+				Diagnostics::Log("left gun: the server's copy of its shot isn't shown again");
+			s_Logged = true;
+			return 0;
+		}
 		vecNewOrigin = m_VR->GetRightControllerAbsPos();
 		vecNewAngles = m_VR->GetRightControllerAbsAngle();
 	}

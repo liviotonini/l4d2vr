@@ -10,6 +10,7 @@
 #include "dual_wield.h"
 #include "diagnostics.h"
 #include "reload_logic.h"
+#include "pose_relay.h"
 
 using namespace HandMath;
 
@@ -73,8 +74,6 @@ namespace
 	const int kServerAmmoArrayOffset = 0x1874;
 	// The right hand puts the magazine in within this of where it goes, meters
 	const float kMagazineWellReach = 0.12f;
-	// Where the right hand is taken for near the ammo bag, in the log (meters)
-	const float kBagNearLog = 0.4f;
 	// The muzzle flash's length, units
 	const float kMuzzleFlashLength = 8.0f;
 
@@ -140,6 +139,45 @@ bool VR::TryRightHoldLeftGun()
 	return true;
 }
 
+namespace
+{
+	// The scopes of the guns, on their world model: the middle of the eyepiece from the weapon bone, up the grip and along
+	// the barrel (units, measured from the models' vertices), and the radius of the image (as in the right hand)
+	struct LeftScope
+	{
+		int weaponId;
+		float up, along, radius;
+	};
+	const LeftScope kLeftScopes[] =
+	{
+		{ C_WeaponCSBase::HUNTING_RIFLE, 5.0f, 2.0f, 0.95f },
+		{ C_WeaponCSBase::SNIPER_MILITARY, 6.8f, -4.0f, 0.80f },
+		{ C_WeaponCSBase::AWP, 4.8f, 1.0f, 1.30f },
+		{ C_WeaponCSBase::SCOUT, 4.2f, 2.0f, 0.90f },
+		{ C_WeaponCSBase::SG552, 5.1f, -1.0f, 0.75f },
+	};
+}
+
+// The scope of the left hand's gun, as it's drawn (VR::UpdateScope): false if it has none
+bool VR::GetLeftScope(Vec3 &eyepiece, QAngle &angles, float &radius)
+{
+	if (!LeftHandHoldsItem())
+		return false;
+	const LeftScope *scope = nullptr;
+	for (const LeftScope &candidate : kLeftScopes)
+	{
+		if (candidate.weaponId == m_LeftItemId)
+			scope = &candidate;
+	}
+	Mat34 frame;
+	if (!scope || !GetLeftItemFrame(frame))
+		return false;
+	eyepiece = TransformPoint(frame, Vec3(0.0f, scope->up, scope->along));
+	QAngle::VectorAngles(ToVector(Normalized(Axis(frame, 2))), ToVector(Normalized(Axis(frame, 1))), angles);
+	radius = scope->radius;
+	return true;
+}
+
 // The left hand's gun takes ammo now: its magazine isn't full, and there's ammo for it
 bool VR::LeftGunNeedsAmmo(const LeftGun::GunData &gun) const
 {
@@ -174,39 +212,132 @@ bool VR::AtLeftGunWell(const Vec3 &point) const
 // True if the grab was for that.
 bool VR::TryRightReloadLeftGun()
 {
-	const Vec3 fist = GetFistPoint(true);
+	// With the reload by hand the right hand's grab was taken by it already (UpdateLeftGunReload)
+	if (m_ManualReloadEnabled)
+		return m_LeftReloadTookGrab;
+
+	// Without it, a grab where the magazine goes loads it
 	const LeftGun::GunData *gun = LeftHandHoldsItem() ? LeftGun::Find(m_LeftItemId) : nullptr;
-	// Holding a magazine already: the grab puts it in there, or back
-	if (m_RightMagazine)
-	{
-		m_RightMagazine = false;
-		if (gun && AtLeftGunWell(fist))
-			LoadLeftGun(*gun);
-		else
-			Diagnostics::Log("left gun: the right hand put its magazine back");
-		return true;
-	}
-	if (!m_RightHandEmpty || !gun || !LeftGunNeedsAmmo(*gun))
+	if (!m_RightHandEmpty || !gun || !LeftGunNeedsAmmo(*gun) || !AtLeftGunWell(GetFistPoint(true)))
 		return false;
-	if (!m_ManualReloadEnabled)
-	{
-		if (!AtLeftGunWell(fist))
-			return false;
-		LoadLeftGun(*gun);
-		return true;
-	}
-	const float toBag = Length(fist - m_WaistWorld) / m_VRScale;
-	if (toBag > Reload::kPouchRadius)
-	{
-		if (toBag < kBagNearLog)
-			Diagnostics::Log("left gun: the right hand is %.2f m from the ammo bag, it takes a magazine within %.2f m", toBag, Reload::kPouchRadius);
-		return false;
-	}
-	m_RightMagazine = true;
-	m_RightMagazineIndex = m_LeftItemIndex;
-	m_Haptics.Play(Haptics::Hand::WeaponHand, HapticEffects::Take);
-	Diagnostics::Log("left gun: the right hand took a %s for it", gun->shells ? "shell" : "magazine");
+	LoadLeftGun(*gun);
 	return true;
+}
+
+namespace
+{
+	// The reload by hand of the left hand's gun: the same steps as the right hand's weapon (Reload::Machine), the right
+	// hand doing them
+	Reload::Machine g_LeftMachine;
+	int g_LeftMachineGun = 0;
+	bool g_RightWasAtBag = false;
+	// From the weapon bone of a pump shotgun to where its pump is held, units along the barrel; and where the bolt of a
+	// gun whose model has none is taken, above the grip
+	const float kPumpForward = 14.0f;
+	const float kBoltUp = 3.0f;
+}
+
+// Every frame, after the right hand's weapon's reload and before the grabs (UpdateTracking): the right hand takes the
+// left hand's gun's magazine out and drops it, takes a new one from the ammo bag and puts it in, pulls its bolt with the
+// right trigger when it ran empty, and works its pump or bolt after every shot with the trigger while it holds it too.
+// The parts are where the gun was last drawn (BuildBodyModelBones).
+void VR::UpdateLeftGunReload()
+{
+	m_LeftReloadTookGrab = false;
+	const LeftGun::GunData *gun = m_LeftItemIndex ? LeftGun::Find(m_LeftItemId) : nullptr;
+	ReloadSpec spec;
+	Mat34 frame;
+	const unsigned long long now = GetTickCount64();
+	const bool active = m_ManualReloadEnabled && gun && LeftHandHoldsItem() && GetReloadSpec(m_LeftItemId, spec) && now - m_LeftGunWellMs < 250
+		&& GetLeftItemFrame(frame) && m_Game->m_PoseRelay->IsServerCapable();
+	if (g_LeftMachineGun != m_LeftItemIndex)
+	{
+		// Another gun, or none: what was out is back in
+		g_LeftMachine.Reset();
+		g_LeftMachineGun = m_LeftItemIndex;
+	}
+	if (!active)
+	{
+		m_LeftGunMagazineOut = false;
+		m_LeftGunBoltPull = 0.0f;
+		m_LeftGunBlocked = false;
+		m_RightMagazine = false;
+		return;
+	}
+
+	const void *weapon = m_Game->GetClientEntity(m_LeftItemIndex);
+	const void *local = m_Game->GetClientEntity(m_Game->m_EngineClient->GetLocalPlayer());
+	const int ammoType = weapon ? Read<int>(weapon, kClientAmmoTypeOffset) : -1;
+	if (!weapon || !local || ammoType < 0 || ammoType >= 32)
+		return;
+
+	const Vec3 barrel = Normalized(Axis(frame, 2)), up = Normalized(Axis(frame, 1));
+	const Vec3 fist = GetFistPoint(true);
+	// The right hand only reloads it while it holds nothing of its own
+	const bool rightFree = m_RightHandEmpty;
+
+	Reload::Inputs in;
+	in.palm = fist;
+	in.held = fist;
+	in.socket = m_LeftGunWell;
+	in.magazineBase = m_LeftGunWell - up * (spec.magazineLength * 0.5f + 0.5f);
+	in.boltGrab = m_LeftGunHasBolt ? m_LeftGunBolt : spec.pump ? Origin(frame) + barrel * kPumpForward : Origin(frame) + up * kBoltUp;
+	in.boltAxis = barrel;
+	in.weaponPoint = Origin(frame);
+	in.waist = m_WaistWorld;
+	in.unitsPerMeter = m_VRScale;
+	in.boltTravel = spec.boltTravel;
+	in.grip = rightFree && PressedDigitalAction(m_RightHandGrab);
+	in.trigger = rightFree && PressedDigitalAction(m_ActionPrimaryAttack) && !m_LeftScopeTookTrigger;
+	in.holdsPump = spec.everyShot && m_RightHoldsLeftGun;
+	in.pumpEveryShot = spec.everyShot;
+	in.clip = Read<int>(weapon, kClientClipOffset);
+	in.capacity = std::max(spec.capacity, in.clip);
+	in.reserve = ReloadHasUnlimitedReserve(m_LeftItemId) ? 999 : Read<int>(local, kClientAmmoArrayOffset + ammoType * 4);
+	in.shells = spec.shells;
+	in.hasBolt = spec.boltTravel > 0.0f;
+	in.handFree = rightFree;
+
+	const unsigned events = g_LeftMachine.Update(in);
+	const Reload::State state = g_LeftMachine.GetState();
+	m_LeftReloadTookGrab = (events & (Reload::Event_GrabbedOld | Reload::Event_GrabbedFresh)) != 0;
+	m_LeftGunMagazineOut = !spec.shells && g_LeftMachine.MagazineIsOut();
+	m_LeftGunBoltPull = g_LeftMachine.BoltPull();
+	m_LeftGunBlocked = g_LeftMachine.BlocksFire(in.clip, spec.shells);
+	m_RightMagazine = state == Reload::State::HoldingOld || state == Reload::State::HoldingFresh;
+	m_LeftGunMagazineShown = !spec.shells;
+	if (state != Reload::State::Idle && state != Reload::State::NeedFresh)
+		m_RightHandHandledLeftGunMs = now;
+	m_RightMagazineIndex = m_LeftItemIndex;
+
+	// The right hand reaches the bag where it can take one: a faint tick
+	const bool atBag = rightFree && in.reserve > 0 && (state == Reload::State::Idle || state == Reload::State::NeedFresh)
+		&& Length(fist - m_WaistWorld) < Reload::kPouchRadius * m_VRScale;
+	if (atBag && !g_RightWasAtBag)
+		m_Haptics.Play(Haptics::Hand::WeaponHand, HapticEffects::Hint);
+	g_RightWasAtBag = atBag;
+
+	if (events & (Reload::Event_Inserted | Reload::Event_ShellInserted))
+	{
+		char command[64];
+		snprintf(command, sizeof(command), "l4d2vr_left_reload %d", ammoType);
+		m_Game->m_EngineClient->ServerCmd(command, true);
+		Diagnostics::Log("left gun: the right hand put a %s in", spec.shells ? "shell" : "magazine");
+	}
+	if (events & (Reload::Event_GrabbedOld | Reload::Event_GrabbedFresh | Reload::Event_GrabbedBolt))
+		m_Haptics.Play(Haptics::Hand::WeaponHand, HapticEffects::Take);
+	if (events & (Reload::Event_Inserted | Reload::Event_ShellInserted | Reload::Event_BoltPulled | Reload::Event_MagazineOut))
+		m_Haptics.Play(Haptics::Hand::BothHands, HapticEffects::Click);
+	if (events & Reload::Event_MagazineOut)
+		PlayWeaponSound(spec.magazineOutSound);
+	if (events & (Reload::Event_Inserted | Reload::Event_ShellInserted))
+		PlayWeaponSound(spec.magazineInSound);
+	if (events & Reload::Event_BoltPulled)
+		PlayWeaponSound(spec.boltBackSound);
+	if (events & Reload::Event_BoltReleased)
+		PlayWeaponSound(spec.boltForwardSound);
+	if (events & (Reload::Event_GrabbedOld | Reload::Event_MagazineOut | Reload::Event_DroppedOld | Reload::Event_GrabbedFresh | Reload::Event_BoltPulled))
+		Diagnostics::Log("left gun: reload by the right hand, events 0x%X", events);
 }
 
 // The magazine goes in: the server loads the gun from the ammo carried (LeftGun::ServerReload)
@@ -259,6 +390,17 @@ bool VR::GetLeftGunAim(Vector &origin, QAngle &angles) const
 	return true;
 }
 
+bool VR::IsLeftGunShot(int seed) const
+{
+	const unsigned long long now = GetTickCount64();
+	for (int i = 0; i < 8; ++i)
+	{
+		if (m_LeftGunSeeds[i] == seed && seed != 0 && now - m_LeftGunSeedMs[i] < 2000)
+			return true;
+	}
+	return false;
+}
+
 // Every frame (UpdateDualWield): the left trigger fires the left hand's gun, one shot per pull, as long as it's held, or
 // three at a time, as the gun does
 void VR::UpdateLeftGun(unsigned long long now)
@@ -271,19 +413,14 @@ void VR::UpdateLeftGun(unsigned long long now)
 		m_RightHoldsLeftGunTest = false;
 		Diagnostics::Log("left gun: let go by the right hand");
 	}
-	// A magazine in the right hand stays there until it goes in where the gun's goes (another right grab puts it back)
-	if (m_RightMagazine)
+	if (m_RightHoldsLeftGun)
+		m_RightHandHandledLeftGunMs = now;
+	// The test's magazine goes in at once
+	if (m_RightMagazineTest)
 	{
-		if (!gun || !m_RightHandEmpty || m_LeftItemIndex != m_RightMagazineIndex)
-		{
-			m_RightMagazine = m_RightMagazineTest = false;
-			Diagnostics::Log("left gun: the right hand's magazine went back");
-		}
-		else if (AtLeftGunWell(GetFistPoint(true)) || m_RightMagazineTest)
-		{
-			m_RightMagazine = m_RightMagazineTest = false;
+		m_RightMagazineTest = false;
+		if (gun)
 			LoadLeftGun(*gun);
-		}
 	}
 	const bool trigger = gun && PressedDigitalAction(m_ActionSecondaryAttack) && !m_ScopeZoomTookTrigger;
 	const bool pressed = trigger && !m_LeftGunTriggerDown;
@@ -307,6 +444,16 @@ void VR::UpdateLeftGun(unsigned long long now)
 
 	if (pressed)
 		m_LeftGunPull = true;
+
+	// The reload by hand: empty, the bolt or the pump to work, the magazine out
+	if (m_ManualReloadEnabled && m_LeftGunBlocked)
+	{
+		m_LeftGunBurstLeft = 0;
+		m_LeftGunPull = false;
+		if (pressed)
+			m_Game->ClientCmd_Unrestricted(gun->pistolClick ? "playgamesound Default.ClipEmpty_Pistol" : "playgamesound Default.ClipEmpty_Rifle");
+		return;
+	}
 	bool wantsShot = false;
 	switch (gun->mode)
 	{
@@ -349,7 +496,12 @@ void VR::UpdateLeftGun(unsigned long long now)
 // shows it to the other players
 void VR::FireLeftGun(const LeftGun::GunData &gun, const Vector &origin, const QAngle &angles)
 {
-	const int seed = (int)(GetTickCount64() * 2654435761ull & 0x7FFFFFFF);
+	// Never 0, and different from the last ones: the server's copy of the shot is known by it
+	static unsigned s_Counter = 0;
+	const int seed = (int)(((GetTickCount64() * 2654435761ull) ^ (++s_Counter * 40503u)) & 0x7FFFFFFF) | 1;
+	m_LeftGunSeeds[m_LeftGunSeedNext] = seed;
+	m_LeftGunSeedMs[m_LeftGunSeedNext] = GetTickCount64();
+	m_LeftGunSeedNext = (m_LeftGunSeedNext + 1) % 8;
 	char command[96];
 	snprintf(command, sizeof(command), "playgamesound %s", gun.shotSound);
 	m_Game->ClientCmd_Unrestricted(command);

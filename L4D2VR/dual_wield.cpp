@@ -986,7 +986,7 @@ void VR::DualWieldTest(const char *action)
 	if (strcmp(action, "support") == 0)
 	{
 		Vector before, after;
-		QAngle beforeAngles, afterAngles;
+		QAngle beforeAngles(0.0f, 0.0f, 0.0f), afterAngles(0.0f, 0.0f, 0.0f);
 		const bool had = GetLeftGunAim(before, beforeAngles);
 		m_RightHoldsLeftGun = m_RightHoldsLeftGunTest = m_RightHandEmpty && LeftGun::Find(m_LeftItemId) && LeftGun::Find(m_LeftItemId)->twoHanded;
 		const bool has = GetLeftGunAim(after, afterAngles);

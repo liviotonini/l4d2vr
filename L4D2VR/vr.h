@@ -405,6 +405,17 @@ public:
 	bool m_BoltMarkerFailed = false;
 
 	// What the player carries, seen on the body (body_items.cpp): the ammo bag, pills and grenades on the chest
+	// The reload by hand of a weapon (manual_reload.cpp), for the left hand's gun
+	struct ReloadSpec
+	{
+		int capacity = 0;
+		bool shells = false;
+		float boltTravel = 0.0f;
+		bool pump = false;          // the part worked is the pump, held by the other hand
+		bool everyShot = false;     // worked after every shot (pump and bolt actions)
+		float magazineLength = 0.0f;
+		const char *magazineOutSound = nullptr, *magazineInSound = nullptr, *boltBackSound = nullptr, *boltForwardSound = nullptr;
+	};
 	struct BodyModelDraw
 	{
 		const void *model = nullptr;
@@ -484,6 +495,10 @@ public:
 	int m_LeftGunClip = 0;                 // the game's, less the shots it hasn't counted yet
 	int m_LeftGunClipSeen = 0;
 	int m_LeftGunClipIndex = 0;
+	// The seeds of the last shots of the left hand's gun, to know the server's copies of them (Hooks::dClientFireTerrorBullets)
+	int m_LeftGunSeeds[8] = {};
+	unsigned long long m_LeftGunSeedMs[8] = {};
+	int m_LeftGunSeedNext = 0;
 	bool m_RightHoldsLeftGun = false;      // the empty right hand holds the left hand's gun too (TryRightHoldLeftGun)
 	bool m_RightHoldsLeftGunTest = false;  // held so by l4d2vr_dual_test, without the grab
 	bool m_RightMagazine = false;          // the empty right hand holds a magazine for the left hand's gun
@@ -492,6 +507,19 @@ public:
 	HandMath::Vec3 m_LeftGunWell;          // where the left hand's gun takes its magazine, as last drawn
 	unsigned long long m_LeftGunWellMs = 0;
 	mutable unsigned long long m_LeftGunWellNearLogMs = 0;
+	// The reload by hand of the left hand's gun, done by the right hand (UpdateLeftGunReload)
+	bool m_LeftReloadTookGrab = false;     // this frame's right grab was for it
+	bool m_LeftGunMagazineOut = false;
+	bool m_LeftGunMagazineShown = true;    // what the right hand holds is drawn (not a shell)
+	float m_LeftGunBoltPull = 0.0f;        // game units back
+	bool m_LeftGunBlocked = false;         // it can't fire: empty, the bolt or pump to work, the magazine out
+	bool m_LeftScopeTookTrigger = false;   // the right trigger changed the zoom of its scope
+	HandMath::Vec3 m_LeftGunBolt;          // its bolt, slide or charging handle, as last drawn
+	bool m_LeftGunHasBolt = false;
+	bool m_ScopeOnLeft = false;            // the scope shown is the left hand's gun's
+	unsigned long long m_RightHandHandledLeftGunMs = 0; // the right hand held the left hand's gun or worked it lately
+	static constexpr unsigned long long kNoShoveAfterLeftGunMs = 400;
+	bool m_LeftScopeTriggerDown = false;
 	HandMath::Vec3 m_LeftGunMuzzle;        // and its muzzle
 	unsigned long long m_LeftGunMuzzleMs = 0;
 	bool m_LeftSwinging = false;
@@ -599,6 +627,7 @@ public:
 	bool ManualReloadIsHolding() const;
 	static bool ReloadHasUnlimitedReserve(int weaponId);
 	static int GetReloadCapacity(int weaponId);
+	static bool GetReloadSpec(int weaponId, ReloadSpec &spec);
 	bool ManualReloadBlocksFire() const;
 	bool ManualReloadBlocksNativeReload() const;
 	bool ManualReloadOwnsReloadButton() const;
@@ -641,8 +670,11 @@ public:
 	void FireLeftGun(const LeftGun::GunData &gun, const Vector &origin, const QAngle &angles);
 	bool GetLeftGunAim(Vector &origin, QAngle &angles) const;
 	bool GetLeftItemFrame(HandMath::Mat34 &frame) const;
+	bool IsLeftGunShot(int seed) const;
 	bool TryRightHoldLeftGun();
 	bool TryRightReloadLeftGun();
+	void UpdateLeftGunReload();
+	bool GetLeftScope(HandMath::Vec3 &eyepiece, QAngle &angles, float &radius);
 	bool LeftGunNeedsAmmo(const LeftGun::GunData &gun) const;
 	bool AtLeftGunWell(const HandMath::Vec3 &point) const;
 	void LoadLeftGun(const LeftGun::GunData &gun);

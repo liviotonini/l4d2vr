@@ -227,6 +227,25 @@ bool VR::ManualReloadIsHolding() const
 	return m_ManualReloadEnabled && (state == Reload::State::HoldingOld || state == Reload::State::HoldingFresh);
 }
 
+// What the reload by hand of a weapon is, for the left hand's gun (left_gun.cpp)
+bool VR::GetReloadSpec(int weaponId, ReloadSpec &spec)
+{
+	const Profile *profile = FindProfile(weaponId);
+	if (!profile)
+		return false;
+	spec.capacity = profile->capacity;
+	spec.shells = profile->shells;
+	spec.boltTravel = profile->boltTravel;
+	spec.pump = profile->pump;
+	spec.everyShot = profile->firePoseMs > 0;
+	spec.magazineLength = profile->magazineLength;
+	spec.magazineOutSound = profile->sounds->magazineOut;
+	spec.magazineInSound = profile->sounds->magazineIn;
+	spec.boltBackSound = profile->sounds->boltBack;
+	spec.boltForwardSound = profile->sounds->boltForward;
+	return true;
+}
+
 // How many rounds a weapon holds, 0 for weapons reloaded the game's way
 int VR::GetReloadCapacity(int weaponId)
 {

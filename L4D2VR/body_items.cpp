@@ -485,7 +485,7 @@ void VR::UpdateBodyItems()
 		leftItem.leftGun = LeftGun::Find(m_LeftItemId) != nullptr;
 		m_BodyDraws[m_BodyDrawCount++] = leftItem;
 		// The magazine the empty right hand takes for it, in its fist
-		if (m_RightMagazine && leftItem.leftGun && m_BodyDrawCount < kMaxBodyDraws && GetTickCount64() - m_RightGripMs < 250)
+		if (m_RightMagazine && m_LeftGunMagazineShown && leftItem.leftGun && m_BodyDrawCount < kMaxBodyDraws && GetTickCount64() - m_RightGripMs < 250)
 		{
 			BodyModelDraw magazine;
 			magazine.model = leftItem.model;
@@ -798,6 +798,7 @@ namespace
 		int clip = -1, bullets = -1;
 		int muzzleBone = -1;
 		Mat34 muzzleOnBone;
+		int bolt = -1;   // what's pulled: the slide, the charging handle or the bolt
 	};
 
 	const ClipBones &ClipBonesOf(const void *studioHeader)
@@ -816,6 +817,17 @@ namespace
 				bones.clip = i;
 			else if (length >= 24 && strcmp(name + length - 24, "weapon_bone_Clip_Bullets") == 0 && bones.bullets < 0)
 				bones.bullets = i;
+		}
+		const char *const kBolts[] = { "weapon_charger_slide", "weapon_charger", "weapon_bolt", "weapon_bolt_opposite" };
+		for (const char *wanted : kBolts)
+		{
+			for (int i = 0; i < count && bones.bolt < 0; ++i)
+			{
+				const char *name = Studio::BoneName(studioHeader, i);
+				const size_t length = strlen(name), wantedLength = strlen(wanted);
+				if (length >= wantedLength && _stricmp(name + length - wantedLength, wanted) == 0)
+					bones.bolt = i;
+			}
 		}
 		const uint8_t *base = (const uint8_t *)studioHeader;
 		const int32_t attachments = *(const int32_t *)(base + 240), attachmentIndex = *(const int32_t *)(base + 244);
@@ -901,6 +913,20 @@ void VR::BuildBodyModelBones(const void *studioHeader, const BodyModelDraw &draw
 		{
 			m_LeftGunWell = Origin(bones[clip->clip]);
 			m_LeftGunWellMs = GetTickCount64();
+			// Out of it while the right hand reloads it
+			if (m_LeftGunMagazineOut)
+			{
+				bones[clip->clip] = CollapsedAt(m_LeftGunWell);
+				if (clip->bullets >= 0 && clip->bullets < boneCount)
+					bones[clip->bullets] = CollapsedAt(m_LeftGunWell);
+			}
+		}
+		// The bolt pulled back along the barrel, and where it is
+		m_LeftGunHasBolt = draw.leftGun && clip->bolt >= 0 && clip->bolt < boneCount;
+		if (m_LeftGunHasBolt)
+		{
+			SetAxis(bones[clip->bolt], 3, Origin(bones[clip->bolt]) - Normalized(Axis(draw.frame, 2)) * m_LeftGunBoltPull);
+			m_LeftGunBolt = Origin(bones[clip->bolt]);
 		}
 		if (draw.leftGun && clip->muzzleBone >= 0 && clip->muzzleBone < boneCount)
 		{
