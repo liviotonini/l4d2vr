@@ -358,7 +358,17 @@ bool VR::BuildFirstPersonHands(const void *studioHeader, const void *customBones
 	if (m_LeftUseActive || m_RightHandEmpty)
 	{
 		if (GetRightHandTarget(rig, rightHand))
-			rig.PoseHand(HandRig::Right, rightHand, m_RightFingerCurls, bones);
+		{
+			float curls[HandRig::FingerCount];
+			memcpy(curls, m_RightFingerCurls, sizeof(curls));
+			// Holding a magazine for the left hand's gun: closing the hand completely would put the fingers through it
+			if (m_RightMagazine && m_LeftGunMagazineShown)
+			{
+				for (float &curl : curls)
+					curl = std::min(curl, kHoldingMagazineCurl);
+			}
+			rig.PoseHand(HandRig::Right, rightHand, curls, bones);
+		}
 	}
 	else if (m_Game->m_IsMeleeWeaponActive && GetRightHandTarget(rig, rightHand, m_MeleeHandBackMeters))
 	{

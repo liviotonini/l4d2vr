@@ -3,6 +3,7 @@
 #include <Windows.h>
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 #include "sdk.h"
 #include "sdk_server.h"
 #include "game.h"
@@ -27,28 +28,66 @@ namespace
 {
 	const LeftGun::GunData kGuns[] =
 	{
-		{ C_WeaponCSBase::PISTOL, 0.15f, LeftGun::Semi, 1.5f, "Pistol.Fire", true, false, false, 0, "Pistol.ClipIn", "weapon_muzzle_flash_pistol" },
-		{ C_WeaponCSBase::MAGNUM, 0.15f, LeftGun::Semi, 1.25f, "Magnum.Fire", true, false, false, 0, "Magnum.ClipIn", "weapon_muzzle_flash_autoshotgun" },
-		{ C_WeaponCSBase::UZI, 0.0625f, LeftGun::Auto, 1.0f, "SMG.Fire", false, true, false, 650, "SMG.ClipIn", "weapon_muzzle_flash_smg" },
-		{ C_WeaponCSBase::MAC10, 0.0625f, LeftGun::Auto, 1.2f, "SMG_Silenced.Fire", false, true, false, 650, "SMG_Silenced.ClipIn", "weapon_muzzle_flash_smg_silenced" },
-		{ C_WeaponCSBase::MP5, 0.075f, LeftGun::Auto, 1.1f, "Weapon_MP5Navy.Single", false, true, false, 650, "SMG.ClipIn", "weapon_muzzle_flash_smg" },
+		{ C_WeaponCSBase::PISTOL, 0.15f, LeftGun::Semi, 1.5f, "Pistol.Fire", true, false, false, 0, "Pistol.ClipIn", "weapon_muzzle_flash_pistol", "weapon_shell_casing_9mm_L4D2", 6.0f, false },
+		{ C_WeaponCSBase::MAGNUM, 0.15f, LeftGun::Semi, 1.25f, "Magnum.Fire", true, false, false, 0, "Magnum.ClipIn", "weapon_muzzle_flash_autoshotgun", "weapon_shell_casing_desert_eagle", 10.0f, false },
+		{ C_WeaponCSBase::UZI, 0.0625f, LeftGun::Auto, 1.0f, "SMG.Fire", false, true, false, 650, "SMG.ClipIn", "weapon_muzzle_flash_smg", "weapon_shell_casing_9mm", 3.0f, false },
+		{ C_WeaponCSBase::MAC10, 0.0625f, LeftGun::Auto, 1.2f, "SMG_Silenced.Fire", false, true, false, 650, "SMG_Silenced.ClipIn", "weapon_muzzle_flash_smg_silenced", "weapon_shell_casing_9mm_L4D2", 3.0f, false },
+		{ C_WeaponCSBase::MP5, 0.075f, LeftGun::Auto, 1.1f, "Weapon_MP5Navy.Single", false, true, false, 650, "SMG.ClipIn", "weapon_muzzle_flash_smg", "weapon_shell_casing_9mm", 2.5f, false },
 		// The pump shotguns are pumped between shots
-		{ C_WeaponCSBase::PUMPSHOTGUN, 0.8f, LeftGun::Semi, 0.8f, "Shotgun.Fire", false, true, true, 56, nullptr, "weapon_muzzle_flash_autoshotgun" },
-		{ C_WeaponCSBase::SHOTGUN_CHROME, 0.8f, LeftGun::Semi, 0.8f, "Shotgun_Chrome.Fire", false, true, true, 56, nullptr, "weapon_muzzle_flash_autoshotgun" },
-		{ C_WeaponCSBase::AUTOSHOTGUN, 0.15f, LeftGun::Semi, 0.8f, "AutoShotgun.Fire", false, true, true, 90, nullptr, "weapon_muzzle_flash_autoshotgun" },
-		{ C_WeaponCSBase::SPAS, 0.15f, LeftGun::Semi, 0.75f, "AutoShotgun_Spas.Fire", false, true, true, 90, nullptr, "weapon_muzzle_flash_autoshotgun" },
-		{ C_WeaponCSBase::M16A1, 0.0875f, LeftGun::Auto, 0.4f, "Rifle.Fire", false, true, false, 360, "Rifle.ClipIn", "weapon_muzzle_flash_assaultrifle" },
-		{ C_WeaponCSBase::SCAR, 0.07f, LeftGun::Burst, 0.35f, "Rifle_Desert.Fire", false, true, false, 360, "Rifle_Desert.ClipIn", "weapon_muzzle_flash_assaultrifle" },
-		{ C_WeaponCSBase::AK47, 0.13f, LeftGun::Auto, 1.0f, "AK47.Fire", false, true, false, 360, "AK47.ClipIn", "weapon_muzzle_flash_smg" },
-		{ C_WeaponCSBase::SG552, 0.0825f, LeftGun::Auto, 0.4f, "Weapon_SG552.Single", false, true, false, 360, "Rifle.ClipIn", "weapon_muzzle_flash_assaultrifle" },
+		{ C_WeaponCSBase::PUMPSHOTGUN, 0.8f, LeftGun::Semi, 0.8f, "Shotgun.Fire", false, true, true, 56, nullptr, "weapon_muzzle_flash_autoshotgun", "weapon_shell_casing_shotgun", 9.0f, true },
+		{ C_WeaponCSBase::SHOTGUN_CHROME, 0.8f, LeftGun::Semi, 0.8f, "Shotgun_Chrome.Fire", false, true, true, 56, nullptr, "weapon_muzzle_flash_autoshotgun", "weapon_shell_casing_shotgun", 9.0f, true },
+		{ C_WeaponCSBase::AUTOSHOTGUN, 0.15f, LeftGun::Semi, 0.8f, "AutoShotgun.Fire", false, true, true, 90, nullptr, "weapon_muzzle_flash_autoshotgun", "weapon_shell_casing_shotgun", 7.0f, false },
+		{ C_WeaponCSBase::SPAS, 0.15f, LeftGun::Semi, 0.75f, "AutoShotgun_Spas.Fire", false, true, true, 90, nullptr, "weapon_muzzle_flash_autoshotgun", "weapon_shell_casing_shotgun", 7.0f, false },
+		{ C_WeaponCSBase::M16A1, 0.0875f, LeftGun::Auto, 0.4f, "Rifle.Fire", false, true, false, 360, "Rifle.ClipIn", "weapon_muzzle_flash_assaultrifle", "weapon_shell_casing_rifle", 3.0f, false },
+		{ C_WeaponCSBase::SCAR, 0.07f, LeftGun::Burst, 0.35f, "Rifle_Desert.Fire", false, true, false, 360, "Rifle_Desert.ClipIn", "weapon_muzzle_flash_assaultrifle", "weapon_shell_casing_rifle", 3.5f, false },
+		{ C_WeaponCSBase::AK47, 0.13f, LeftGun::Auto, 1.0f, "AK47.Fire", false, true, false, 360, "AK47.ClipIn", "weapon_muzzle_flash_smg", "weapon_shell_casing_rifle", 4.0f, false },
+		{ C_WeaponCSBase::SG552, 0.0825f, LeftGun::Auto, 0.4f, "Weapon_SG552.Single", false, true, false, 360, "Rifle.ClipIn", "weapon_muzzle_flash_assaultrifle", "weapon_shell_casing_rifle", 3.0f, false },
 		// The M60 isn't reloaded, as in the game
-		{ C_WeaponCSBase::M60, 0.11f, LeftGun::Auto, 1.0f, "M60.Fire", false, true, false, 0, nullptr, "weapon_muzzle_flash_assaultrifle" },
-		{ C_WeaponCSBase::HUNTING_RIFLE, 0.25f, LeftGun::Semi, 0.1f, "HuntingRifle.Fire", false, true, false, 150, "HuntingRifle.ClipIn", "weapon_muzzle_flash_huntingrifle" },
-		{ C_WeaponCSBase::SNIPER_MILITARY, 0.25f, LeftGun::Semi, 0.5f, "Sniper_Military.Fire", false, true, false, 180, "Sniper_Military.ClipIn", "weapon_muzzle_flash_huntingrifle" },
+		{ C_WeaponCSBase::M60, 0.11f, LeftGun::Auto, 1.0f, "M60.Fire", false, true, false, 0, nullptr, "weapon_muzzle_flash_assaultrifle", "weapon_shell_casing_m60", 3.5f, false },
+		{ C_WeaponCSBase::HUNTING_RIFLE, 0.25f, LeftGun::Semi, 0.1f, "HuntingRifle.Fire", false, true, false, 150, "HuntingRifle.ClipIn", "weapon_muzzle_flash_huntingrifle", "weapon_shell_casing_rifle", 6.0f, false },
+		{ C_WeaponCSBase::SNIPER_MILITARY, 0.25f, LeftGun::Semi, 0.5f, "Sniper_Military.Fire", false, true, false, 180, "Sniper_Military.ClipIn", "weapon_muzzle_flash_huntingrifle", "weapon_shell_casing_rifle", 6.0f, false },
 		// The bolt action rifles are worked between shots
-		{ C_WeaponCSBase::AWP, 1.05f, LeftGun::Semi, 0.1f, "Weapon_AWP.Single", false, true, false, 180, "HuntingRifle.ClipIn", "weapon_muzzle_flash_huntingrifle" },
-		{ C_WeaponCSBase::SCOUT, 0.9f, LeftGun::Semi, 0.1f, "Weapon_Scout.Single", false, true, false, 180, "HuntingRifle.ClipIn", "weapon_muzzle_flash_huntingrifle" },
+		{ C_WeaponCSBase::AWP, 1.05f, LeftGun::Semi, 0.1f, "Weapon_AWP.Single", false, true, false, 180, "HuntingRifle.ClipIn", "weapon_muzzle_flash_huntingrifle", "weapon_shell_casing_rifle", 9.0f, true },
+		{ C_WeaponCSBase::SCOUT, 0.9f, LeftGun::Semi, 0.1f, "Weapon_Scout.Single", false, true, false, 180, "HuntingRifle.ClipIn", "weapon_muzzle_flash_huntingrifle", "weapon_shell_casing_rifle", 7.0f, true },
 	};
+
+	// The guns' world models (LeftGun::GunModel). The magazine's middle is the middle of its vertices' box; the shotguns'
+	// is where shells go in, under the receiver. A bolt with vertices of its own is the middle of them; otherwise where the
+	// part is on the model (the slide's back, the charging handle, the bolt handle by the ejection port). The pump of the
+	// pump shotguns is their "weapon_bone_Clip", the forend.
+	const LeftGun::GunModel kGunModels[] =
+	{
+		{ "w_pistol_a.mdl", { 0.0f, -1.15f, 0.75f }, 2.85f, { 0.0f, 1.9f, 0.3f }, false },
+		{ "w_desert_eagle.mdl", { 0.0f, -1.0f, 0.75f }, 2.4f, { 0.0f, 2.0f, 0.7f }, false },
+		{ "w_smg_uzi.mdl", { 0.0f, -2.55f, 1.0f }, 3.75f, { 0.0f, 3.6f, 6.3f }, false },
+		{ "w_smg_a.mdl", { 0.0f, -1.9f, 0.9f }, 4.3f, { 0.0f, 4.0f, -2.5f }, false },
+		{ "w_smg_mp5.mdl", { 0.45f, -1.45f, 7.75f }, 4.15f, { 0.8f, 4.6f, 11.0f }, false },
+		{ "w_shotgun.mdl", { 0.0f, 0.8f, 5.0f }, 0.0f, { 0.2f, 2.5f, 14.3f }, true },
+		{ "w_pumpshotgun_a.mdl", { 0.0f, 0.8f, 5.0f }, 0.0f, { 0.2f, 2.4f, 14.2f }, true },
+		{ "w_autoshot_m4super.mdl", { 0.0f, 1.0f, 5.5f }, 0.0f, { -1.0f, 2.6f, 7.5f }, false },
+		{ "w_shotgun_spas.mdl", { 0.0f, 1.0f, 8.0f }, 0.0f, { -1.0f, 2.8f, 6.0f }, false },
+		{ "w_rifle_m16a2.mdl", { 0.0f, -1.4f, 6.05f }, 3.2f, { 0.0f, 3.4f, -0.8f }, false },
+		{ "w_desert_rifle.mdl", { 0.0f, -1.9f, 6.4f }, 4.0f, { 0.0f, 3.9f, 8.7f }, false },
+		{ "w_rifle_ak47.mdl", { 0.0f, -1.95f, 7.95f }, 4.55f, { -1.0f, 2.9f, 8.2f }, false },
+		{ "w_rifle_sg552.mdl", { 0.0f, -0.5f, 6.2f }, 3.3f, { -1.2f, 3.3f, 8.5f }, false },
+		{ "w_sniper_mini14.mdl", { 0.0f, 1.2f, 7.3f }, 1.7f, { -0.8f, 3.1f, 8.7f }, false },
+		{ "w_sniper_military.mdl", { 0.0f, 0.7f, 6.7f }, 3.4f, { 1.0f, 4.4f, 13.0f }, false },
+		{ "w_sniper_awp.mdl", { 0.25f, 0.4f, 7.0f }, 1.8f, { -1.2f, 2.8f, 5.0f }, false },
+		{ "w_sniper_scout.mdl", { 0.0f, 0.5f, 6.75f }, 1.7f, { -2.0f, 2.4f, 3.0f }, false },
+	};
+
+	// The third person holds a weapon in the right hand by its weapon bone at the survivors' "ValveBiped.weapon_bone", a
+	// child of "Bip01_R_Hand". The left hand holds a gun the same way, mirrored (the hands' bones mirror each other with
+	// their z turned around), the gun itself not: where its weapon bone is in the left hand bone, from the models.
+	const Mat34 kLeftGunInHand = FromAxes(Vec3(0.0072f, 0.9631f, 0.2692f), Vec3(0.0676f, -0.2691f, 0.9608f), Vec3(0.9977f, 0.0113f, -0.0670f),
+		Vec3(2.8569f, -1.5362f, 0.9738f));
+
+	// A shot throws the gun's muzzle up in the hand and back, and its bolt goes back and forward again (the slide of a
+	// pistol): for this long
+	const unsigned long long kRecoilMs = 110;
+	const float kRecoilBackPerDegree = 0.06f;
+	const unsigned long long kBlowbackMs = 70;
+	const float kBlowbackTravel = 1.5f;
 
 	const int kBurstShots = 3;
 	const unsigned long long kBurstPauseMs = 350;
@@ -98,16 +137,44 @@ const LeftGun::GunData *LeftGun::Find(int weaponId)
 	return nullptr;
 }
 
+const LeftGun::GunModel *LeftGun::FindModel(const char *modelName)
+{
+	if (!modelName)
+		return nullptr;
+	const char *file = modelName;
+	for (const char *c = modelName; *c; ++c)
+	{
+		if (*c == '/' || *c == '\\')
+			file = c + 1;
+	}
+	for (const GunModel &model : kGunModels)
+	{
+		if (_stricmp(model.model, file) == 0)
+			return &model;
+	}
+	return nullptr;
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // Client
 // ---------------------------------------------------------------------------------------------------------------
 
-// The frame the left hand's item is drawn in: its fist (y along the grip, z where the fingers point), turned to point at
-// the right hand while that one holds the gun too
+// The frame the left hand's item is drawn in: its fist (y along the grip, z where the fingers point), or for a gun where
+// the third person holds it (kLeftGunInHand), turned to point at the right hand while that one holds the gun too
 bool VR::GetLeftItemFrame(Mat34 &frame) const
 {
-	if (!GetLeftGripFrame(frame))
+	if (LeftGun::Find(m_LeftItemId))
+	{
+		if (!m_LeftGripValid || !m_ArmsRig)
+			return false;
+		frame = Multiply(GetLeftHandBone(*m_ArmsRig), kLeftGunInHand);
+		if (!IsFinite(frame))
+			return false;
+	}
+	else if (!GetLeftGripFrame(frame))
+	{
 		return false;
+	}
 	if (!m_RightHoldsLeftGun)
 		return true;
 
@@ -127,7 +194,7 @@ bool VR::TryRightHoldLeftGun()
 {
 	const LeftGun::GunData *gun = LeftHandHoldsItem() ? LeftGun::Find(m_LeftItemId) : nullptr;
 	Mat34 grip;
-	if (!m_RightHandEmpty || !gun || !gun->twoHanded || !GetLeftGripFrame(grip))
+	if (!m_RightHandEmpty || !gun || !gun->twoHanded || !GetLeftItemFrame(grip))
 		return false;
 	const Vec3 barrel = Normalized(Axis(grip, 2));
 	const float distance = Reload::DistanceToSegment(GetFistPoint(true), Origin(grip) + barrel * kSupportFrom, Origin(grip) + barrel * kSupportTo);
@@ -243,6 +310,21 @@ namespace
 // The parts are where the gun was last drawn (BuildBodyModelBones).
 void VR::UpdateLeftGunReload()
 {
+	// The mark, as on the right hand's weapon (UpdateManualReload), shown on the way out whatever that is. The right hand
+	// only reloads it while it's empty, and then the mark is this one's.
+	struct MarkerUpdate
+	{
+		VR *vr;
+		bool show = false;
+		bool inReach = false;
+		~MarkerUpdate()
+		{
+			if (vr->m_RightHandEmpty)
+				vr->UpdateBoltMarker(show, inReach, true);
+		}
+	} marker{ this };
+	m_LeftMarkKind = 0;
+
 	m_LeftReloadTookGrab = false;
 	const LeftGun::GunData *gun = m_LeftItemIndex ? LeftGun::Find(m_LeftItemId) : nullptr;
 	ReloadSpec spec;
@@ -280,7 +362,8 @@ void VR::UpdateLeftGunReload()
 	in.palm = fist;
 	in.held = fist;
 	in.socket = m_LeftGunWell;
-	in.magazineBase = m_LeftGunWell - up * (spec.magazineLength * 0.5f + 0.5f);
+	in.magazineBase = m_LeftGunMagazineBase;
+	// Where the bolt is drawn: back when it's locked back
 	in.boltGrab = m_LeftGunHasBolt ? m_LeftGunBolt : spec.pump ? Origin(frame) + barrel * kPumpForward : Origin(frame) + up * kBoltUp;
 	in.boltAxis = barrel;
 	in.weaponPoint = Origin(frame);
@@ -310,6 +393,24 @@ void VR::UpdateLeftGunReload()
 		m_RightHandHandledLeftGunMs = now;
 	m_RightMagazineIndex = m_LeftItemIndex;
 
+	// The mark: on the empty gun's magazine, to take it out; where the new one goes once it's out; then, if the gun ran
+	// empty, on the bolt (or the pump of a gun that isn't held by it)
+	if (m_ShowReloadMark)
+	{
+		const bool takeOut = !spec.shells && in.clip == 0 && in.reserve > 0 && state == Reload::State::Idle && !g_LeftMachine.MagazineIsOut();
+		const bool magazineOut = !spec.shells && g_LeftMachine.MagazineIsOut();
+		const bool chamberIt = in.hasBolt && g_LeftMachine.NeedsCycle() && in.clip > 0 && (!spec.everyShot || g_LeftMachine.ReloadInProgress())
+			&& state != Reload::State::HoldingBolt && !in.holdsPump;
+		m_LeftMarkKind = takeOut ? 1 : magazineOut ? 2 : chamberIt ? 3 : 0;
+		marker.show = m_LeftMarkKind != 0;
+		if (takeOut)
+			marker.inReach = Reload::DistanceToSegment(fist, in.socket, in.magazineBase) < Reload::kGrabRadius * m_VRScale;
+		else if (magazineOut)
+			marker.inReach = state == Reload::State::HoldingFresh;
+		else
+			marker.inReach = Length(fist - in.boltGrab) < Reload::kBoltGrabRadius * m_VRScale;
+	}
+
 	// The right hand reaches the bag where it can take one: a faint tick
 	const bool atBag = rightFree && in.reserve > 0 && (state == Reload::State::Idle || state == Reload::State::NeedFresh)
 		&& Length(fist - m_WaistWorld) < Reload::kPouchRadius * m_VRScale;
@@ -334,6 +435,9 @@ void VR::UpdateLeftGunReload()
 		PlayWeaponSound(spec.magazineInSound);
 	if (events & Reload::Event_BoltPulled)
 		PlayWeaponSound(spec.boltBackSound);
+	// A pump or a bolt action throws its case out when it's worked
+	if ((events & Reload::Event_BoltPulled) && gun->workedByHand && now - m_LeftGunShellMs < 250)
+		Hooks::ClientParticle(gun->brass, ToVector(m_LeftGunShell), ToVector(m_LeftGunShell + m_LeftGunShellDir * kMuzzleFlashLength));
 	if (events & Reload::Event_BoltReleased)
 		PlayWeaponSound(spec.boltForwardSound);
 	if (events & (Reload::Event_GrabbedOld | Reload::Event_MagazineOut | Reload::Event_DroppedOld | Reload::Event_GrabbedFresh | Reload::Event_BoltPulled))
@@ -388,6 +492,30 @@ bool VR::GetLeftGunAim(Vector &origin, QAngle &angles) const
 	origin = m_LeftControllerPosAbs;
 	QAngle::VectorAngles(m_LeftControllerForward, m_LeftControllerUp, angles);
 	return true;
+}
+
+// The left hand's gun as it's drawn (GetLeftItemDraw): a shot throws its muzzle up and back for a moment, and its bolt
+// goes back and forward again (not on a pump or bolt action, worked by hand). The aim isn't moved.
+void VR::ApplyLeftGunShot(Mat34 &frame)
+{
+	const LeftGun::GunData *gun = LeftGun::Find(m_LeftItemId);
+	const unsigned long long since = GetTickCount64() - m_LeftGunShotMs;
+	m_LeftGunDrawnPull = m_LeftGunBoltPull;
+	if (!gun || gun->weaponId != m_LeftGunShotId)
+		return;
+	if (since < kRecoilMs)
+	{
+		const float left = 1.0f - (float)since / (float)kRecoilMs;
+		const float kick = left * left;
+		const float radians = gun->recoilDegrees * kick * 3.14159265f / 180.0f;
+		const Vec3 barrel = Normalized(Axis(frame, 2));
+		const Mat34 turn = AxisAngle(Axis(frame, 0), -radians);
+		for (int axis = 0; axis < 3; ++axis)
+			SetAxis(frame, axis, RotateVector(turn, Axis(frame, axis)));
+		SetAxis(frame, 3, Origin(frame) - barrel * (gun->recoilDegrees * kick * kRecoilBackPerDegree));
+	}
+	if (!gun->workedByHand && since < kBlowbackMs)
+		m_LeftGunDrawnPull = std::max(m_LeftGunDrawnPull, kBlowbackTravel * sinf(3.14159265f * (float)since / (float)kBlowbackMs));
 }
 
 bool VR::IsLeftGunShot(int seed) const
@@ -508,7 +636,12 @@ void VR::FireLeftGun(const LeftGun::GunData &gun, const Vector &origin, const QA
 	Vector forward;
 	QAngle::AngleVectors(angles, &forward, nullptr, nullptr);
 	Hooks::ClientParticle(gun.muzzleFlash, origin, origin + forward * kMuzzleFlashLength);
+	// The empty case out of the ejection port, the way its attachment points (to the right)
+	if (!gun.workedByHand && GetTickCount64() - m_LeftGunShellMs < 250)
+		Hooks::ClientParticle(gun.brass, ToVector(m_LeftGunShell), ToVector(m_LeftGunShell + m_LeftGunShellDir * kMuzzleFlashLength));
 	Hooks::FireClientBullets(m_Game->m_EngineClient->GetLocalPlayer(), origin, angles, gun.weaponId, seed, gun.spread);
+	m_LeftGunShotMs = GetTickCount64();
+	m_LeftGunShotId = gun.weaponId;
 
 	snprintf(command, sizeof(command), "l4d2vr_left_fire %.1f %.1f %.1f %.2f %.2f %.2f %d", origin.x, origin.y, origin.z, angles.x, angles.y, angles.z, seed);
 	m_Game->m_EngineClient->ServerCmd(command, false);

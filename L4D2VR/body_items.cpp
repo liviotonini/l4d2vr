@@ -792,13 +792,16 @@ namespace
 	}
 
 	// A weapon's magazine in its world model: "weapon_bone_Clip", and the bullets in it, -1 if none. And its muzzle: the
-	// "muzzle_flash" attachment, on a bone.
+	// "muzzle_flash" attachment, on a bone, and its ejection port: the "shell" one, pointing out of it.
 	struct ClipBones
 	{
 		int clip = -1, bullets = -1;
 		int muzzleBone = -1;
 		Mat34 muzzleOnBone;
+		int shellBone = -1;
+		Mat34 shellOnBone;
 		int bolt = -1;   // what's pulled: the slide, the charging handle or the bolt
+		const LeftGun::GunModel *parts = nullptr; // where its parts really are, for the game's guns
 	};
 
 	const ClipBones &ClipBonesOf(const void *studioHeader)
@@ -831,14 +834,22 @@ namespace
 		}
 		const uint8_t *base = (const uint8_t *)studioHeader;
 		const int32_t attachments = *(const int32_t *)(base + 240), attachmentIndex = *(const int32_t *)(base + 244);
-		for (int i = 0; i < attachments && bones.muzzleBone < 0; ++i)
+		for (int i = 0; i < attachments; ++i)
 		{
 			const uint8_t *attachment = base + attachmentIndex + i * 92;
-			if (_stricmp((const char *)attachment + *(const int32_t *)attachment, "muzzle_flash") != 0)
-				continue;
-			bones.muzzleBone = *(const int32_t *)(attachment + 8);
-			memcpy(&bones.muzzleOnBone, attachment + 12, sizeof(float) * 12);
+			const char *name = (const char *)attachment + *(const int32_t *)attachment;
+			if (_stricmp(name, "muzzle_flash") == 0 && bones.muzzleBone < 0)
+			{
+				bones.muzzleBone = *(const int32_t *)(attachment + 8);
+				memcpy(&bones.muzzleOnBone, attachment + 12, sizeof(float) * 12);
+			}
+			else if (_stricmp(name, "shell") == 0 && bones.shellBone < 0)
+			{
+				bones.shellBone = *(const int32_t *)(attachment + 8);
+				memcpy(&bones.shellOnBone, attachment + 12, sizeof(float) * 12);
+			}
 		}
+		bones.parts = LeftGun::FindModel(Studio::ModelName(studioHeader));
 		return s_Found[studioHeader] = bones;
 	}
 
@@ -885,6 +896,92 @@ namespace
 	}
 }
 
+// The left hand's gun as it's drawn (BuildBodyModelBones): where its magazine goes and its end that sticks out, its
+// bolt (pulled back, or kicked back by a shot: ApplyLeftGunShot), its muzzle and ejection port, kept for the reload
+// by hand (UpdateLeftGunReload) and the shots. The parts are where the model has them (LeftGun::GunModel), or its bones
+// for a model that isn't one of the game's.
+void VR::PlaceLeftGunParts(const void *clipBones, const Mat34 &frame, Mat34 *bones, int boneCount)
+{
+	const ClipBones &clip = *(const ClipBones *)clipBones;
+	// The magazine of a model that isn't one of the game's: from its bone to its end that sticks out, units
+	const float kUnknownMagazineLength = 3.5f;
+	const LeftGun::GunModel *parts = clip.parts;
+	const Vec3 barrel = Normalized(Axis(frame, 2)), up = Normalized(Axis(frame, 1));
+	const float pull = m_LeftGunDrawnPull;
+	const unsigned long long now = GetTickCount64();
+	const bool hasClip = clip.clip >= 0 && clip.clip < boneCount;
+
+	if (parts)
+	{
+		m_LeftGunWell = TransformPoint(frame, parts->magazine);
+		m_LeftGunMagazineBase = TransformPoint(frame, parts->magazine - Vec3(0.0f, parts->magazineHalf + 0.5f, 0.0f));
+		m_LeftGunWellMs = now;
+	}
+	else if (hasClip)
+	{
+		m_LeftGunWell = Origin(bones[clip.clip]);
+		m_LeftGunMagazineBase = m_LeftGunWell - up * kUnknownMagazineLength;
+		m_LeftGunWellMs = now;
+	}
+	if (hasClip)
+	{
+		const bool bullets = clip.bullets >= 0 && clip.bullets < boneCount;
+		if (m_LeftGunMagazineOut)
+		{
+			// Out of it while the right hand reloads it
+			bones[clip.clip] = CollapsedAt(m_LeftGunWell);
+			if (bullets)
+				bones[clip.bullets] = CollapsedAt(m_LeftGunWell);
+		}
+		else if (parts && parts->pumpIsClip)
+		{
+			// The forend of a pump shotgun goes back with the pump
+			SetAxis(bones[clip.clip], 3, Origin(bones[clip.clip]) - barrel * pull);
+			if (bullets)
+				SetAxis(bones[clip.bullets], 3, Origin(bones[clip.bullets]) - barrel * pull);
+		}
+	}
+
+	// The bolt pulled back along the barrel, and where it is taken
+	const bool hasBolt = clip.bolt >= 0 && clip.bolt < boneCount;
+	if (hasBolt && !(parts && parts->pumpIsClip))
+		SetAxis(bones[clip.bolt], 3, Origin(bones[clip.bolt]) - barrel * pull);
+	m_LeftGunHasBolt = parts || hasBolt;
+	if (parts)
+		m_LeftGunBolt = TransformPoint(frame, parts->bolt) - barrel * pull;
+	else if (hasBolt)
+		m_LeftGunBolt = Origin(bones[clip.bolt]);
+
+	if (clip.muzzleBone >= 0 && clip.muzzleBone < boneCount)
+	{
+		m_LeftGunMuzzle = Origin(Multiply(bones[clip.muzzleBone], clip.muzzleOnBone));
+		m_LeftGunMuzzleMs = now;
+	}
+	if (clip.shellBone >= 0 && clip.shellBone < boneCount)
+	{
+		const Mat34 shell = Multiply(bones[clip.shellBone], clip.shellOnBone);
+		m_LeftGunShell = Origin(shell);
+		m_LeftGunShellDir = Normalized(Axis(shell, 0));
+		m_LeftGunShellMs = now;
+	}
+
+	// The mark (UpdateLeftGunReload): relative to the left controller in its OpenVR frame (x right, y up, z back). It
+	// faces the eyes, its arrow the way the hand goes: down off the magazine, up where the new one goes, back on the bolt.
+	if (m_LeftMarkKind != 0)
+	{
+		const Vec3 point = m_LeftMarkKind == 1 ? m_LeftGunMagazineBase : m_LeftMarkKind == 2 ? m_LeftGunWell : m_LeftGunBolt;
+		const Vec3 controllerRight = ToVec3(m_LeftControllerRightRaw), controllerUp = ToVec3(m_LeftControllerUpRaw), controllerForward = ToVec3(m_LeftControllerForwardRaw);
+		auto toController = [&](const Vec3 &v) { return Vec3(Dot(v, controllerRight), Dot(v, controllerUp), -Dot(v, controllerForward)); };
+		const Vec3 normal = Normalized(ToVec3(m_HmdPosAbs) - point);
+		Vec3 along = m_LeftMarkKind == 1 ? up * -1.0f : m_LeftMarkKind == 2 ? up : barrel * -1.0f;
+		along = Normalized(along - normal * Dot(along, normal), Normalized(Cross(Vec3(0.0f, 0.0f, 1.0f), normal)));
+		const Vec3 x = toController(along), y = toController(Cross(normal, along)), z = toController(normal);
+		const Vec3 p = toController(point - ToVec3(m_LeftControllerPosAbs)) * (1.0f / m_VRScale);
+		m_LeftMarkerTransform = { { { x.x, y.x, z.x, p.x }, { x.y, y.y, z.y, p.y }, { x.z, y.z, z.z, p.z } } };
+		m_LeftMarkerPlaced = IsFinite(FromAxes(x, y, z, p));
+	}
+}
+
 // The bones of an item drawn on the body: the model as it was made, its center at the frame, at its scale
 void VR::BuildBodyModelBones(const void *studioHeader, const BodyModelDraw &draw, void *outBones)
 {
@@ -897,7 +994,15 @@ void VR::BuildBodyModelBones(const void *studioHeader, const BodyModelDraw &draw
 	const int heldBone = syringe ? syringe->syringe : draw.magazine ? clip->clip : draw.alignWeaponBone ? WeaponBoneOf(studioHeader) : -1;
 	if (heldBone >= 0 && heldBone < boneCount)
 	{
-		const Mat34 placed = Multiply(draw.frame, Studio::PoseToBone(studioHeader, heldBone));
+		Mat34 frame = draw.frame;
+		// The magazine of one of the game's guns is held by its middle (its bone is elsewhere)
+		const int weaponBone = draw.magazine && clip->parts ? WeaponBoneOf(studioHeader) : -1;
+		if (weaponBone >= 0 && weaponBone < boneCount)
+		{
+			const Mat34 weaponToHeld = Multiply(Studio::PoseToBone(studioHeader, heldBone), InvertRigid(Studio::PoseToBone(studioHeader, weaponBone)));
+			SetAxis(frame, 3, TransformPoint(frame, TransformPoint(weaponToHeld, clip->parts->magazine) * -1.0f));
+		}
+		const Mat34 placed = Multiply(frame, Studio::PoseToBone(studioHeader, heldBone));
 		for (int i = 0; i < boneCount; ++i)
 			bones[i] = Multiply(placed, InvertRigid(Studio::PoseToBone(studioHeader, i)));
 		// Only the magazine: the rest of the weapon folded away in it
@@ -909,30 +1014,8 @@ void VR::BuildBodyModelBones(const void *studioHeader, const BodyModelDraw &draw
 					bones[i] = CollapsedAt(Origin(draw.frame));
 			}
 		}
-		if (draw.leftGun && clip->clip >= 0 && clip->clip < boneCount)
-		{
-			m_LeftGunWell = Origin(bones[clip->clip]);
-			m_LeftGunWellMs = GetTickCount64();
-			// Out of it while the right hand reloads it
-			if (m_LeftGunMagazineOut)
-			{
-				bones[clip->clip] = CollapsedAt(m_LeftGunWell);
-				if (clip->bullets >= 0 && clip->bullets < boneCount)
-					bones[clip->bullets] = CollapsedAt(m_LeftGunWell);
-			}
-		}
-		// The bolt pulled back along the barrel, and where it is
-		m_LeftGunHasBolt = draw.leftGun && clip->bolt >= 0 && clip->bolt < boneCount;
-		if (m_LeftGunHasBolt)
-		{
-			SetAxis(bones[clip->bolt], 3, Origin(bones[clip->bolt]) - Normalized(Axis(draw.frame, 2)) * m_LeftGunBoltPull);
-			m_LeftGunBolt = Origin(bones[clip->bolt]);
-		}
-		if (draw.leftGun && clip->muzzleBone >= 0 && clip->muzzleBone < boneCount)
-		{
-			m_LeftGunMuzzle = Origin(Multiply(bones[clip->muzzleBone], clip->muzzleOnBone));
-			m_LeftGunMuzzleMs = GetTickCount64();
-		}
+		if (draw.leftGun)
+			PlaceLeftGunParts(clip, draw.frame, bones, boneCount);
 		if (syringe)
 		{
 			for (int piece : syringe->capPieces)

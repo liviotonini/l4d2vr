@@ -165,6 +165,8 @@ namespace
 	// The mark where the bolt is taken: relative to the right controller in its OpenVR frame, from the last draw
 	vr::HmdMatrix34_t g_MarkerTransform = {};
 	bool g_MarkerPlaced = false;
+	// The mark is on the empty weapon's magazine, to take it out
+	bool g_MarkTakeOut = false;
 	bool g_ActionSoundsOff = false;
 	const float kMarkerWidth = 0.035f;       // meters
 	const int kMarkerSize = 64;              // pixels
@@ -322,9 +324,13 @@ namespace
 
 // The mark on the weapon where the bolt, slide or pump is taken with the left trigger. A SteamVR overlay attached to the
 // right controller, so it follows the weapon without lag; it's drawn over everything, like the scope.
-void VR::UpdateBoltMarker(bool show, bool inReach)
+// The mark on the weapon being reloaded: the right hand's (placed by BuildReloadViewmodel, relative to its controller),
+// or the left hand's gun's (PlaceLeftGunParts, relative to the left one)
+void VR::UpdateBoltMarker(bool show, bool inReach, bool onLeft)
 {
-	if (!show || !g_MarkerPlaced || !m_Overlay || m_RightControllerDeviceIndex == vr::k_unTrackedDeviceIndexInvalid)
+	const vr::TrackedDeviceIndex_t device = onLeft ? m_LeftControllerDeviceIndex : m_RightControllerDeviceIndex;
+	const bool placed = onLeft ? m_LeftMarkerPlaced : g_MarkerPlaced;
+	if (!show || !placed || !m_Overlay || device == vr::k_unTrackedDeviceIndexInvalid)
 	{
 		if (m_BoltMarkerVisible)
 			m_Overlay->HideOverlay(m_BoltMarkerHandle);
@@ -349,7 +355,7 @@ void VR::UpdateBoltMarker(bool show, bool inReach)
 		Diagnostics::Log("manual reload: the overlay that marks the bolt is ready");
 	}
 
-	m_Overlay->SetOverlayTransformTrackedDeviceRelative(m_BoltMarkerHandle, m_RightControllerDeviceIndex, &g_MarkerTransform);
+	m_Overlay->SetOverlayTransformTrackedDeviceRelative(m_BoltMarkerHandle, device, onLeft ? &m_LeftMarkerTransform : &g_MarkerTransform);
 	// Amber: this is where to take it. Green: the hand is there, the trigger takes it.
 	if (inReach)
 		m_Overlay->SetOverlayColor(m_BoltMarkerHandle, 0.35f, 1.0f, 0.45f);
@@ -397,14 +403,20 @@ bool VR::ManualReloadUsesLeftHand() const
 // Called by UpdateTracking every frame, before it looks at the grab buttons
 void VR::UpdateManualReload()
 {
-	// The bolt's mark is shown or hidden on the way out, whatever path that is
+	// The bolt's mark is shown or hidden on the way out, whatever path that is. With the right hand empty the mark is
+	// the left hand's gun's (UpdateLeftGunReload).
 	struct MarkerUpdate
 	{
 		VR *vr;
 		bool show = false;
 		bool inReach = false;
-		~MarkerUpdate() { vr->UpdateBoltMarker(show, inReach); }
+		~MarkerUpdate()
+		{
+			if (!vr->m_RightHandEmpty)
+				vr->UpdateBoltMarker(show, inReach, false);
+		}
 	} marker{ this };
+	g_MarkTakeOut = false;
 
 	// Nothing to reload in an empty right hand (EmptyRightHand)
 	const Profile *profile = m_ManualReloadEnabled && !m_RightHandEmpty ? FindProfile(m_ActiveWeaponId) : nullptr;
@@ -524,15 +536,20 @@ void VR::UpdateManualReload()
 	if (state == Reload::State::HoldingOld || state == Reload::State::HoldingFresh || state == Reload::State::HoldingBolt)
 		g_LeftHandUsedTime = now;
 
-	// The mark: from the moment the magazine is out until the weapon is loaded. First where the magazine goes, then, if
-	// the weapon ran empty, the bolt.
+	// The mark: on the magazine of the empty weapon, to take it out; from the moment it's out until the weapon is loaded,
+	// first where the magazine goes, then, if the weapon ran empty, the bolt.
 	if (m_ShowReloadMark)
 	{
+		const bool takeOut = !profile->shells && inputs.clip == 0 && inputs.reserve > 0 && state == Reload::State::Idle && !g_Machine.MagazineIsOut();
 		const bool magazineOut = !profile->shells && g_Machine.MagazineIsOut();
 		const bool chamberIt = inputs.hasBolt && g_Machine.NeedsCycle() && inputs.clip > 0 && (profile->firePoseMs == 0 || g_Machine.ReloadInProgress())
 			&& state != Reload::State::HoldingBolt && !inputs.holdsPump;
-		marker.show = magazineOut || chamberIt;
-		marker.inReach = magazineOut ? state == Reload::State::HoldingFresh : Length(inputs.palm - inputs.boltGrab) < Reload::kBoltGrabRadius * m_VRScale;
+		g_MarkTakeOut = takeOut;
+		marker.show = takeOut || magazineOut || chamberIt;
+		if (takeOut)
+			marker.inReach = Reload::DistanceToSegment(inputs.palm, inputs.socket, inputs.magazineBase) < Reload::kGrabRadius * m_VRScale;
+		else
+			marker.inReach = magazineOut ? state == Reload::State::HoldingFresh : Length(inputs.palm - inputs.boltGrab) < Reload::kBoltGrabRadius * m_VRScale;
 	}
 
 	// The hand reaches the waist where it can take one: a faint tick, so it can be found without looking
@@ -689,16 +706,18 @@ bool VR::BuildReloadViewmodel(const void *studioHeader, const void *customBones,
 	g_LastViewmodelDraw = now;
 
 	// Where the mark goes: relative to the right controller in its OpenVR frame (x right, y up, z back). It faces the eyes,
-	// on the bolt with its arrow pointing the way it's pulled, or where the magazine goes with the arrow pointing in.
+	// on the bolt with its arrow pointing the way it's pulled, where the magazine goes with the arrow pointing in, or on
+	// the end of the empty one with the arrow pointing out.
 	const bool markMagazine = !profile->shells && g_Machine.MagazineIsOut();
-	if (g_HaveBolt || markMagazine)
+	const bool markTakeOut = !markMagazine && g_MarkTakeOut;
+	if (g_HaveBolt || markMagazine || markTakeOut)
 	{
-		const Vec3 markPoint = markMagazine ? g_Socket : g_BoltGrab;
+		const Vec3 markPoint = markMagazine ? g_Socket : markTakeOut ? g_MagazineBase : g_BoltGrab;
 		const Vec3 controllerRight = ToVec3(m_RightControllerRightRaw), controllerUp = ToVec3(m_RightControllerUpRaw), controllerForward = ToVec3(m_RightControllerForwardRaw);
 		auto toController = [&](const Vec3 &v) { return Vec3(Dot(v, controllerRight), Dot(v, controllerUp), -Dot(v, controllerForward)); };
 
 		const Vec3 normal = Normalized(ToVec3(m_HmdPosAbs) - markPoint);
-		Vec3 along = markMagazine ? ToVec3(m_ViewmodelUp) : forward * -1.0f;
+		Vec3 along = markMagazine ? ToVec3(m_ViewmodelUp) : markTakeOut ? ToVec3(m_ViewmodelUp) * -1.0f : forward * -1.0f;
 		along = Normalized(along - normal * Dot(along, normal), Normalized(Cross(Vec3(0.0f, 0.0f, 1.0f), normal)));
 		const Vec3 x = toController(along), y = toController(Cross(normal, along)), z = toController(normal);
 		const Vec3 p = toController(markPoint - ToVec3(m_RightControllerPosAbsRaw)) * (1.0f / m_VRScale);

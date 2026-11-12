@@ -522,6 +522,16 @@ public:
 	bool m_LeftScopeTriggerDown = false;
 	HandMath::Vec3 m_LeftGunMuzzle;        // and its muzzle
 	unsigned long long m_LeftGunMuzzleMs = 0;
+	HandMath::Vec3 m_LeftGunMagazineBase;  // the end of its magazine that sticks out
+	HandMath::Vec3 m_LeftGunShell;         // its ejection port, and the way out of it
+	HandMath::Vec3 m_LeftGunShellDir;
+	unsigned long long m_LeftGunShellMs = 0;
+	unsigned long long m_LeftGunShotMs = 0; // its last shot, which kicks it in the hand (ApplyLeftGunShot)
+	int m_LeftGunShotId = 0;
+	float m_LeftGunDrawnPull = 0.0f;       // how far back its bolt is drawn: pulled, or kicked back by a shot
+	int m_LeftMarkKind = 0;                // the reload's mark on it: 1 the magazine to take out, 2 where one goes, 3 the bolt
+	vr::HmdMatrix34_t m_LeftMarkerTransform = {}; // relative to the left controller, from the last draw
+	bool m_LeftMarkerPlaced = false;
 	bool m_LeftSwinging = false;
 	QAngle m_LeftSwingPrevAim = { 0, 0, 0 }; // the aim sent for the swing, from the last update
 	bool m_LeftSwingAimValid = false;
@@ -635,7 +645,7 @@ public:
 	void ClearManualReloadCache();
 	bool BuildReloadViewmodel(const void *studioHeader, const void *customBones, void *outBones, void *outDetached, bool &drawDetached);
 	void PlayWeaponSound(const char *sound);
-	void UpdateBoltMarker(bool show, bool inReach);
+	void UpdateBoltMarker(bool show, bool inReach, bool onLeft);
 	bool ManualReloadPumpsByHand() const;
 	bool ManualReloadHoldsFirePose();
 	bool ManualReloadUsesLeftHand() const;
@@ -670,6 +680,8 @@ public:
 	void FireLeftGun(const LeftGun::GunData &gun, const Vector &origin, const QAngle &angles);
 	bool GetLeftGunAim(Vector &origin, QAngle &angles) const;
 	bool GetLeftItemFrame(HandMath::Mat34 &frame) const;
+	void ApplyLeftGunShot(HandMath::Mat34 &frame);
+	void PlaceLeftGunParts(const void *clipBones, const HandMath::Mat34 &frame, HandMath::Mat34 *bones, int boneCount);
 	bool IsLeftGunShot(int seed) const;
 	bool TryRightHoldLeftGun();
 	bool TryRightReloadLeftGun();

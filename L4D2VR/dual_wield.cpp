@@ -341,6 +341,8 @@ bool VR::GetLeftItemDraw(BodyModelDraw &draw)
 	}
 	if (!GetLeftItemFrame(draw.frame))
 		return false;
+	if (LeftGun::Find(m_LeftItemId))
+		ApplyLeftGunShot(draw.frame);
 
 	// The game's animation holds the knife in the right hand with its blade leaning 20 degrees towards the fingers (the
 	// katana about 6, which the fist's grip already gives). Measured with l4d2vr_dual_test vmgrip.
@@ -518,11 +520,25 @@ void VR::UpdateDualWield(C_BasePlayer *local, int activeWeaponId, float deltaSec
 	UpdateLeftGun(now);
 
 	// The left hand's item became the active weapon without being used (the game takes a weapon picked up in its hand):
-	// back to the right hand's. Not while the right hand is empty: what the game has out then isn't seen.
-	if (m_LeftItemIndex && activeIndex == m_LeftItemIndex && !m_LeftUseActive && !m_RightHandEmpty && now - m_LastSwitchBackMs > kSwitchBackIntervalMs)
+	// back to the right hand's, or with the right hand empty to the one it put away, unseen (UpdateEmptyHand)
+	if (m_LeftItemIndex && activeIndex == m_LeftItemIndex && !m_LeftUseActive && now - m_LastSwitchBackMs > kSwitchBackIntervalMs)
 	{
-		m_LastSwitchBackMs = now;
-		SelectWeapon(PickRightWeapon(items, count, m_LeftItemIndex, m_RightWeaponIndex));
+		int preferred = m_RightWeaponIndex;
+		if (m_RightHandEmpty)
+		{
+			preferred = 0;
+			for (int i = 0; i < count; ++i)
+			{
+				if (items[i].weapon == m_EmptyHandWeapon)
+					preferred = items[i].index;
+			}
+		}
+		const int back = PickRightWeapon(items, count, m_LeftItemIndex, preferred);
+		if (back)
+		{
+			m_LastSwitchBackMs = now;
+			SelectWeapon(back);
+		}
 	}
 
 	UpdateLeftSwing(now);
@@ -784,6 +800,9 @@ void VR::UpdateEmptyHand(C_BasePlayer *local)
 	if (active == m_EmptyHandWeapon || m_LeftUseActive)
 		return;
 	if (m_LeftItemIndex && active == (const void *)m_Game->GetClientEntity(m_LeftItemIndex))
+		return;
+	// The left hand grabbed something in the world, which the game may take out: it's the left hand's (UpdateDualWield)
+	if (m_LeftGrabUntil && NowMs() <= m_LeftGrabUntil)
 		return;
 	if (NowMs() - m_EmptyHandSelectMs < kEmptyHandSelectMs)
 	{
