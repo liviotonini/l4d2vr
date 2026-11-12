@@ -1,3 +1,5 @@
+// VREnabled: false to play without VR, the game as without the mod (on when missing)
+VREnabled=true
 TurnSpeed=0.3
 SnapTurning=false
 SnapTurnAngle=45.0
