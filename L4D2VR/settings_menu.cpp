@@ -587,6 +587,8 @@ void SettingsMenu::DrawMenu()
 			DrawSlider("Player height", "Your real height. Used for physical crouching and for the item positions on your body (legs and back).", settings.m_PlayerHeightInMeters, 1.2f, 2.2f, 0.01f, "%.2f m");
 			DrawCheckbox("Crouch physically", "Crouch in the game when you crouch in real life.", settings.m_ActivateCrouchPhisically);
 			DrawCheckbox("Crouch button toggles", "Pressing the crouch button toggles crouching instead of crouching only while it's held.", settings.m_UseCrouchButtonAsToggle);
+			DrawCheckbox("Room scale", "When you step or walk for real, your character walks there too, so where you stand in the game is where your head is. Leaning a little doesn't move it, and walls stop it.", settings.m_RoomscaleEnabled);
+			DrawCheckbox("Speed follows the thumbstick", "The further you push the thumbstick, the faster you move: a little is a slow walk, all the way is running. Off, any push past half way runs.", settings.m_AnalogMovement);
 			DrawSlider("World scale", "Game units per meter (default 43.2). Lower values make the world look bigger.", settings.m_VRScale, 20.0f, 80.0f, 0.1f, "%.1f");
 			DrawSlider("IPD scale", "Multiplies the distance between the eyes. Changes how big the world feels.", settings.m_IpdScale, 0.5f, 2.0f, 0.05f, "%.2f");
 			ImGui::EndChild();

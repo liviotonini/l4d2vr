@@ -377,19 +377,9 @@ bool __fastcall Hooks::dCreateMove(void *ecx, void *edx, float flInputSampleTime
 	if (!cmd->command_number)
 		return hkCreateMove.fOriginal(ecx, flInputSampleTime, cmd);
 
-	if (m_VR->m_IsVREnabled && m_VR->m_RoomscaleActive)
-	{
-		Vector setupOriginToHMD = m_VR->m_SetupOriginToHMD;
-		setupOriginToHMD.z = 0;
-		float distance = VectorLength(setupOriginToHMD);
-		if (distance > 1)
-		{
-			float forwardSpeed = DotProduct2D(setupOriginToHMD, m_VR->m_HmdForward);
-			float sideSpeed = DotProduct2D(setupOriginToHMD, m_VR->m_HmdRight);
-			cmd->forwardmove += distance * forwardSpeed;
-			cmd->sidemove += distance * sideSpeed;
-		}
-	}
+	// The thumbstick's speed, and the body walking to the head (roomscale)
+	if (m_VR->m_IsVREnabled)
+		m_VR->BuildMoveCommand(cmd->viewangles.y, cmd->forwardmove, cmd->sidemove);
 
 	return false;
 }

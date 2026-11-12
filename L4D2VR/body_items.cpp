@@ -114,6 +114,8 @@ namespace
 	int g_WorldModelIndexOffset = -1;
 	// The upgrades of a gun (DT_TerrorGun): bit 2 the laser sight
 	int g_UpgradeBitsOffset = -1;
+	// The player's top speed (DT_BasePlayer)
+	int g_MaxSpeedOffset = -1;
 	bool g_NetvarsLookedUp = false;
 
 	bool HasPlayerClass(const ClientClass *clientClass)
@@ -168,6 +170,7 @@ namespace
 		if (classes)
 		{
 			FindPlayerProp(classes, "m_nModelIndex", g_ModelIndexOffset, unused);
+			FindPlayerProp(classes, "m_flMaxspeed", g_MaxSpeedOffset, unused);
 			FindPlayerProp(classes, "m_hOwnerEntity", g_OwnerOffset, unused);
 			FindClassProp(classes, "CPistol", "m_iWorldModelIndex", g_WorldModelIndexOffset, unused);
 			FindClassProp(classes, "CPistol", "m_upgradeBitVec", g_UpgradeBitsOffset, unused);
@@ -739,6 +742,16 @@ int VR::GetInventory(C_BasePlayer *player, InventoryItem *items, int max)
 		++count;
 	}
 	return count;
+}
+
+// How fast the player can run now (m_flMaxspeed: slower when hurt, faster with adrenaline), the usual 220 if it can't be
+// read or looks wrong
+float VR::GetLocalRunSpeed(const void *player)
+{
+	if (!g_NetvarsLookedUp)
+		LookUpNetvars(m_Game);
+	const float speed = player && g_MaxSpeedOffset > 0 ? Read<float>(player, g_MaxSpeedOffset) : 0.0f;
+	return speed >= 50.0f && speed <= 1000.0f ? speed : 220.0f;
 }
 
 // A gun of the player has a laser sight (m_upgradeBitVec)

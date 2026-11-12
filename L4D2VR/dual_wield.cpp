@@ -1126,6 +1126,23 @@ void VR::DualWieldTest(const char *action)
 		m_GrenadeThrow = grenadeThrow;
 		return;
 	}
+	// step_<cm>: the head moves that far to the right (roomscale); stick_<percent>: the thumbstick pushed forward for 3 s.
+	// The movement is in the log for 6 s.
+	if (strncmp(action, "step", 4) == 0 && filter)
+	{
+		m_TestHeadTarget = (float)atof(filter) / 100.0f;
+		m_TestHeadStartMs = NowMs();
+		m_MovementTestLogUntil = NowMs() + 2500;
+		return;
+	}
+	if (strncmp(action, "stick", 5) == 0 && filter)
+	{
+		m_TestStickY = std::clamp((float)atof(filter) / 100.0f, -1.0f, 1.0f);
+		m_TestStickUntil = NowMs() + 1200;
+		m_MovementTestLogUntil = NowMs() + 2500;
+		return;
+	}
+
 	// lasertest: the left hand's gun's laser sight, from the eyes for 5 s (without the hand drawn)
 	if (strcmp(action, "lasertest") == 0)
 	{

@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <vector>
 #include "hand_rig.h"
+#include "movement_logic.h"
 
 #define MAX_STR_LEN 256
 
@@ -98,7 +99,46 @@ public:
 	Vector m_SetupOriginToHMD = { 0,0,0 };
 
 	float m_HeightOffset = 0.0;
-	bool m_RoomscaleActive = false;
+
+	// Moving the player (movement_logic.h): the body walks to where the head is (roomscale), and the thumbstick's speed
+	// follows how far it's pushed. Read by every usercmd (Hooks::dCreateMove, BuildMoveCommand), written by the tracking
+	// and the input, which may run on another thread.
+	bool m_RoomscaleEnabled = true;
+	bool m_AnalogMovement = true;
+	struct MovementInputs
+	{
+		Movement::Vec2 headFromBody;   // from the body to the head's neck, on the ground, units
+		Movement::Vec2 body;
+		bool canWalk = false;          // on the ground
+		float runSpeed = 220.0f;       // the player's top speed now
+		unsigned long long trackedMs = 0;
+		float stickX = 0.0f, stickY = 0.0f;
+		unsigned long long stickMs = 0;
+		bool walking = false;          // the walk speed toggle
+		bool ducking = false;
+	};
+	std::mutex m_MovementMutex;
+	MovementInputs m_MovementInputs;
+	Movement::Roomscale m_Roomscale;
+	Movement::Vec2 m_RoomscaleLastBody;
+	bool m_RoomscaleHasLastBody = false;
+	std::chrono::steady_clock::time_point m_LastMoveCommand;
+	unsigned long long m_MovementLogMs = 0;
+	// l4d2vr_dual_test step_<cm> and stick_<percent>: the head moved to the side, the thumbstick pushed forward
+	Vector m_TestHeadOffset = { 0, 0, 0 };
+	float m_TestHeadTarget = 0.0f;
+	unsigned long long m_TestHeadStartMs = 0;
+	float m_TestStickY = 0.0f;
+	unsigned long long m_TestStickUntil = 0;
+	unsigned long long m_MovementTestLogUntil = 0;
+	static constexpr float kStickDeadZone = 0.15f;
+	static constexpr float kRoomscaleOvershootMeters = 0.08f; // the body slowing down after a step, past the head
+	static constexpr float kWalkSpeed = 85.0f;     // the walk toggle (+speed)
+	static constexpr float kCrouchSpeed = 75.0f;   // survivor_crouch_speed
+	// The slowest speed asked of the game's movement that it keeps up: below it the ground's friction holds the player
+	// still (measured: up to about 60 it barely creeps, from 75 on it gets going, at about 0.72 of
+	// the speed asked)
+	static constexpr float kSlowestMoveSpeed = 75.0f;
 
 	Vector m_LeftControllerPosAbs;
 	QAngle m_LeftControllerAngAbs;
@@ -624,6 +664,9 @@ public:
 	void GetViewParameters();
 	void ProcessMenuInput();
 	void ProcessInput();
+	void BuildMoveCommand(float yawDegrees, float &forward, float &side);
+	void UpdateMovementTest();
+	float GetLocalRunSpeed(const void *player);
 	VMatrix VMatrixFromHmdMatrix(const vr::HmdMatrix34_t &hmdMat);
 	vr::HmdMatrix34_t VMatrixToHmdMatrix(const VMatrix &vMat);
 	vr::HmdMatrix34_t GetControllerTipMatrix(vr::ETrackedControllerRole controllerRole);

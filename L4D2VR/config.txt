@@ -28,3 +28,5 @@ InteractWithHand=true
 ShareBodyMovement=true
 ShowOtherPlayersMovement=true
 DiagnosticsEnabled=false
+Roomscale=true
+AnalogMovement=true

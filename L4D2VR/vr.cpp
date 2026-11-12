@@ -661,12 +661,22 @@ void VR::ProcessInput()
 
     if (GetAnalogActionData(m_ActionWalk, analogActionData))
     {
-        SetGameButton(GameButton_Forward, analogActionData.y > 0.5);
-        SetGameButton(GameButton_Back, analogActionData.y < -0.5);
-        SetGameButton(GameButton_MoveRight, analogActionData.x > 0.5);
-        SetGameButton(GameButton_MoveLeft, analogActionData.x < -0.5);
+        // With the speed following the thumbstick (BuildMoveCommand), the keys only tell the game which way it's pushed,
+        // from the dead zone on: ladders are climbed by them
+        const float keyThreshold = m_AnalogMovement ? kStickDeadZone : 0.5f;
+        SetGameButton(GameButton_Forward, analogActionData.y > keyThreshold);
+        SetGameButton(GameButton_Back, analogActionData.y < -keyThreshold);
+        SetGameButton(GameButton_MoveRight, analogActionData.x > keyThreshold);
+        SetGameButton(GameButton_MoveLeft, analogActionData.x < -keyThreshold);
 
-        m_PushingThumbstick = fabsf(analogActionData.y) > 0.5 || fabsf(analogActionData.x) > 0.5;
+        m_PushingThumbstick = fabsf(analogActionData.y) > keyThreshold || fabsf(analogActionData.x) > keyThreshold;
+
+        std::lock_guard<std::mutex> lock(m_MovementMutex);
+        m_MovementInputs.stickX = analogActionData.x;
+        m_MovementInputs.stickY = analogActionData.y;
+        m_MovementInputs.stickMs = GetTickCount64();
+        m_MovementInputs.walking = isWalkingSlowly;
+        m_MovementInputs.ducking = m_GameButtonState[GameButton_Duck] == 1;
     }
     else
     {
@@ -674,6 +684,7 @@ void VR::ProcessInput()
         SetGameButton(GameButton_Back, false);
         SetGameButton(GameButton_MoveRight, false);
         SetGameButton(GameButton_MoveLeft, false);
+        m_PushingThumbstick = false;
     }
 
     UpdateGrenadeThrow();
@@ -2339,24 +2350,20 @@ void VR::UpdateTracking()
     QAngle::AngleVectors(hmdAngLocal, &m_HmdForward, &m_HmdRight, &m_HmdUp);				
 
     m_HmdPosLocalInWorld = hmdPosCorrected * m_VRScale;
+    UpdateMovementTest();
 
-    // Roomscale setup
-    Vector cameraMovingDirection = m_SetupOrigin - m_SetupOriginPrev;
-    Vector cameraToPlayer = m_HmdPosAbsPrev - m_SetupOriginPrev;
-    cameraMovingDirection.z = 0;
-    cameraToPlayer.z = 0;
-    float cameraFollowing = DotProduct(cameraMovingDirection, cameraToPlayer);
-    float cameraDistance = VectorLength(cameraToPlayer);
-
-    if (localPlayer->m_hGroundEntity != -1 && localPlayer->m_vecVelocity.IsZero())
-        m_RoomscaleActive = true;
-
-    // TODO: Get roomscale to work while using thumbstick
-    if ((cameraFollowing < 0 && cameraDistance > 1) || (m_PushingThumbstick))
-        m_RoomscaleActive = false;
-
-    if (!m_RoomscaleActive)
-        m_CameraAnchor += m_SetupOrigin - m_SetupOriginPrev;
+    // The camera goes with the body, but for the part of the body's move that catches up with the head: a step taken
+    // for real, which the body walks after (roomscale, BuildMoveCommand). The head is its neck: looking down or around
+    // doesn't move the body.
+    const Vector neckLocal = m_HmdPosLocalInWorld - m_HmdForward * (kEyeToNeckForward * m_VRScale) - m_HmdUp * (kEyeToNeckDown * m_VRScale);
+    {
+        const Vector neckWorld = m_CameraAnchor - Vector(0, 0, 64) + neckLocal;
+        const Movement::Vec2 bodyMove(m_SetupOrigin.x - m_SetupOriginPrev.x, m_SetupOrigin.y - m_SetupOriginPrev.y);
+        const Movement::Vec2 headFromBody(neckWorld.x - m_SetupOriginPrev.x, neckWorld.y - m_SetupOriginPrev.y);
+        const Movement::Vec2 follow = m_RoomscaleEnabled ? Movement::CameraFollow(bodyMove, headFromBody, kRoomscaleOvershootMeters * m_VRScale) : bodyMove;
+        m_CameraAnchor.x += follow.x;
+        m_CameraAnchor.y += follow.y;
+    }
     
     typedef std::chrono::duration<float, std::milli> duration;
     auto currentTime = std::chrono::steady_clock::now();
@@ -2407,6 +2414,18 @@ void VR::UpdateTracking()
         Vector distanceInsideWall = trace.endpos - extendedHmdPos;
         m_CameraAnchor += distanceInsideWall;
         m_HmdPosAbs = m_CameraAnchor - Vector(0, 0, 64) + m_HmdPosLocalInWorld;
+    }
+
+    // For the usercmds (BuildMoveCommand): the head from the body now, and whether the body can walk
+    {
+        const Vector neckWorld = m_CameraAnchor - Vector(0, 0, 64) + neckLocal;
+        const float runSpeed = GetLocalRunSpeed(localPlayer);
+        std::lock_guard<std::mutex> lock(m_MovementMutex);
+        m_MovementInputs.headFromBody = Movement::Vec2(neckWorld.x - m_SetupOrigin.x, neckWorld.y - m_SetupOrigin.y);
+        m_MovementInputs.body = Movement::Vec2(m_SetupOrigin.x, m_SetupOrigin.y);
+        m_MovementInputs.canWalk = localPlayer->m_hGroundEntity != -1;
+        m_MovementInputs.runSpeed = runSpeed;
+        m_MovementInputs.trackedMs = GetTickCount64();
     }
 
     // Reset camera if it somehow gets too far
@@ -2669,6 +2688,79 @@ Vector VR::GetViewOriginRight()
 }
 
 
+// Every usercmd (Hooks::dCreateMove): its movement. The thumbstick's, its speed following how far it's pushed (the game's
+// keys give it at the full speed), and the body walking to where the head is (roomscale, a step taken for real). Works in
+// any game, the host doesn't need the mod: it's the player's own movement.
+void VR::BuildMoveCommand(float yawDegrees, float &forward, float &side)
+{
+    MovementInputs in;
+    {
+        std::lock_guard<std::mutex> lock(m_MovementMutex);
+        in = m_MovementInputs;
+    }
+    const unsigned long long nowMs = GetTickCount64();
+    const auto now = std::chrono::steady_clock::now();
+    const float seconds = std::clamp(std::chrono::duration<float>(now - m_LastMoveCommand).count(), 0.0f, 0.1f);
+    m_LastMoveCommand = now;
+
+    const float topSpeed = in.walking ? kWalkSpeed : in.ducking ? kCrouchSpeed : in.runSpeed;
+    const bool testStick = nowMs < m_TestStickUntil;
+    const bool stick = testStick || nowMs - in.stickMs < 250;
+    if (m_AnalogMovement && stick)
+    {
+        const Movement::Vec2 share = testStick ? Movement::StickShare(0.0f, m_TestStickY, kStickDeadZone) : Movement::StickShare(in.stickX, in.stickY, kStickDeadZone);
+        const Movement::Vec2 speeds = Movement::StickSpeeds(share, kSlowestMoveSpeed, topSpeed);
+        forward = speeds.y;
+        side = speeds.x;
+    }
+
+    Movement::Vec2 velocity;
+    if (m_RoomscaleEnabled && nowMs - in.trackedMs < 250)
+    {
+        const Movement::Vec2 bodyMove = m_RoomscaleHasLastBody ? in.body - m_RoomscaleLastBody : Movement::Vec2();
+        m_RoomscaleLastBody = in.body;
+        m_RoomscaleHasLastBody = true;
+        Movement::RoomscaleSettings settings;
+        settings.startDistance = 0.12f * m_VRScale;
+        settings.stopDistance = 0.03f * m_VRScale;
+        settings.resumeDistance = 0.05f * m_VRScale;
+        settings.minimumAsked = 0.05f * m_VRScale;
+        settings.minimumSpeed = kSlowestMoveSpeed;
+        velocity = m_Roomscale.Update(in.headFromBody, bodyMove, in.canWalk, topSpeed, seconds, settings);
+        float roomForward, roomSide;
+        Movement::ToCommand(velocity, yawDegrees, roomForward, roomSide);
+        forward += roomForward;
+        side += roomSide;
+        if (m_AnalogMovement && stick)
+            Movement::LimitSpeed(forward, side, topSpeed);
+    }
+    else
+    {
+        m_RoomscaleHasLastBody = false;
+    }
+
+    if (nowMs < m_MovementTestLogUntil && nowMs - m_MovementLogMs >= 100)
+    {
+        m_MovementLogMs = nowMs;
+        Diagnostics::Log("movement: body %.0f %.0f, head %.1f %.1f from it%s%s, top speed %.0f, command %.0f forward %.0f side",
+            in.body.x, in.body.y, in.headFromBody.x, in.headFromBody.y, m_Roomscale.Following() ? ", following" : "",
+            m_Roomscale.Blocked() ? ", blocked" : "", topSpeed, forward, side);
+    }
+}
+
+// l4d2vr_dual_test step_<cm>: the head goes that far to the right of where the view looks, in half a second, and stays
+void VR::UpdateMovementTest()
+{
+    if (!m_TestHeadStartMs)
+        return;
+    const float progress = std::min((GetTickCount64() - m_TestHeadStartMs) / 500.0f, 1.0f);
+    const Vector right(m_HmdRight.x, m_HmdRight.y, 0.0f);
+    const float length = VectorLength(right);
+    if (length > 0.01f && progress < 1.0f)
+        m_TestHeadOffset = right * (m_TestHeadTarget * m_VRScale * progress / length);
+    m_HmdPosLocalInWorld += m_TestHeadOffset;
+}
+
 void VR::ResetPosition()
 {
     m_CameraAnchor += m_SetupOrigin - m_HmdPosAbs;
@@ -2711,6 +2803,8 @@ void VR::ParseConfigFile()
     m_MeleeSwingVelocityRequired = std::stof(userConfig["MeleeSwingVelocityRequired"]);
     m_PlayerHeightInMeters = std::stof(userConfig["PlayerHeightInMeters"]);
     m_ActivateCrouchPhisically = userConfig["ActivateCrouchPhisically"] == "true";
+    m_RoomscaleEnabled = userConfig["Roomscale"] != "false"; // enabled if missing from config
+    m_AnalogMovement = userConfig["AnalogMovement"] != "false"; // enabled if missing from config
     m_UseCrouchButtonAsToggle = userConfig["UseCrouchButtonAsToggle"] == "true";
     m_AttachFlashlightToHeadWhenMelee = userConfig["AttachFlashlightToHeadWhenMelee"] != "false"; // enabled if missing from config
     m_ScopeEnabled = userConfig["ScopeEnabled"] != "false"; // enabled if missing from config
@@ -2816,6 +2910,8 @@ bool VR::SaveConfigFile()
         { "MeleeSwingVelocityRequired", ConfigFloatString(m_MeleeSwingVelocityRequired) },
         { "PlayerHeightInMeters", ConfigFloatString(m_PlayerHeightInMeters) },
         { "ActivateCrouchPhisically", ConfigBoolString(m_ActivateCrouchPhisically) },
+        { "Roomscale", ConfigBoolString(m_RoomscaleEnabled) },
+        { "AnalogMovement", ConfigBoolString(m_AnalogMovement) },
         { "UseCrouchButtonAsToggle", ConfigBoolString(m_UseCrouchButtonAsToggle) },
         { "AttachFlashlightToHeadWhenMelee", ConfigBoolString(m_AttachFlashlightToHeadWhenMelee) },
         { "ScopeEnabled", ConfigBoolString(m_ScopeEnabled) },
