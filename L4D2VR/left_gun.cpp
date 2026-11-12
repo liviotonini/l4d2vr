@@ -12,6 +12,8 @@
 #include "diagnostics.h"
 #include "reload_logic.h"
 #include "pose_relay.h"
+#include "trace.h"
+#include <initializer_list>
 
 using namespace HandMath;
 
@@ -466,6 +468,195 @@ void VR::UpdateLeftGunReload()
 		PlayWeaponSound(spec.boltForwardSound);
 	if (events & (Reload::Event_GrabbedOld | Reload::Event_MagazineOut | Reload::Event_DroppedOld | Reload::Event_GrabbedFresh | Reload::Event_BoltPulled))
 		Diagnostics::Log("left gun: reload by the right hand, events 0x%X", events);
+}
+
+namespace
+{
+	// The first person laser sight of C_TerrorPlayer (Offsets::ClientLaserSightCreate): a particle system on the player's
+	// ParticleProp at the world's origin, whose control points are set every frame: 1 where the beam leaves, 3 32 units
+	// along it, 2 where it hits. The left hand's gun's laser is one more of them. The functions are the targets of the
+	// calls in that code, checked one by one.
+	struct ParticleRef // CUtlReference: emptied by the effect when it goes
+	{
+		ParticleRef *next = nullptr;
+		ParticleRef *prev = nullptr;
+		void *effect = nullptr;
+	};
+
+	struct LaserCode
+	{
+		bool read = false, found = false;
+		int particleProp = 0;    // CParticleProperty in the player
+		int references = 0;      // the list of references in the effect
+		const char *name = nullptr;
+		void *(__thiscall *create)(void *prop, const char *name, int attachType, int attachment, float x, float y, float z, void *matrix) = nullptr;
+		void(__thiscall *addControlPoint)(void *prop, void *effect, int point, void *entity, int attachType, int attachment, float x, float y, float z, void *matrix) = nullptr;
+		void(__thiscall *drawForUser)(void *effect, int user) = nullptr;
+		void(__thiscall *setControlPoint)(void *effect, int point, const Vector *position) = nullptr;
+		void(__thiscall *stopEmission)(void *prop, void *effect) = nullptr;
+	};
+	LaserCode g_LaserCode;
+	ParticleRef g_LeftLaser;
+	const float kLaserReach = 4096.0f;
+	const float kLaserDirectionPoint = 32.0f;
+
+	bool BytesAre(const uint8_t *at, std::initializer_list<int> bytes)
+	{
+		for (int byte : bytes)
+		{
+			if (*at++ != (uint8_t)byte)
+				return false;
+		}
+		return true;
+	}
+
+	template <typename T>
+	T CallTarget(const uint8_t *call)
+	{
+		return (T)(call + 5 + *(const int32_t *)(call + 1));
+	}
+
+	const LaserCode &ReadLaserCode(Game *game)
+	{
+		if (g_LaserCode.read)
+			return g_LaserCode;
+		g_LaserCode.read = true;
+		const uint8_t *a = (const uint8_t *)game->m_Offsets->ClientLaserSightCreate.address;
+		if (!a)
+			return g_LaserCode;
+		__try
+		{
+			LaserCode code;
+			code.read = true;
+			code.particleProp = *(const int32_t *)(a + 4);
+			code.name = *(const char *const *)(a + 9);
+			const bool looksRight = code.particleProp > 0 && code.particleProp < 0x4000 && strcmp(code.name, "weapon_laser_sight_FP") == 0
+				&& BytesAre(a + 0xB3, { 0x8D, 0x8E }) && *(const int32_t *)(a + 0xB5) == code.particleProp && a[0xB9] == 0xE8
+				&& BytesAre(a + 0x14A, { 0x57, 0xE8 })
+				&& BytesAre(a + 0x25B, { 0x50, 0x6A, 0x01, 0xE8 })
+				&& BytesAre(a - 0x17C, { 0x50, 0x8D, 0x8E }) && *(const int32_t *)(a - 0x179) == code.particleProp && *(a - 0x175) == 0xE8
+				&& BytesAre(a + 0x35, { 0x8D, 0x8A });
+			if (looksRight)
+			{
+				code.create = CallTarget<decltype(code.create)>(a + 0xD);
+				code.addControlPoint = CallTarget<decltype(code.addControlPoint)>(a + 0xB9);
+				code.drawForUser = CallTarget<decltype(code.drawForUser)>(a + 0x14B);
+				code.setControlPoint = CallTarget<decltype(code.setControlPoint)>(a + 0x25E);
+				code.stopEmission = CallTarget<decltype(code.stopEmission)>(a - 0x175);
+				code.references = *(const int32_t *)(a + 0x37);
+				code.found = code.references > 0 && code.references < 0x1000;
+			}
+			g_LaserCode = code;
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+		}
+		Diagnostics::Log("left gun: the game's laser sight %s", g_LaserCode.found ? "found" : "NOT understood, the left hand's gun shows none");
+		return g_LaserCode;
+	}
+
+	// As the game links a reference to an effect, and unlinks it
+	void LinkReference(ParticleRef &ref, void *effect, int references)
+	{
+		ParticleRef **list = (ParticleRef **)((uint8_t *)effect + references);
+		ref.effect = effect;
+		ref.next = *list;
+		if (*list)
+			(*list)->prev = &ref;
+		ref.prev = nullptr;
+		*list = &ref;
+	}
+
+	void UnlinkReference(ParticleRef &ref, int references)
+	{
+		if (ref.effect)
+		{
+			ParticleRef **list = (ParticleRef **)((uint8_t *)ref.effect + references);
+			if (ref.prev)
+			{
+				ref.prev->next = ref.next;
+				if (ref.next)
+					ref.next->prev = ref.prev;
+			}
+			else if (*list == &ref)
+			{
+				*list = ref.next;
+				if (ref.next)
+					ref.next->prev = nullptr;
+			}
+		}
+		ref.next = ref.prev = nullptr;
+		ref.effect = nullptr;
+	}
+
+	// The laser goes through the player holding it
+	class SkipOneFilter : public CTraceFilter
+	{
+	public:
+		SkipOneFilter(IHandleEntity *skip) : CTraceFilter(skip, 0) {}
+		bool ShouldHitEntity(IHandleEntity *entity, int contentsMask) override { return entity != m_pPassEnt; }
+	};
+}
+
+// Every frame (UpdateDualWield): the left hand's gun shows its laser sight, as the game shows the right hand's, from its
+// flashlight along its barrel to what it hits (PlaceLeftGunParts)
+void VR::UpdateLeftLaser()
+{
+	const LaserCode &code = ReadLaserCode(m_Game);
+	if (!code.found)
+		return;
+	void *local = m_Game->GetClientEntity(m_Game->m_EngineClient->GetLocalPlayer());
+	void *prop = local ? (uint8_t *)local + code.particleProp : nullptr;
+	const unsigned long long now = GetTickCount64();
+	const void *weapon = LeftHandShowsItem() && LeftGun::Find(m_LeftItemId) ? m_Game->GetClientEntity(m_LeftItemIndex) : nullptr;
+	const bool test = now < m_LeftLaserTestUntil;
+	const bool show = prop && (test || (weapon && now - m_LeftGunLaserMs < 250 && WeaponHasLaser(weapon)));
+
+	if (!show)
+	{
+		if (g_LeftLaser.effect)
+		{
+			if (prop)
+				code.stopEmission(prop, g_LeftLaser.effect);
+			UnlinkReference(g_LeftLaser, code.references);
+			Diagnostics::Log("left gun: its laser sight off");
+		}
+		return;
+	}
+
+	if (!g_LeftLaser.effect)
+	{
+		void *effect = code.create(prop, code.name, 5, -1, 0.0f, 0.0f, 0.0f, nullptr);
+		if (!effect)
+			return;
+		LinkReference(g_LeftLaser, effect, code.references);
+		for (int point = 1; point <= 3; ++point)
+			code.addControlPoint(prop, effect, point, local, 2, 0, 0.0f, 0.0f, 0.0f, nullptr);
+		code.drawForUser(effect, 0);
+		Diagnostics::Log("left gun: its laser sight on");
+	}
+
+	Vector start, direction;
+	if (test)
+	{
+		start = m_SetupOrigin + Vector(0.0f, 0.0f, 10.0f);
+		direction = Vector(1.0f, 0.0f, 0.0f);
+	}
+	else
+	{
+		start = ToVector(m_LeftGunLaser);
+		direction = ToVector(Normalized(m_LeftGunLaserDir));
+	}
+	CGameTrace trace;
+	Ray_t ray;
+	ray.Init(start, start + direction * kLaserReach);
+	SkipOneFilter filter((IHandleEntity *)local);
+	m_Game->m_EngineTrace->TraceRay(ray, MASK_SHOT, &filter, &trace);
+	const Vector end = trace.fraction < 1.0f ? trace.endpos : start + direction * kLaserReach;
+	const Vector along = start + direction * kLaserDirectionPoint;
+	code.setControlPoint(g_LeftLaser.effect, 1, &start);
+	code.setControlPoint(g_LeftLaser.effect, 3, &along);
+	code.setControlPoint(g_LeftLaser.effect, 2, &end);
 }
 
 // The magazine goes in: the server loads the gun from the ammo carried (LeftGun::ServerReload)

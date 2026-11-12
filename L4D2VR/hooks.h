@@ -98,6 +98,7 @@ typedef int(__thiscall *tGetSlot)(void *thisptr);
 typedef bool(__thiscall *tAddDualWeapon)(void *thisptr);
 typedef void *(__thiscall *tWeaponOfId)(void *thisptr, int weaponId);
 typedef void(__cdecl *tParticleTracer)(const char *name, const Vector &start, const Vector &end, int entityIndex, int attachment, bool whiz);
+typedef bool(__thiscall *tPlayerAddUpgrade)(void *thisptr, int type);
 typedef void *(__cdecl *tGrenadeLauncherCreate)(const Vector &origin, const QAngle &angles, const Vector &velocity, const Vector &angularVelocity, void *owner, int flags);
 
 // A Vector passed by value (CBaseCSGrenade::EmitGrenade takes its vectors by value)
@@ -165,6 +166,12 @@ public:
 	static inline Hook<tWeaponOfId> hkServerWeaponById;
 	static inline Hook<tParticleTracer> hkClientParticleTracer;
 	static inline Hook<tGrenadeLauncherCreate> hkGrenadeLauncherCreate;
+	static inline Hook<tPlayerAddUpgrade> hkPlayerAddUpgrade;
+	// Read from CTerrorPlayer::AddUpgrade (Offsets::ServerPlayerAddUpgrade), 0 / null if it doesn't look as expected
+	static inline int m_PlayerWeaponSlotOffset = 0;
+	static inline int m_WeaponAddUpgradeOffset = 0;
+	static inline const char *m_AwardUpgradeSound = nullptr;
+	static inline void(__thiscall *m_EmitSound)(void *entity, const char *sound) = nullptr;
 
 	// Read from the code of CBaseCSGrenade::ThrowGrenade by initGrenadeThrowHooks (null / 0 if it doesn't look as expected)
 	static inline tThrowGrenade m_ThrowGrenade = nullptr;
@@ -262,6 +269,7 @@ public:
 	static int __fastcall dClientGetSlot(void *ecx, void *edx);
 	static int __fastcall dServerGetSlot(void *ecx, void *edx);
 	static bool __fastcall dServerAddDualWeapon(void *ecx, void *edx);
+	static bool __fastcall dPlayerAddUpgrade(void *ecx, void *edx, int type);
 	static void *__cdecl dGrenadeLauncherCreate(const Vector &origin, const QAngle &angles, const Vector &velocity, const Vector &angularVelocity, void *owner, int flags);
 	static void TraceMeleeSwing(void *weapon, const QAngle &from, const QAngle &to, const Vector *hand, bool newSwing);
 	static bool GetServerHandAim(void *player, Vector &origin, QAngle &angles);

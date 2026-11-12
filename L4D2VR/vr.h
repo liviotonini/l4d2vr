@@ -537,6 +537,10 @@ public:
 	const LeftGun::GunModel *m_LeftGunModel = nullptr; // where the parts of the left hand's gun are (GetLeftItemDraw)
 	const void *m_LeftGunModelPtr = nullptr;
 	int m_LeftGunModelIndex = 0;
+	HandMath::Vec3 m_LeftGunLaser;          // where its laser sight leaves, and the way (UpdateLeftLaser)
+	HandMath::Vec3 m_LeftGunLaserDir;
+	unsigned long long m_LeftGunLaserMs = 0;
+	unsigned long long m_LeftLaserTestUntil = 0;
 	bool m_LeftSwinging = false;
 	QAngle m_LeftSwingPrevAim = { 0, 0, 0 }; // the aim sent for the swing, from the last update
 	bool m_LeftSwingAimValid = false;
@@ -688,6 +692,8 @@ public:
 	void ApplyLeftGunShot(HandMath::Mat34 &frame);
 	HandMath::Mat34 LeftGunGrip() const;
 	HandMath::Mat34 GetLeftHandDrawn(const HandRig &rig) const;
+	void UpdateLeftLaser();
+	bool WeaponHasLaser(const void *weapon);
 	void PlaceLeftGunParts(const void *clipBones, const HandMath::Mat34 &frame, HandMath::Mat34 *bones, int boneCount);
 	bool IsLeftGunShot(int seed) const;
 	bool TryRightHoldLeftGun();
@@ -752,6 +758,7 @@ public:
 	void HideWristHud();
 	void UpdateFlashlightAttachment();
 	void PatchLaserSight();
+	void PatchLaserSightSlots();
 	void CreateScopeOverlays();
 	bool UpdateScope();
 	bool UpdateScopeZoom(bool haveBolt, const HandMath::Vec3 &boltGrab);

@@ -116,6 +116,8 @@ Hooks::Hooks(Game *game)
 		hkClientParticleTracer.enableHook();
 	if (hkGrenadeLauncherCreate.pTarget)
 		hkGrenadeLauncherCreate.enableHook();
+	if (hkPlayerAddUpgrade.pTarget)
+		hkPlayerAddUpgrade.enableHook();
 }
 
 Hooks::~Hooks()
@@ -1232,6 +1234,27 @@ void Hooks::initWeaponStateHooks()
 	else
 		Diagnostics::Log("left gun: the tracers weren't found in this game version, the left hand's shots show none");
 
+	// The laser sights: on the gun of the hand that takes one, pistols too. What CTerrorPlayer::AddUpgrade calls is read
+	// from its code: the player's Weapon_GetSlot, the weapon's AddUpgrade, the sound of an upgrade and EmitSound.
+	if (const uint8_t *addUpgrade = (const uint8_t *)offsets->ServerPlayerAddUpgrade.address)
+	{
+		const uint8_t kAward[] = { 0x8B, 0x10, 0x8B, 0xC8, 0x8B, 0x82 };
+		const bool looksRight = addUpgrade[0x30] == 0x8B && addUpgrade[0x31] == 0x90 && memcmp(addUpgrade + 0xB9, kAward, sizeof(kAward)) == 0
+			&& addUpgrade[0xCA] == 0x68 && addUpgrade[0xCF] == 0x8B && addUpgrade[0xD0] == 0xCF && addUpgrade[0xD1] == 0xE8;
+		const int slotOffset = looksRight ? *(const int32_t *)(addUpgrade + 0x32) : 0;
+		const int upgradeOffset = looksRight ? *(const int32_t *)(addUpgrade + 0xBF) : 0;
+		if (slotOffset > 0 && slotOffset < 0x2000 && slotOffset % 4 == 0 && upgradeOffset > 0 && upgradeOffset < 0x2000 && upgradeOffset % 4 == 0)
+		{
+			m_PlayerWeaponSlotOffset = slotOffset;
+			m_WeaponAddUpgradeOffset = upgradeOffset;
+			m_AwardUpgradeSound = *(const char *const *)(addUpgrade + 0xCB);
+			m_EmitSound = (void(__thiscall *)(void *, const char *))(addUpgrade + 0xD1 + 5 + *(const int32_t *)(addUpgrade + 0xD2));
+			hkPlayerAddUpgrade.createHook((LPVOID)addUpgrade, &dPlayerAddUpgrade);
+		}
+	}
+	if (!hkPlayerAddUpgrade.pTarget)
+		Diagnostics::Log("upgrades: the game's AddUpgrade wasn't found in this game version, laser sights go on the primary weapon");
+
 	// The grenade launcher's grenade from the weapon in the hand: the target of the call found by its signature
 	const uintptr_t createCall = offsets->GrenadeLauncherCreateCall.address;
 	if (createCall && *(const uint8_t *)createCall == 0xE8)
@@ -1242,6 +1265,31 @@ void Hooks::initWeaponStateHooks()
 
 // The grenade launcher's grenade fired by a VR player leaves from the weapon in the hand, where it points. The game's
 // velocity, relative to where the eyes look (forward with some lift), is turned the same way.
+// CTerrorPlayer::AddUpgrade, from the laser sight box and the "upgrade_add" command: the game puts the upgrade on the
+// primary weapon only. A laser sight goes on the gun of the hand that took it instead (DualWield::ServerUpgradeWeapon),
+// a pistol too, the same way: the weapon's AddUpgrade and the sound of an upgrade.
+bool __fastcall Hooks::dPlayerAddUpgrade(void *ecx, void *edx, int type)
+{
+	const int kLaserSight = 2;
+	void *weapon = type == kLaserSight ? DualWield::ServerUpgradeWeapon(ecx) : nullptr;
+	if (weapon)
+	{
+		typedef void *(__thiscall *tWeaponSlot)(void *player, int slot);
+		typedef bool(__thiscall *tWeaponAddUpgrade)(void *weapon, int type);
+		void *primary = (*(tWeaponSlot **)ecx)[m_PlayerWeaponSlotOffset / 4](ecx, 0);
+		if (weapon != primary)
+		{
+			if (!(*(tWeaponAddUpgrade **)weapon)[m_WeaponAddUpgradeOffset / 4](weapon, type))
+				return false;
+			if (m_AwardUpgradeSound)
+				m_EmitSound(ecx, m_AwardUpgradeSound);
+			Diagnostics::Log("upgrades: a laser sight on weapon %d of player %d", ((Server_WeaponCSBase *)weapon)->GetWeaponID(), GetServerEntityIndex(ecx));
+			return true;
+		}
+	}
+	return hkPlayerAddUpgrade.fOriginal(ecx, type);
+}
+
 void *__cdecl Hooks::dGrenadeLauncherCreate(const Vector &origin, const QAngle &angles, const Vector &velocity, const Vector &angularVelocity, void *owner, int flags)
 {
 	bool isLocalPlayer;

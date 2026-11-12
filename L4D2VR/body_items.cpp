@@ -112,6 +112,8 @@ namespace
 	// The model of a weapon in the world (DT_BaseCombatWeapon). The weapons a player carries have their first person
 	// model as their own (m_nModelIndex), with the parts placed for the animations.
 	int g_WorldModelIndexOffset = -1;
+	// The upgrades of a gun (DT_TerrorGun): bit 2 the laser sight
+	int g_UpgradeBitsOffset = -1;
 	bool g_NetvarsLookedUp = false;
 
 	bool HasPlayerClass(const ClientClass *clientClass)
@@ -168,6 +170,7 @@ namespace
 			FindPlayerProp(classes, "m_nModelIndex", g_ModelIndexOffset, unused);
 			FindPlayerProp(classes, "m_hOwnerEntity", g_OwnerOffset, unused);
 			FindClassProp(classes, "CPistol", "m_iWorldModelIndex", g_WorldModelIndexOffset, unused);
+			FindClassProp(classes, "CPistol", "m_upgradeBitVec", g_UpgradeBitsOffset, unused);
 		}
 		Diagnostics::Log("body items: m_nModelIndex at 0x%X, m_hOwnerEntity at 0x%X, m_iWorldModelIndex at 0x%X", g_ModelIndexOffset, g_OwnerOffset,
 			g_WorldModelIndexOffset);
@@ -738,6 +741,14 @@ int VR::GetInventory(C_BasePlayer *player, InventoryItem *items, int max)
 	return count;
 }
 
+// A gun of the player has a laser sight (m_upgradeBitVec)
+bool VR::WeaponHasLaser(const void *weapon)
+{
+	if (!g_NetvarsLookedUp)
+		LookUpNetvars(m_Game);
+	return weapon && g_UpgradeBitsOffset > 0 && (Read<int>(weapon, g_UpgradeBitsOffset) & (1 << 2)) != 0;
+}
+
 // The model an entity is drawn with
 const void *VR::GetEntityModel(const void *entity)
 {
@@ -800,6 +811,8 @@ namespace
 		Mat34 muzzleOnBone;
 		int shellBone = -1;
 		Mat34 shellOnBone;
+		int flashlightBone = -1;   // the "flashlight" attachment, where a laser sight leaves
+		Mat34 flashlightOnBone;
 		int bolt = -1;   // what's pulled: the slide, the charging handle or the bolt
 		const LeftGun::GunModel *parts = nullptr; // where its parts really are, for the game's guns
 	};
@@ -847,6 +860,11 @@ namespace
 			{
 				bones.shellBone = *(const int32_t *)(attachment + 8);
 				memcpy(&bones.shellOnBone, attachment + 12, sizeof(float) * 12);
+			}
+			else if (_stricmp(name, "flashlight") == 0 && bones.flashlightBone < 0)
+			{
+				bones.flashlightBone = *(const int32_t *)(attachment + 8);
+				memcpy(&bones.flashlightOnBone, attachment + 12, sizeof(float) * 12);
 			}
 		}
 		bones.parts = LeftGun::FindModel(Studio::ModelName(studioHeader));
@@ -957,6 +975,13 @@ void VR::PlaceLeftGunParts(const void *clipBones, const Mat34 &frame, Mat34 *bon
 		m_LeftGunMuzzle = Origin(Multiply(bones[clip.muzzleBone], clip.muzzleOnBone));
 		m_LeftGunMuzzleMs = now;
 	}
+	// Where its laser sight leaves: its flashlight, or its muzzle
+	if (clip.flashlightBone >= 0 && clip.flashlightBone < boneCount)
+		m_LeftGunLaser = Origin(Multiply(bones[clip.flashlightBone], clip.flashlightOnBone));
+	else
+		m_LeftGunLaser = m_LeftGunMuzzle;
+	m_LeftGunLaserDir = barrel;
+	m_LeftGunLaserMs = now;
 	if (clip.shellBone >= 0 && clip.shellBone < boneCount)
 	{
 		const Mat34 shell = Multiply(bones[clip.shellBone], clip.shellOnBone);
@@ -1359,6 +1384,17 @@ bool VR::TryGrabWorld(const Vec3 &handWorld, bool leftHand)
 		return false;
 	}
 
+	void *model = m_Game->m_ModelInfo->GetModel(target.modelIndex);
+	const char *modelName = model ? m_Game->m_ModelInfo->GetModelName(model) : nullptr;
+
+	// A laser sight goes on the gun of the hand that takes it (Hooks::dPlayerAddUpgrade): the empty right hand has none
+	if (!leftHand && m_RightHandEmpty && modelName && strstr(modelName, "laser_sight"))
+	{
+		Diagnostics::Log("grab: a laser sight, the right hand holds no gun");
+		m_Haptics.Play(Haptics::Hand::WeaponHand, HapticEffects::Cancel);
+		return true;
+	}
+
 	// From a little behind the hand, straight at it
 	Vec3 direction = target.point - handWorld;
 	direction = Normalized(direction, ToVec3(m_RightControllerForward));
@@ -1393,8 +1429,6 @@ bool VR::TryGrabWorld(const Vec3 &handWorld, bool leftHand)
 	if (target.ammo)
 		GiveLeftGunAmmo();
 
-	void *model = m_Game->m_ModelInfo->GetModel(target.modelIndex);
-	const char *modelName = model ? m_Game->m_ModelInfo->GetModelName(model) : nullptr;
 	Diagnostics::Log("grab: %s, %s, %.2f m from the hand, with the %s hand", target.door ? "door" : "item", modelName ? modelName : "no model",
 		target.distance / m_VRScale, leftHand ? "left" : "right");
 	return true;

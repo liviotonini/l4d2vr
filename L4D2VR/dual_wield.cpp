@@ -463,6 +463,7 @@ int VR::PickRightWeapon(const InventoryItem *items, int count, int exceptIndex, 
 void VR::UpdateDualWield(C_BasePlayer *local, int activeWeaponId, float deltaSeconds)
 {
 	const unsigned long long now = NowMs();
+	UpdateLeftLaser();
 
 	if (!m_DualWieldEnabled || !local || !m_Game->m_PoseRelay->IsServerCapable())
 	{
@@ -975,12 +976,15 @@ void VR::DualWieldTest(const char *action)
 		{
 			const int slot = getSlot ? getSlot(items[i].weapon) : -1;
 			const void *model = GetEntityModel(items[i].weapon), *worldModel = GetWorldModel(items[i].weapon);
-			Diagnostics::Log("dual wield test: entity %d weapon %d slot %d%s%s, %s, in the world %s", items[i].index, items[i].id, slot,
+			Diagnostics::Log("dual wield test: entity %d weapon %d slot %d%s%s%s, %s, in the world %s", items[i].index, items[i].id, slot,
 				items[i].weapon == active ? " (active)" : "", items[i].index == m_LeftItemIndex ? " (left hand)" : "",
+				LeftGun::Find(items[i].id) && WeaponHasLaser(items[i].weapon) ? " (laser sight)" : "",
 				model ? m_Game->m_ModelInfo->GetModelName((void *)model) : "no model", worldModel ? m_Game->m_ModelInfo->GetModelName((void *)worldModel) : "no model");
 		}
 		Diagnostics::Log("dual wield test: left item %d, extra weapon %d, right weapon %d, right hand %s", m_LeftItemIndex, m_ExtraWeaponIndex, m_RightWeaponIndex,
 			m_RightHandEmpty ? "empty" : "holding it");
+		// The game's first person laser sight effect (C_TerrorPlayer, the reference at 0x28E0 in this game version)
+		Diagnostics::Log("dual wield test: the game's first person laser sight effect %p", *(void *const *)((const uint8_t *)local + 0x28E8));
 		return;
 	}
 
@@ -1120,6 +1124,12 @@ void VR::DualWieldTest(const char *action)
 		grenadeThrow.sequence = m_GrenadeThrowSequence;
 		std::lock_guard<std::mutex> lock(m_GrenadeThrowMutex);
 		m_GrenadeThrow = grenadeThrow;
+		return;
+	}
+	// lasertest: the left hand's gun's laser sight, from the eyes for 5 s (without the hand drawn)
+	if (strcmp(action, "lasertest") == 0)
+	{
+		m_LeftLaserTestUntil = NowMs() + 5000;
 		return;
 	}
 	// leftgrenade: the grenade carried goes to the left hand, as from the chest
@@ -1592,6 +1602,26 @@ bool DualWield::ServerTakeOut(void *player, void *weapon)
 void *DualWield::ServerPlayersWeapon(void *player, int index)
 {
 	return PlayersWeapon(player, index);
+}
+
+void *DualWield::ServerUpgradeWeapon(void *player)
+{
+	if (!g_ServerGame || !player)
+		return nullptr;
+	const int index = EntIndex(player);
+	if (g_ServerGame->IsValidPlayerIndex(index))
+	{
+		const Player &vrPlayer = g_ServerGame->m_PlayersVRInfo[index];
+		if (vrPlayer.useAimLeft && GetTickCount64() < vrPlayer.useAimUntil)
+		{
+			void *left = vrPlayer.leftItemIndex ? PlayersWeapon(player, vrPlayer.leftItemIndex) : nullptr;
+			return left && LeftGun::Find(WeaponIdOf(left)) ? left : nullptr;
+		}
+	}
+	typedef void *(__thiscall *tGetActiveWeapon)(void *player);
+	const tGetActiveWeapon getActiveWeapon = (tGetActiveWeapon)g_ServerGame->m_Offsets->GetActiveWeapon.address;
+	void *active = getActiveWeapon ? getActiveWeapon(player) : nullptr;
+	return active && LeftGun::Find(WeaponIdOf(active)) ? active : nullptr;
 }
 
 // As the game's code does it: the entity's edict is flagged changed, all of it compared (FL_EDICT_CHANGED |

@@ -106,6 +106,7 @@ VR::VR(Game *game)
     UpdatePosesAndActions();
 
     PatchLaserSight();
+    PatchLaserSightSlots();
 
     // The dashboard overlay and its D3D11 device are created on the first Update() (render thread)
     m_SettingsMenu = new SettingsMenu(this);
@@ -1056,6 +1057,28 @@ static bool PatchCodeBytes(uintptr_t address, const uint8_t *bytes, size_t size)
     VirtualProtect((LPVOID)address, size, oldProtect, &oldProtect);
     FlushInstructionCache(GetCurrentProcess(), (LPVOID)address, size);
     return true;
+}
+
+// The laser sights are drawn on the primary weapons only: C_TerrorPlayer's update (around Offsets::ClientLaserSightCreate)
+// gives up, in first and in third person, when the weapon's slot (a virtual returning its script's slot) isn't 0. A pistol
+// takes a laser sight too (Hooks::dPlayerAddUpgrade): those two jumps are taken out, so any gun with one shows it.
+void VR::PatchLaserSightSlots()
+{
+    const uintptr_t create = m_Game->m_Offsets->ClientLaserSightCreate.address;
+    if (!create)
+        return;
+    // mov eax, [edx + slot virtual]; call eax; test eax, eax; jne give up
+    const uintptr_t firstPerson = create - 0x6B, thirdPerson = create + 0x9EC;
+    const bool codeMatches = CodeBytesMatch(firstPerson, { 0x8B, 0x82, 0xFC, 0x04, 0x00, 0x00, 0xFF, 0xD0, 0x85, 0xC0, 0x0F, 0x85 })
+        && CodeBytesMatch(thirdPerson, { 0x8B, 0x82, 0xFC, 0x04, 0x00, 0x00, 0xFF, 0xD0, 0x85, 0xC0, 0x0F, 0x85 });
+    if (!codeMatches)
+    {
+        Diagnostics::Log("upgrades: the laser sights' slot check wasn't found in this game version, pistols show none");
+        return;
+    }
+    const uint8_t nops[6] = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
+    PatchCodeBytes(firstPerson + 10, nops, sizeof(nops));
+    PatchCodeBytes(thirdPerson + 10, nops, sizeof(nops));
 }
 
 // L4D2's first person laser sight (C_TerrorPlayer, particle "weapon_laser_sight_FP") traces the laser from a blend

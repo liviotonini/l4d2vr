@@ -52,6 +52,9 @@ namespace DualWield
 	bool ServerTakeOut(void *player, void *weapon);
 	// The weapon `index` of `player`, null if the player doesn't have it
 	void *ServerPlayersWeapon(void *player, int index);
+	// The gun a laser sight goes on (Hooks::dPlayerAddUpgrade): the left hand's for a VR player who took it with that
+	// hand, otherwise the gun out (pistols too). Null for the game's own choice, the primary weapon.
+	void *ServerUpgradeWeapon(void *player);
 	// A field of the entity written by the mod goes to the players (CBaseEntity::NetworkStateChanged)
 	void ServerNetworkChanged(void *entity);
 

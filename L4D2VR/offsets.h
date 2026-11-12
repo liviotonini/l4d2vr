@@ -120,6 +120,13 @@ public:
     Offset ThrowGrenade =                { "server.dll", 0x24E2A0, "55 8B EC 81 EC 94 00 00 00 A1 ? ? ? ? 33 C5 89 45 FC 53 56 57 8B F9 E8 ? ? ? ? 8B F0 85 F6 0F 84 ? ? ? ? 8B 06 8B 90 68 01 00 00 8B CE FF D2 84 C0" };
     // CBaseCSGrenade::ItemPostFrame once m_fThrowTime is reached: owner->RemoveAmmo(1, m_iPrimaryAmmoType) (virtual, its
     // offset at +10, the ammo type's at +2), then ThrowGrenade. Without that the grenade stays with the player.
+    // CTerrorPlayer::AddUpgrade(type): the upgrade goes on the primary weapon (Weapon_GetSlot(0), virtual, its offset at
+    // +0x32) through the weapon's AddUpgrade (virtual, its offset at +0xBF), then "Player.AwardUpgrade" (+0xCB) with
+    // EmitSound (call at +0xD1). Hooks::dPlayerAddUpgrade puts a laser sight on the gun of the hand that took it.
+    Offset ServerPlayerAddUpgrade =      { "server.dll", 0x308EE0, "55 8B EC 81 EC 18 01 00 00 A1 ? ? ? ? 33 C5 89 45 FC 53 8B 5D 08 56 57 53 8B F9 E8 ? ? ? ? 83 C4 04 89 85 EC FE FF FF 85 C0 74 76 8B 07 8B 90", 0, true };
+    // In C_TerrorPlayer's laser sight update: ParticleProp()->Create("weapon_laser_sight_FP", PATTACH_WORLDORIGIN, ...),
+    // the first person laser. The left hand's gun's is made the same way (VR::UpdateLeftLaser).
+    Offset ClientLaserSightCreate =      { "client.dll", 0x25DFB3, "6A 05 8D 8E ? ? ? ? 68 ? ? ? ? E8 ? ? ? ? 8D 8C 7F 38 0A 00 00 8B 54 8E 08", 0, true };
     Offset GrenadeThrowTimeReached =     { "server.dll", 0x24E153, "8B 86 ? ? ? ? 8B 13 8B 92 ? ? ? ? 50 6A 01 8B CB FF D2 8B 06 8B 90 ? ? ? ? 8B CE FF D2", 0, true };
     Offset ProcessUsercmds =             { "server.dll", 0xEFB20, "55 8B EC B8 ? ? ? ? E8 ? ? ? ? A1 ? ? ? ? 33 C5 89 45 FC 8B 45 0C 8B 55 08" };
     Offset CBaseEntity_entindex =        { "server.dll", 0x253A0, "8B 41 28 85 C0 75 01 C3 8B 0D ? ? ? ? 2B 41 58 C1 F8 04 C3 CC CC CC CC CC CC CC CC CC CC CC 55"};
