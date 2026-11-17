@@ -1,0 +1,41 @@
+"mission"
+{
+	"Name"			"L4D2VRTestRoom"
+	"Version"		"2"
+	"Author"		"L4D2VR"
+	"Website"		"https://github.com/sd805/l4d2vr"
+	"BuiltIn"		"0"
+
+	"DisplayTitle"	"L4D2VR Test Room"
+	"Description"	"Every weapon, melee weapon, grenade and item on tables, with doors to open, no infected and no bots: to test the VR mod alone or with friends."
+
+	"Image"			"maps/any"
+	"OuttroImage"	"vgui/outroTitle_DarkCarnival"
+
+	// Every melee weapon, so the test room can have all of them
+	"meleeweapons"	"fireaxe;katana;machete;baseball_bat;cricket_bat;crowbar;electric_guitar;frying_pan;tonfa;golfclub;knife;pitchfork;shovel"
+
+	"survivor_set"	"2"
+
+	"modes"
+	{
+		"coop"
+		{
+			"1"
+			{
+				"Map"			"l4d2vr_testroom"
+				"DisplayName"	"Test Room"
+				"Image"			"maps/c2m1_highway"
+			}
+		}
+		"realism"
+		{
+			"1"
+			{
+				"Map"			"l4d2vr_testroom"
+				"DisplayName"	"Test Room"
+				"Image"			"maps/c2m1_highway"
+			}
+		}
+	}
+}
