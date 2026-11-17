@@ -22,11 +22,15 @@ namespace
 	const int kMaxHelloAttempts = 8;
 	const unsigned long long kHelloIntervalMs = 1500;
 	const unsigned long long kKeepAliveIntervalMs = 2000;
-	const unsigned long long kSendIntervalMs = 33;       // about 30 per second
+	const double kSendIntervalMs = 1000.0 / 30.0;        // the rate the client sends its packets at (cl_cmdrate)
 	const unsigned long long kStaleMs = 500;             // the model goes back to the game's animation
 	const unsigned long long kClientForgottenMs = 5000;  // a player that stopped uploading doesn't get poses either
-	const unsigned long long kMinDecodeIntervalUs = 16667;
+	const unsigned long long kNewStreamMs = 1000;        // a pose after this long is taken whatever its clock says
+	const double kForwardRate = 40.0;                    // poses per second the server forwards from one player
+	const double kForwardBurst = 6.0;                    // how many can come together
+	const unsigned long long kReportIntervalMs = 30000;  // how often the log says how the poses of each player arrive
 
+	// GetTickCount64 moves in steps of about 16 ms: the times poses are sent and shown at use the precise counter
 	unsigned long long NowMs() { return GetTickCount64(); }
 
 	unsigned long long NowUs()
@@ -41,6 +45,103 @@ namespace
 		LARGE_INTEGER counter;
 		QueryPerformanceCounter(&counter);
 		return (unsigned long long)(counter.QuadPart * s_MicrosecondsPerTick);
+	}
+
+	double NowMsPrecise() { return NowUs() / 1000.0; }
+
+	// --- The engine's pieces for commands in the unreliable part of the packets (engine.dll of Left 4 Dead 2).
+	//
+	// CBaseClientState::SendStringCmd and IVEngineServer::ClientCommand build a NET_StringCmd on the stack, set its
+	// "reliable" to 1 and give it to the player's channel: SendNetMsg puts a reliable message in the reliable stream
+	// whatever its second argument says, so ServerCmd's "reliable" does nothing. The same message with 0 there goes in
+	// the next packet.
+	const int kStringCmdReliableOffset = 4;
+	const int kStringCmdTextOffset = 0x54;
+	const int kStringCmdSize = 0x460;       // with the 1 KB buffer it reads into
+	const int kSendNetMsgIndex = 41;        // INetChannel::SendNetMsg(INetMessage &, bool forceReliable, bool voice)
+	const int kClientNetChannelIndex = 74;  // IVEngineClient::GetNetChannelInfo()
+	const int kServerNetChannelIndex = 21;  // IVEngineServer::GetPlayerNetInfo(int playerIndex)
+
+	typedef bool(__thiscall *tSendNetMsg)(void *channel, void *message, bool forceReliable, bool voice);
+	typedef void *(__thiscall *tClientNetChannel)(void *engineClient);
+	typedef void *(__thiscall *tServerNetChannel)(void *engineServer, int playerIndex);
+
+	bool InEngine(const void *address, size_t size)
+	{
+		static const HMODULE engine = GetModuleHandleA("engine.dll");
+		if (!engine || !address)
+			return false;
+		const uint8_t *base = (const uint8_t *)engine;
+		const IMAGE_NT_HEADERS *nt = (const IMAGE_NT_HEADERS *)(base + ((const IMAGE_DOS_HEADER *)base)->e_lfanew);
+		const uintptr_t start = (uintptr_t)base, end = start + nt->OptionalHeader.SizeOfImage;
+		return (uintptr_t)address >= start && (uintptr_t)address + size <= end;
+	}
+
+	// The code starts with these bytes, -1 for any
+	bool CodeStartsWith(const void *code, const int *pattern, int length)
+	{
+		if (!InEngine(code, length))
+			return false;
+		for (int i = 0; i < length; ++i)
+		{
+			if (pattern[i] >= 0 && ((const uint8_t *)code)[i] != pattern[i])
+				return false;
+		}
+		return true;
+	}
+
+	// The vtable of NET_StringCmd, from IVEngineServer::ClientCommand: "mov byte [ebp+r], 1" sets reliable, and the
+	// message starts 4 bytes before, where "mov dword [ebp+r-4], vtable" puts its vtable, with the text 0x54 after it
+	void *FindStringCmdVtable(const void *clientCommand)
+	{
+		if (!InEngine(clientCommand, 0x200))
+			return nullptr;
+
+		const uint8_t *code = (const uint8_t *)clientCommand;
+		for (int i = 0; i < 0x180; ++i)
+		{
+			if (code[i] != 0xC6 || code[i + 1] != 0x85 || code[i + 6] != 0x01)
+				continue;
+
+			const int32_t message = *(const int32_t *)(code + i + 2) - kStringCmdReliableOffset;
+			void *vtable = nullptr;
+			bool textThere = false;
+			for (int j = 0; j < 0x180; ++j)
+			{
+				if (code[j] != 0xC7 || code[j + 1] != 0x85)
+					continue;
+				const int32_t at = *(const int32_t *)(code + j + 2);
+				if (at == message)
+					vtable = *(void *const *)(code + j + 6);
+				else if (at == message + kStringCmdTextOffset)
+					textThere = true;
+			}
+
+			// Its IsReliable (8th function) reads the byte at +4: mov al, [ecx+4]; ret
+			const int isReliable[] = { 0x8A, 0x41, kStringCmdReliableOffset, 0xC3 };
+			if (vtable && textThere && InEngine(vtable, 12 * sizeof(void *)) && CodeStartsWith(((void **)vtable)[7], isReliable, 4))
+				return vtable;
+		}
+		return nullptr;
+	}
+
+	// SendNetMsg returns with "ret 0Ch" (three arguments) when the channel has no address, and asks the message whether
+	// it's reliable (its function at +1Ch)
+	bool LooksLikeSendNetMsg(const void *function)
+	{
+		if (!InEngine(function, 0x40))
+			return false;
+
+		const uint8_t *code = (const uint8_t *)function;
+		bool returnsThree = false, asksReliable = false;
+		for (int i = 0; i < 0x3D; ++i)
+		{
+			if (code[i] == 0xC2 && code[i + 1] == 0x0C && code[i + 2] == 0x00)
+				returnsThree = true;
+			if (code[i] == 0x8B && (code[i + 1] & 0xC7) == 0x40 && code[i + 2] == 0x1C)
+				asksReliable = true;
+		}
+		return returnsThree && asksReliable;
 	}
 
 	// --- Console commands. Same layout as the engine's classes.
@@ -312,6 +413,7 @@ void PoseRelay::Init(Game *game)
 	m_EngineClientCommand = (void *)FindEngineClientCommand(m_EngineServer);
 	if (!m_EngineClientCommand)
 		Diagnostics::Log("pose relay: IVEngineServer::ClientCommand not found, this game won't forward poses when hosting");
+	FindUnreliableCommands();
 
 	void *cvar = TryInterface("vstdlib.dll", "VEngineCvar007");
 	if (!cvar)
@@ -326,6 +428,84 @@ void PoseRelay::Init(Game *game)
 	((ICvarRegister *)cvar)->RegisterConCommand(&g_DualTestCommand);
 }
 
+void PoseRelay::FindUnreliableCommands()
+{
+	__try
+	{
+		m_StringCmdVtable = FindStringCmdVtable(m_EngineClientCommand);
+
+		// IVEngineClient::GetNetChannelInfo: call GetBaseLocalClient; mov eax, [eax+10h]; ret
+		const int clientGetter[] = { 0xE8, -1, -1, -1, -1, 0x8B, 0x40, 0x10, 0xC3 };
+		void *engineClient = m_Game->m_EngineClient;
+		void *candidate = engineClient ? (*(void ***)engineClient)[kClientNetChannelIndex] : nullptr;
+		if (CodeStartsWith(candidate, clientGetter, 9))
+			m_ClientNetChannelGetter = candidate;
+
+		// IVEngineServer::GetPlayerNetInfo: if (index < 1 ...) on its argument first
+		const int serverGetter[] = { 0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x08, 0x83, 0xF8, 0x01, 0x7C };
+		candidate = m_EngineServer ? (*(void ***)m_EngineServer)[kServerNetChannelIndex] : nullptr;
+		if (CodeStartsWith(candidate, serverGetter, 10))
+			m_ServerNetChannelGetter = candidate;
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		m_StringCmdVtable = nullptr;
+	}
+
+	Diagnostics::Log("pose relay: unreliable commands: message %s, client channel %s, server channels %s", m_StringCmdVtable ? "found" : "not found",
+		m_ClientNetChannelGetter ? "found" : "not found", m_ServerNetChannelGetter ? "found" : "not found");
+}
+
+// Sends a console command to the other side of the channel in the next packet, not in the reliable stream. False if it
+// can't, and the caller sends it the usual way.
+bool PoseRelay::SendUnreliable(void *netChannel, const char *command)
+{
+	if (!netChannel || !m_StringCmdVtable || m_UnreliableBroken)
+		return false;
+
+	__try
+	{
+		void *sendNetMsg = (*(void ***)netChannel)[kSendNetMsgIndex];
+		if (!m_SendNetMsgChecked)
+		{
+			m_SendNetMsgChecked = true;
+			if (LooksLikeSendNetMsg(sendNetMsg))
+				m_SendNetMsg = sendNetMsg;
+			else
+				Diagnostics::Log("pose relay: INetChannel::SendNetMsg isn't where it was expected, poses go with the reliable commands");
+		}
+		if (!m_SendNetMsg || sendNetMsg != m_SendNetMsg)
+			return false;
+
+		alignas(8) uint8_t message[kStringCmdSize] = {};
+		*(void **)message = m_StringCmdVtable;
+		message[kStringCmdReliableOffset] = 0;
+		*(const char **)(message + kStringCmdTextOffset) = command;
+		((tSendNetMsg)m_SendNetMsg)(netChannel, message, false, false);
+		return true;
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		m_UnreliableBroken = true;
+		Diagnostics::Log("pose relay: sending in the unreliable part of the packets failed, poses go with the reliable commands");
+		return false;
+	}
+}
+
+bool PoseRelay::SendToServerUnreliable(const char *command)
+{
+	if (!m_ClientNetChannelGetter || !m_Game->m_EngineClient)
+		return false;
+	return SendUnreliable(((tClientNetChannel)m_ClientNetChannelGetter)(m_Game->m_EngineClient), command);
+}
+
+bool PoseRelay::SendToClientUnreliable(int playerIndex, const char *command)
+{
+	if (!m_ServerNetChannelGetter || !m_EngineServer)
+		return false;
+	return SendUnreliable(((tServerNetChannel)m_ServerNetChannelGetter)(m_EngineServer, playerIndex), command);
+}
+
 void PoseRelay::OnLeftItemReceived(int playerIndex, int itemIndex)
 {
 	if (playerIndex != m_Game->m_EngineClient->GetLocalPlayer())
@@ -334,7 +514,62 @@ void PoseRelay::OnLeftItemReceived(int playerIndex, int itemIndex)
 
 void PoseRelay::OnDualTest(const char *action)
 {
+	// remotepose_<player>: that player (a bot) is drawn for 20 s as if it were a VR player sending its arms
+	int player = 0;
+	if (sscanf_s(action, "remotepose_%d", &player) == 1)
+	{
+		m_TestPosePlayer = player >= 1 && player <= 32 ? player : 0;
+		m_TestPoseUntilMs = NowMs() + 20000;
+		Diagnostics::Log("dual test: player %d is drawn with arms from test poses for 20 s", m_TestPosePlayer);
+		return;
+	}
+
 	m_Game->m_VR->DualWieldTest(action);
+}
+
+// The test poses: both hands in front of the player, the right one going round in a small circle and aiming where the
+// player looks, as a VR player would send them. They go straight to OnPoseReceived, without the server.
+void PoseRelay::UpdateTestPose()
+{
+	if (m_TestPosePlayer <= 0)
+		return;
+	if (NowMs() > m_TestPoseUntilMs || m_TestPosePlayer == m_Game->m_EngineClient->GetLocalPlayer())
+	{
+		Diagnostics::Log("dual test: the test poses of player %d ended", m_TestPosePlayer);
+		m_TestPosePlayer = 0;
+		return;
+	}
+
+	const double now = NowMsPrecise();
+	if (now < m_NextTestPoseMs)
+		return;
+	m_NextTestPoseMs = now + kSendIntervalMs;
+
+	float pitch = 0.0f, yaw = 0.0f;
+	if (!m_Game->m_VR->GetPlayerEyeAngles(m_Game->GetClientEntity(m_TestPosePlayer), pitch, yaw))
+		yaw = 0.0f;
+
+	Vec3 forward, right;
+	YawBasis(yaw, forward, right);
+	const Vec3 up(0.0f, 0.0f, 1.0f);
+	const float turn = (float)(now / 1000.0 * 3.14159265 * 2.0 * 0.5); // half a turn per second
+	const Vec3 rightWrist = forward * 14.0f + right * 6.0f - up * 14.0f + (right * cosf(turn) + up * sinf(turn)) * 4.0f;
+	const Vec3 leftWrist = forward * 12.0f - right * 8.0f - up * 16.0f;
+	const QAngle level(0.0f, yaw, 0.0f);
+
+	l4d2vr_pose::WirePacket packet;
+	packet.versionAndValidMask = (uint8_t)((l4d2vr_pose::kVersion << 4) | l4d2vr_pose::kValidMask);
+	packet.featureMask = l4d2vr_pose::kFeatureBodyYaw;
+	packet.handStateFlags = l4d2vr_pose::kHandStateRightNativeFingerAnimation | l4d2vr_pose::kHandStateLeftNativeFingerAnimation;
+	packet.bodyYaw = PackAngle(yaw);
+	PackPoint(Vec3(), level, yaw, packet.hmd);
+	PackPoint(rightWrist, level, yaw, packet.rightHand);
+	PackPoint(leftWrist, level, yaw, packet.leftHand);
+	l4d2vr_pose::FinalizePacket(packet);
+
+	std::string payload;
+	if (l4d2vr_pose::EncodePayload(packet, payload))
+		OnPoseReceived(m_TestPosePlayer, (uint16_t)(unsigned long long)now, payload.c_str());
 }
 
 void PoseRelay::Reset()
@@ -351,7 +586,10 @@ void PoseRelay::Reset()
 		player.useAimUntil = 0;
 	}
 	for (Remote &remote : m_Remotes)
+	{
 		remote.valid = false;
+		remote.playout.Reset();
+	}
 	m_RemoteCount = 0;
 	DualWield::ServerReset();
 }
@@ -368,6 +606,8 @@ void PoseRelay::Update(VR *vr, C_BasePlayer *localPlayer)
 	if (!localPlayer)
 		return;
 
+	UpdateTestPose();
+
 	const unsigned long long now = NowMs();
 
 	if (!m_ServerCapable)
@@ -379,6 +619,12 @@ void PoseRelay::Update(VR *vr, C_BasePlayer *localPlayer)
 			char hello[32];
 			snprintf(hello, sizeof(hello), "l4d2vr_pose_hello %u", (unsigned)l4d2vr_pose::kVersion);
 			m_Game->m_EngineClient->ServerCmd(hello, true);
+		}
+		else if (m_HelloAttempts == kMaxHelloAttempts && now - m_LastHelloMs >= kHelloIntervalMs)
+		{
+			++m_HelloAttempts;
+			Diagnostics::Log("pose relay: the server didn't answer: it doesn't have the mod, or has another version of it (protocol %u here)",
+				(unsigned)l4d2vr_pose::kVersion);
 		}
 		return;
 	}
@@ -409,9 +655,11 @@ void PoseRelay::Update(VR *vr, C_BasePlayer *localPlayer)
 		return;
 	}
 
-	if (now - m_LastSendMs < kSendIntervalMs)
+	// 30 per second, in step with the frames: a pose every 3 frames at 90 per second
+	const double nowPrecise = NowMsPrecise();
+	if (nowPrecise < m_NextSendMs)
 		return;
-	m_LastSendMs = now;
+	m_NextSendMs = nowPrecise - m_NextSendMs > kSendIntervalMs ? nowPrecise + kSendIntervalMs : m_NextSendMs + kSendIntervalMs;
 
 	// Positions are relative to the camera's origin. The receiver only uses the hands relative to the head, so any point
 	// that moves with the player works, and this one doesn't need to be read from the entity.
@@ -461,9 +709,18 @@ void PoseRelay::Update(VR *vr, C_BasePlayer *localPlayer)
 	if (!l4d2vr_pose::EncodePayload(packet, payload))
 		return;
 
+	// The sequence is the sender's clock in milliseconds: the receivers show the poses in the rhythm they were made in
 	char command[192];
-	snprintf(command, sizeof(command), "l4d2vr_pose_upload %u %s", (unsigned)++m_Sequence, payload.c_str());
-	m_Game->m_EngineClient->ServerCmd(command, false);
+	snprintf(command, sizeof(command), "l4d2vr_pose_upload %u %s", (unsigned)(uint16_t)(unsigned long long)nowPrecise, payload.c_str());
+	const bool unreliable = SendToServerUnreliable(command);
+	if (!unreliable)
+		m_Game->m_EngineClient->ServerCmd(command, false);
+
+	if (!m_LoggedUploadPath)
+	{
+		m_LoggedUploadPath = true;
+		Diagnostics::Log("pose relay: this player's poses go %s", unreliable ? "in the unreliable part of the packets" : "with the reliable commands");
+	}
 }
 
 bool PoseRelay::SendToClient(edict_t *edict, const char *command)
@@ -645,10 +902,18 @@ bool PoseRelay::HandleServerCommand(edict_t *player, const void *commandObject)
 			client.introduced = true;
 			client.haveSequence = false;
 			client.lastUploadMs = nowMs;
+			client.forwardTokens = kForwardBurst;
+			client.lastRefillUs = NowUs();
 
 			char ack[32];
 			snprintf(ack, sizeof(ack), "l4d2vr_pose_ack %u\n", (unsigned)l4d2vr_pose::kVersion);
 			SendToClient(player, ack);
+		}
+		else if (!client.loggedOtherVersion)
+		{
+			client.loggedOtherVersion = true;
+			Diagnostics::Log("pose relay: player %d has another version of the mod (protocol %s, this one %u): no poses to or from them", index,
+				args.Arg(1), (unsigned)l4d2vr_pose::kVersion);
 		}
 		return true;
 	}
@@ -656,15 +921,20 @@ bool PoseRelay::HandleServerCommand(edict_t *player, const void *commandObject)
 	if (!client.introduced || args.Count() != 3)
 		return true;
 
+	// The sequence is the sender's clock: after a pause it can be anything
 	const uint16_t sequence = (uint16_t)atoi(args.Arg(1));
-	if (client.haveSequence && !l4d2vr_pose::IsSequenceNewer(sequence, client.lastSequence))
+	const bool newStream = nowMs - client.lastUploadMs > kNewStreamMs;
+	if (client.haveSequence && !newStream && !l4d2vr_pose::IsSequenceNewer(sequence, client.lastSequence))
 		return true;
 
-	// A client can't make the server decode or forward more than this
+	// A client can't make the server decode or forward more than this. Poses that come together (in one packet) are
+	// all forwarded, so none of the motion is lost.
 	const unsigned long long nowUs = NowUs();
-	if (client.lastDecodeUs != 0 && nowUs - client.lastDecodeUs < kMinDecodeIntervalUs)
+	client.forwardTokens = std::min(kForwardBurst, client.forwardTokens + (nowUs - client.lastRefillUs) * (kForwardRate / 1000000.0));
+	client.lastRefillUs = nowUs;
+	if (client.forwardTokens < 1.0)
 		return true;
-	client.lastDecodeUs = nowUs;
+	client.forwardTokens -= 1.0;
 
 	l4d2vr_pose::WirePacket packet;
 	const char *payload = args.Arg(2);
@@ -693,7 +963,15 @@ bool PoseRelay::HandleServerCommand(edict_t *player, const void *commandObject)
 			continue;
 		}
 
-		SendToClient(recipient.edict, relayed);
+		const bool unreliable = SendToClientUnreliable(i, relayed);
+		if (!unreliable)
+			SendToClient(recipient.edict, relayed);
+
+		if (!m_LoggedForwardPath)
+		{
+			m_LoggedForwardPath = true;
+			Diagnostics::Log("pose relay: the server forwards poses %s", unreliable ? "in the unreliable part of the packets" : "with the reliable commands");
+		}
 	}
 
 	return true;
@@ -783,8 +1061,6 @@ void PoseRelay::OnPoseReceived(int playerIndex, uint16_t sequence, const char *p
 		return;
 
 	Remote &remote = m_Remotes[playerIndex];
-	if (remote.valid && !l4d2vr_pose::IsSequenceNewer(sequence, remote.sequence) && NowMs() - remote.receivedMs < 2000)
-		return;
 
 	const uint8_t validMask = l4d2vr_pose::PacketValidMask(packet);
 	const uint8_t features = l4d2vr_pose::PacketFeatureMask(packet);
@@ -805,23 +1081,50 @@ void PoseRelay::OnPoseReceived(int playerIndex, uint16_t sequence, const char *p
 	for (int finger = 0; finger < HandRig::FingerCount; ++finger)
 		frame.leftCurls[finger] = packet.leftFingerCurls[finger] * (l4d2vr_pose::kFingerCurlMaximum / 255.0f);
 
+	// Out of order or twice: dropped
+	if (!remote.playout.Add(sequence, NowMsPrecise(), frame))
+		return;
+
 	const unsigned long long now = NowMs();
-	if (remote.valid)
+	if (!remote.valid)
 	{
-		remote.previous = remote.latest;
-		remote.havePrevious = true;
-		remote.intervalMs = std::clamp((float)(now - remote.receivedMs), 10.0f, 120.0f);
-	}
-	else
-	{
-		remote.havePrevious = false;
 		++m_RemoteCount;
+		remote.receivedSinceReport = 0;
+		remote.reportedMs = now;
+		Diagnostics::Log("pose relay: receiving the poses of player %d", playerIndex);
 	}
 
 	remote.valid = true;
-	remote.sequence = sequence;
-	remote.latest = frame;
 	remote.receivedMs = now;
+	++remote.receivedSinceReport;
+
+	if (now - remote.reportedMs >= kReportIntervalMs)
+	{
+		Diagnostics::Log("pose relay: player %d: %.1f poses per second, shown %.0f ms behind the newest, %.0f ms of jitter", playerIndex,
+			remote.receivedSinceReport * 1000.0 / (double)(now - remote.reportedMs), remote.playout.DelayBehindNewestMs(), remote.playout.JitterMs());
+		remote.receivedSinceReport = 0;
+		remote.reportedMs = now;
+	}
+}
+
+namespace
+{
+	PoseRelay::Frame BlendFrames(const PoseRelay::Frame &a, const PoseRelay::Frame &b, float t)
+	{
+		// What isn't a position (which hands it has, whether the left one is on the weapon) from the nearest one
+		PoseRelay::Frame out = t < 0.5f ? a : b;
+		out.head = BlendPoint(a.head, b.head, t);
+		if (a.hasLeftHand && b.hasLeftHand)
+			out.leftWrist = BlendPoint(a.leftWrist, b.leftWrist, t);
+		if (a.hasRightHand && b.hasRightHand)
+			out.rightWrist = BlendPoint(a.rightWrist, b.rightWrist, t);
+		if (a.hasLeftCurls && b.hasLeftCurls)
+		{
+			for (int finger = 0; finger < HandRig::FingerCount; ++finger)
+				out.leftCurls[finger] = a.leftCurls[finger] + (b.leftCurls[finger] - a.leftCurls[finger]) * t;
+		}
+		return out;
+	}
 }
 
 bool PoseRelay::GetPose(int playerIndex, Frame &out)
@@ -833,49 +1136,48 @@ bool PoseRelay::GetPose(int playerIndex, Frame &out)
 	if (!remote.valid)
 		return false;
 
-	const unsigned long long now = NowMs();
-	if (now - remote.receivedMs > kStaleMs)
+	if (NowMs() - remote.receivedMs > kStaleMs)
 	{
 		remote.valid = false;
+		remote.playout.Reset();
 		--m_RemoteCount;
 		return false;
 	}
 
-	if (!remote.havePrevious)
-	{
-		out = remote.latest;
-		return true;
-	}
+	const Frame *a = nullptr, *b = nullptr;
+	float t = 0.0f;
+	if (!remote.playout.Sample(NowMsPrecise(), a, b, t))
+		return false;
 
-	// Shown one packet late, moving smoothly from the one before to the last one
-	const float t = std::clamp((float)(now - remote.receivedMs) / remote.intervalMs, 0.0f, 1.0f);
-	out = remote.latest;
-	out.head = BlendPoint(remote.previous.head, remote.latest.head, t);
-	out.leftWrist = BlendPoint(remote.previous.leftWrist, remote.latest.leftWrist, t);
-	out.rightWrist = BlendPoint(remote.previous.rightWrist, remote.latest.rightWrist, t);
-	for (int finger = 0; finger < HandRig::FingerCount; ++finger)
-		out.leftCurls[finger] = remote.previous.leftCurls[finger] + (remote.latest.leftCurls[finger] - remote.previous.leftCurls[finger]) * t;
+	out = BlendFrames(*a, *b, t);
 	return true;
 }
 
-void PoseRelay::SetWeaponDelta(int playerIndex, const Mat34 &delta)
+void PoseRelay::SetWeaponHold(int playerIndex, const WeaponHold &hold)
 {
 	if (playerIndex < 1 || playerIndex >= kMaxPlayers)
 		return;
 
-	m_Remotes[playerIndex].weaponDelta = delta;
-	m_Remotes[playerIndex].weaponDeltaMs = NowMs();
+	m_Remotes[playerIndex].weaponHold = hold;
+	m_Remotes[playerIndex].weaponHoldMs = NowMs();
 }
 
-bool PoseRelay::GetWeaponDelta(int playerIndex, Mat34 &delta) const
+// The hand isn't moved (no right hand in the pose): the weapon stays where the game's animation has it, like the hand
+void PoseRelay::ClearWeaponHold(int playerIndex)
+{
+	if (playerIndex >= 1 && playerIndex < kMaxPlayers)
+		m_Remotes[playerIndex].weaponHoldMs = 0;
+}
+
+bool PoseRelay::GetWeaponHold(int playerIndex, WeaponHold &hold) const
 {
 	if (playerIndex < 1 || playerIndex >= kMaxPlayers)
 		return false;
 
 	const Remote &remote = m_Remotes[playerIndex];
-	if (!remote.valid || NowMs() - remote.weaponDeltaMs > kStaleMs)
+	if (!remote.valid || NowMs() - remote.weaponHoldMs > kStaleMs)
 		return false;
 
-	delta = remote.weaponDelta;
+	hold = remote.weaponHold;
 	return true;
 }

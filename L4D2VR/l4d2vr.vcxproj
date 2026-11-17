@@ -454,6 +454,7 @@
     <ClInclude Include="sdk\trace.h" />
     <ClInclude Include="sdk\vector.h" />
     <ClInclude Include="haptics.h" />
+    <ClInclude Include="pose_playout.h" />
     <ClInclude Include="pose_relay.h" />
     <ClInclude Include="reload_logic.h" />
     <ClInclude Include="body_layout.h" />

@@ -379,6 +379,7 @@ public:
 	struct HandModel
 	{
 		HandRig rig;
+		int weaponBone = -1;   // "weapon_bone" of other players' models, where the game merges their weapon
 		bool valid = false;
 	};
 	std::unordered_map<const void *, HandModel> m_HandModels;
@@ -711,6 +712,8 @@ public:
 	int GetInventory(C_BasePlayer *player, InventoryItem *items, int max);
 	const void *GetEntityModel(const void *entity);
 	const void *GetWorldModel(const void *weapon);
+	bool GetPlayerEyeAngles(const void *player, float &pitch, float &yaw);
+	bool HasOwnerEntity(const void *entity);
 	void LogDoors(const HandMath::Vec3 &from);
 	int GetChestSpotAt(const HandMath::Vec3 &handWorld) const;
 	bool IsAtHolster(const HandMath::Vec3 &fist) const;

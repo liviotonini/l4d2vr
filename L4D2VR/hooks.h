@@ -187,6 +187,7 @@ public:
 	static inline std::unordered_map<const void *, ModelKind> m_ModelKinds;
 	static ModelKind GetModelKind(const void *model);
 	static inline bool m_LoggedArmsDraw = false;
+	static inline bool m_LoggedWeaponWithoutBones = false;
 
 	// Models of what the player carries, drawn with the weapon (VR::DrawBodyModels): DrawModel is asked to draw them,
 	// and dDrawModelExecute gives them their place

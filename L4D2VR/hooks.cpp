@@ -997,6 +997,15 @@ void Hooks::DrawModelForVR(void *ecx, void *state, const ModelRenderInfo_t &info
 		}
 	}
 
+	// Without the bones in the draw call a weapon can't be moved into another player's hand (it never happened so far)
+	if (!pCustomBoneToWorld && kind == ModelKind::WorldWeapon && !m_LoggedWeaponWithoutBones && m_Game->m_PoseRelay->HasRemotePlayers())
+	{
+		m_LoggedWeaponWithoutBones = true;
+		const void *studioHeader = *(const void **)state;
+		Diagnostics::Log("remote players: %s is drawn without its bones in the draw call, it doesn't follow the hand",
+			Studio::IsValid(studioHeader) ? Studio::ModelName(studioHeader) : "a weapon");
+	}
+
 	if (pCustomBoneToWorld && kind != ModelKind::Other && kind != ModelKind::Viewmodel && kind != ModelKind::DualPistolsViewmodel)
 	{
 		Diagnostics::ScopedTimer timer(Diagnostics::Section_Models);

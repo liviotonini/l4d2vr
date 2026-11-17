@@ -116,6 +116,8 @@ namespace
 	int g_UpgradeBitsOffset = -1;
 	// The player's top speed (DT_BasePlayer)
 	int g_MaxSpeedOffset = -1;
+	// Where a player looks, as the game has it (DT_TerrorPlayer, pitch and yaw): what its animation aims the weapon at
+	int g_EyeAnglesOffset = -1;
 	bool g_NetvarsLookedUp = false;
 
 	bool HasPlayerClass(const ClientClass *clientClass)
@@ -174,9 +176,14 @@ namespace
 			FindPlayerProp(classes, "m_hOwnerEntity", g_OwnerOffset, unused);
 			FindClassProp(classes, "CPistol", "m_iWorldModelIndex", g_WorldModelIndexOffset, unused);
 			FindClassProp(classes, "CPistol", "m_upgradeBitVec", g_UpgradeBitsOffset, unused);
+
+			int pitchOffset = -1, yawOffset = -1;
+			if (FindPlayerProp(classes, "m_angEyeAngles[0]", pitchOffset, unused) && FindPlayerProp(classes, "m_angEyeAngles[1]", yawOffset, unused)
+				&& pitchOffset > 0 && yawOffset == pitchOffset + 4)
+				g_EyeAnglesOffset = pitchOffset;
 		}
-		Diagnostics::Log("body items: m_nModelIndex at 0x%X, m_hOwnerEntity at 0x%X, m_iWorldModelIndex at 0x%X", g_ModelIndexOffset, g_OwnerOffset,
-			g_WorldModelIndexOffset);
+		Diagnostics::Log("body items: m_nModelIndex at 0x%X, m_hOwnerEntity at 0x%X, m_iWorldModelIndex at 0x%X, m_angEyeAngles at 0x%X", g_ModelIndexOffset,
+			g_OwnerOffset, g_WorldModelIndexOffset, g_EyeAnglesOffset);
 
 		if (foundAmmo && ammoOffset == kClientAmmoArrayOffset && foundWeapons && weaponsCount > 0 && weaponsCount <= 64)
 		{
@@ -783,6 +790,27 @@ const void *VR::GetWorldModel(const void *weapon)
 	const int modelIndex = Read<int>(weapon, g_WorldModelIndexOffset);
 	const void *model = modelIndex > 0 && modelIndex < 0x10000 ? m_Game->m_ModelInfo->GetModel(modelIndex) : nullptr;
 	return model ? model : GetEntityModel(weapon);
+}
+
+// Someone carries the entity (m_hOwnerEntity): weapons lying in the world have nobody. True if it can't be told.
+bool VR::HasOwnerEntity(const void *entity)
+{
+	if (!g_NetvarsLookedUp)
+		LookUpNetvars(m_Game);
+	return !entity || g_OwnerOffset < 0 || IsValidHandle(Read<int>(entity, g_OwnerOffset));
+}
+
+// Where a player looks as the game has it (other players' too, interpolated like their models), false if it can't be
+// read or looks wrong
+bool VR::GetPlayerEyeAngles(const void *player, float &pitch, float &yaw)
+{
+	if (!g_NetvarsLookedUp)
+		LookUpNetvars(m_Game);
+	if (!player || g_EyeAnglesOffset < 0)
+		return false;
+	pitch = Read<float>(player, g_EyeAnglesOffset);
+	yaw = Read<float>(player, g_EyeAnglesOffset + 4);
+	return std::isfinite(pitch) && std::isfinite(yaw) && fabsf(pitch) <= 360.0f && fabsf(yaw) <= 3600.0f;
 }
 
 namespace

@@ -11,7 +11,10 @@
 namespace l4d2vr_pose
 {
     constexpr std::uint8_t kMagic = 0xB7u;
-    constexpr std::uint8_t kVersion = 2u;
+    // 3: the sequence number sent with each packet is the sender's clock in
+    // milliseconds (16 bits), and packets go in the unreliable part of the
+    // network packets. Players with another version don't exchange poses.
+    constexpr std::uint8_t kVersion = 3u;
 
     constexpr std::uint8_t kValidHmd = 1u << 0;
     constexpr std::uint8_t kValidLeftHand = 1u << 1;
@@ -72,12 +75,12 @@ namespace l4d2vr_pose
 #pragma pack(pop)
 
     static_assert(sizeof(PackedTrackedPose) == 12, "Unexpected VR pose transform size.");
-    static_assert(sizeof(WirePacket) == 54, "VR pose protocol 2 wire packet must be 54 bytes.");
+    static_assert(sizeof(WirePacket) == 54, "VR pose wire packet must be 54 bytes.");
 
     constexpr std::size_t kWirePacketBytes = sizeof(WirePacket);
     constexpr std::size_t kEncodedPayloadChars =
         (kWirePacketBytes * 8u + 5u) / 6u;
-    static_assert(kEncodedPayloadChars == 72u, "Unexpected protocol 2 payload length.");
+    static_assert(kEncodedPayloadChars == 72u, "Unexpected pose payload length.");
 
     inline std::uint8_t PacketVersion(const WirePacket& packet)
     {

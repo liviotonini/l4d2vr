@@ -1,7 +1,10 @@
+#include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <string>
 #include <vector>
 #include "../L4D2VR/vr_pose_protocol.h"
+#include "../L4D2VR/pose_playout.h"
 #include "../L4D2VR/hand_rig.h"
 #include "test_common.h"
 
@@ -168,8 +171,163 @@ namespace
 	}
 }
 
+namespace
+{
+	struct Shown
+	{
+		double at;     // real time, ms
+		double value;  // the real time the shown pose was sent at
+	};
+
+	// A stream through the playout buffer: the sender sends every `interval` ms (its clock starting at `senderStart`), each
+	// pose sent at real time s arrives at deliver(s, k) (negative: lost), the receiver (its clock at `receiverStart`)
+	// samples 90 times per second. The pose's value is the real time it was sent at.
+	template <typename Deliver>
+	std::vector<Shown> Play(double interval, double from, double to, double senderStart, double receiverStart, Deliver deliver,
+		PosePlayout::Buffer<double> &buffer)
+	{
+		struct Packet { double arrival; double sent; };
+		std::vector<Packet> packets;
+		int k = 0;
+		for (double sent = from; sent < to; sent += interval, ++k)
+		{
+			const double arrival = deliver(sent, k);
+			if (arrival >= 0.0)
+				packets.push_back({ arrival, sent });
+		}
+		std::stable_sort(packets.begin(), packets.end(), [](const Packet &a, const Packet &b) { return a.arrival < b.arrival; });
+
+		std::vector<Shown> shown;
+		size_t next = 0;
+		for (double now = from; now < to + 500.0; now += 1000.0 / 90.0)
+		{
+			for (; next < packets.size() && packets[next].arrival <= now; ++next)
+			{
+				const uint16_t senderClock = (uint16_t)(long long)std::floor(senderStart + packets[next].sent);
+				buffer.Add(senderClock, receiverStart + packets[next].arrival, packets[next].sent);
+			}
+
+			const double *a = nullptr, *b = nullptr;
+			float t = 0.0f;
+			if (buffer.Sample(receiverStart + now, a, b, t))
+				shown.push_back({ now, *a + (*b - *a) * t });
+		}
+		return shown;
+	}
+
+	struct PlayStats
+	{
+		bool backwards = false;
+		int frames = 0;
+		int uneven = 0;       // frames where it moved much more or less than real time
+		double maxDelay = 0.0;
+	};
+
+	PlayStats Measure(const std::vector<Shown> &shown, double from, double to)
+	{
+		PlayStats stats;
+		const double frame = 1000.0 / 90.0;
+		for (size_t i = 1; i < shown.size(); ++i)
+		{
+			if (shown[i].at < from || shown[i].at > to)
+				continue;
+			const double step = shown[i].value - shown[i - 1].value;
+			if (step < -0.001)
+				stats.backwards = true;
+			if (step < frame * 0.72 || step > frame * 1.08)
+				++stats.uneven;
+			++stats.frames;
+			stats.maxDelay = std::max(stats.maxDelay, shown[i].at - shown[i].value);
+		}
+		return stats;
+	}
+
+	unsigned g_Random = 12345;
+	double Random01()
+	{
+		g_Random = g_Random * 1103515245u + 12345u;
+		return ((g_Random >> 8) & 0xFFFF) / 65536.0;
+	}
+
+	void TestPlayout()
+	{
+		printf("pose playback\n");
+		const double interval = 1000.0 / 30.0;
+
+		{
+			// Bunched like the reliable stream did: what was sent arrives together, every 100 ms, 50 ms late
+			PosePlayout::Buffer<double> buffer;
+			const auto shown = Play(interval, 0.0, 6000.0, 1234.0, 50000.0,
+				[](double sent, int) { return std::ceil((sent + 50.0) / 100.0) * 100.0; }, buffer);
+			const PlayStats stats = Measure(shown, 1500.0, 6000.0);
+			CHECK(stats.frames > 300);
+			CHECK(!stats.backwards);
+			CHECK(stats.uneven == 0);
+			CHECK(stats.maxDelay < 260.0);
+		}
+
+		{
+			// Every pose on time, 30 ms late: shown with little more delay than the time between two poses
+			PosePlayout::Buffer<double> buffer;
+			const auto shown = Play(interval, 0.0, 4000.0, 0.0, 0.0, [](double sent, int) { return sent + 30.0; }, buffer);
+			const PlayStats stats = Measure(shown, 1000.0, 4000.0);
+			CHECK(!stats.backwards);
+			CHECK(stats.uneven == 0);
+			CHECK(stats.maxDelay < 30.0 + interval + 10.0);
+		}
+
+		{
+			// Jitter of 50 ms, 15% lost, some out of order (dropped). The sender's clock wraps around 16 bits meanwhile.
+			PosePlayout::Buffer<double> buffer;
+			g_Random = 777;
+			const auto shown = Play(interval, 0.0, 8000.0, 65536.0 - 3000.0, 1e7,
+				[](double sent, int) { const double lost = Random01(); const double late = Random01() * 50.0; return lost < 0.15 ? -1.0 : sent + 40.0 + late; },
+				buffer);
+			const PlayStats stats = Measure(shown, 1500.0, 8000.0);
+			CHECK(stats.frames > 500);
+			CHECK(!stats.backwards);
+			CHECK(stats.uneven <= stats.frames / 50);
+			CHECK(stats.maxDelay < 40.0 + 50.0 + 3 * interval + 20.0);
+		}
+
+		{
+			// A pause of 3 s: a new stream after it, also when the sender's clock went back (the game restarted)
+			PosePlayout::Buffer<double> buffer;
+			auto shown = Play(interval, 0.0, 2000.0, 100.0, 0.0, [](double sent, int) { return sent + 40.0; }, buffer);
+			CHECK(!shown.empty() && shown.back().value > 1900.0);
+			shown = Play(interval, 5000.0, 7000.0, 100.0, 0.0, [](double sent, int) { return sent + 40.0; }, buffer);
+			PlayStats stats = Measure(shown, 5500.0, 7000.0);
+			CHECK(!stats.backwards);
+			CHECK(stats.uneven == 0);
+			CHECK(stats.maxDelay < 40.0 + interval + 10.0);
+			shown = Play(interval, 9000.0, 11000.0, -8000.0, 0.0, [](double sent, int) { return sent + 40.0; }, buffer);
+			stats = Measure(shown, 9500.0, 11000.0);
+			CHECK(stats.frames > 100);
+			CHECK(!stats.backwards);
+			CHECK(stats.maxDelay < 40.0 + interval + 10.0);
+		}
+
+		{
+			// The same pose twice or an older one: ignored
+			PosePlayout::Buffer<double> buffer;
+			CHECK(buffer.Add(100, 0.0, 1.0));
+			CHECK(!buffer.Add(100, 1.0, 2.0));
+			CHECK(!buffer.Add(90, 2.0, 3.0));
+			CHECK(buffer.Add(133, 3.0, 4.0));
+			CHECK(!buffer.Add(2, 4.0, 5.0));        // far older without a pause: out of order
+			CHECK(!buffer.Add(65530, 5.0, 6.0));    // older across the wrap
+			const double *a = nullptr, *b = nullptr;
+			float t = 0.0f;
+			CHECK(buffer.Sample(10.0, a, b, t));
+			buffer.Reset();
+			CHECK(!buffer.Sample(10.0, a, b, t));
+		}
+	}
+}
+
 void RunPoseTests()
 {
 	TestProtocol();
 	TestArmSolver();
+	TestPlayout();
 }
