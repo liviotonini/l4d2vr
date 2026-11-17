@@ -942,8 +942,10 @@ void Hooks::DrawModelForVR(void *ecx, void *state, const ModelRenderInfo_t &info
 	// The left hand's item being used: the game holds it in its weapon hand, put at the left controller. The mod draws it
 	// in the left hand instead (VR::GetLeftItemDraw), and the right hand empty (BuildFirstPersonHands). The weapon the
 	// game puts away or takes out meanwhile isn't drawn either.
-	// The right hand empty: its weapon is put away, the game's one is there only to draw the hands with (EmptyRightHand)
-	if ((kind == ModelKind::Viewmodel || kind == ModelKind::DualPistolsViewmodel) && (m_VR->m_LeftUseActive || m_VR->m_RightHandEmpty))
+	// The right hand empty: its weapon is put away, the game's one is there only to draw the hands with (EmptyRightHand).
+	// Its weapon is put aside too while it has the left hand's gun's magazine (ReloadNeedsFreeHand off), as the left
+	// hand's item is while that hand reloads.
+	if ((kind == ModelKind::Viewmodel || kind == ModelKind::DualPistolsViewmodel) && (m_VR->m_LeftUseActive || m_VR->m_RightHandEmpty || m_VR->m_RightMagazine))
 		return;
 
 	// l4d2vr_dual_test vmgrip: how the weapon's animation holds it, relative to the right hand (to hold it the same way in

@@ -644,6 +644,118 @@ namespace
 			r.grip(false);
 		}
 	}
+
+	// A hand holding something of its own (the other hand's weapon, an item), ReloadNeedsFreeHand on and off
+	void TestBusyHand()
+	{
+		printf("manual reload: a hand holding something\n");
+
+		// Only a free hand reloads: nothing is started, not the magazine, the bag or the bolt
+		{
+			Rig r(0, 30, 100, false);
+			r.in.handFree = false;
+			r.in.onlyFreeHand = true;
+			r.step();
+			CHECK(r.machine.NeedsCycle());
+			r.moveTo(kSocket);
+			r.grip(true);
+			CHECK(r.machine.GetState() == State::Idle);
+			CHECK(!r.machine.HandIsBusy()); // free to do what the grab does otherwise
+			r.grip(false);
+			r.moveTo(kWaist);
+			r.grip(true);
+			CHECK(r.machine.GetState() == State::Idle);
+			r.grip(false);
+			r.moveTo(kBolt);
+			r.trigger(true);
+			CHECK(r.machine.GetState() == State::Idle);
+			r.trigger(false);
+
+			// Empty again, it does
+			r.in.handFree = true;
+			r.moveTo(kSocket);
+			r.grip(true);
+			CHECK(r.machine.GetState() == State::HoldingOld);
+			r.moveTo(kSocket + Vec3(0.0f, 0.0f, -8.0f));
+			r.grip(false);
+			CHECK(r.machine.GetState() == State::NeedFresh);
+
+			// A magazine out stays out while the hand holds something
+			r.in.handFree = false;
+			r.moveTo(kWaist);
+			r.grip(true);
+			CHECK(r.machine.GetState() == State::NeedFresh);
+			r.grip(false);
+		}
+
+		// A pump held with both hands is worked anyway
+		{
+			Rig r(8, 8, 50, true);
+			r.in.pumpEveryShot = true;
+			r.in.handFree = false;
+			r.in.onlyFreeHand = true;
+			r.in.clip = 7;
+			r.step();
+			CHECK(r.machine.NeedsCycle());
+			r.in.holdsPump = true;
+			r.trigger(true);
+			CHECK(r.machine.GetState() == State::HoldingBolt);
+			r.trigger(false);
+		}
+
+		// A busy hand reloads too: magazine out, a new one from the bag (shells too), in
+		{
+			Rig r(10, 30, 100, false);
+			r.in.handFree = false;
+			r.in.onlyFreeHand = false;
+			r.pullMagazineOut();
+			CHECK(r.machine.GetState() == State::NeedFresh);
+			r.moveTo(kWaist);
+			r.grip(true);
+			CHECK(r.machine.GetState() == State::HoldingFresh);
+			r.moveTo(kSocket);
+			CHECK(r.events & Event_Inserted);
+			r.grip(false);
+
+			Rig s(3, 8, 50, true);
+			s.in.handFree = false;
+			s.in.onlyFreeHand = false;
+			s.moveTo(kWaist);
+			s.grip(true);
+			CHECK(s.machine.GetState() == State::HoldingFresh);
+			s.moveTo(kSocket);
+			CHECK(s.events & Event_ShellInserted);
+			s.grip(false);
+		}
+
+		// ...but its trigger takes the bolt only when the weapon needs it: it's its own weapon's trigger otherwise
+		{
+			Rig r(5, 30, 100, false);
+			r.in.handFree = false;
+			r.in.onlyFreeHand = false;
+			r.moveTo(kBolt);
+			r.trigger(true);
+			CHECK(r.machine.GetState() == State::Idle);
+			r.trigger(false);
+
+			r.in.clip = 0;
+			r.step();
+			CHECK(r.machine.NeedsCycle());
+			r.trigger(true);
+			CHECK(r.machine.GetState() == State::HoldingBolt);
+			r.moveTo(kBolt + Vec3(-9.0f, 0.0f, 0.0f));
+			CHECK(r.events & Event_BoltPulled);
+			r.trigger(false);
+			CHECK(r.machine.GetState() == State::Idle);
+
+			// A free hand takes it any time
+			r.in.handFree = true;
+			r.moveTo(kBolt);
+			r.trigger(true);
+			CHECK(r.machine.GetState() == State::HoldingBolt);
+			r.trigger(false);
+		}
+	}
 }
 
 void RunReloadTests()
@@ -655,4 +767,5 @@ void RunReloadTests()
 	TestBoltWhileWalking();
 	TestShells();
 	TestEdges();
+	TestBusyHand();
 }

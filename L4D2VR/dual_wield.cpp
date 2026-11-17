@@ -578,7 +578,9 @@ void VR::UpdateLeftUse(unsigned long long now, int activeIndex, const InventoryI
 
 	if (!m_LeftUseActive)
 	{
-		if (pressed && LeftHandHoldsItem() && DualWield::IsLeftUseItem(m_LeftItemId) && !m_ScopeZoomTookTrigger && activeIndex != m_LeftItemIndex)
+		// Not when the trigger took the right hand's weapon's bolt (ReloadNeedsFreeHand off)
+		if (pressed && LeftHandHoldsItem() && DualWield::IsLeftUseItem(m_LeftItemId) && !m_ScopeZoomTookTrigger && activeIndex != m_LeftItemIndex
+			&& !ManualReloadHoldsBolt())
 		{
 			m_LeftUseActive = true;
 			m_LeftUseWasActive = false;

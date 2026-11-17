@@ -51,7 +51,11 @@ namespace Reload
 		int reserve = 0;
 		bool shells = false;        // loaded one by one
 		bool hasBolt = false;
-		bool handFree = true;       // the hand holds nothing of its own: only then it takes ammo from the bag
+		bool handFree = true;       // the hand holds nothing of its own
+		bool onlyFreeHand = true;   // only a free hand reloads: takes the magazine out, a new one from the bag, the bolt
+		                            // (ReloadNeedsFreeHand). Otherwise a busy hand does too, but takes the bolt only when
+		                            // the weapon needs it: its trigger is its own weapon's. A pump held with both hands is
+		                            // worked either way.
 	};
 
 	// Distances, in meters
@@ -151,6 +155,8 @@ namespace Reload
 			const bool canReload = in.capacity > 0 && in.clip < in.capacity && in.reserve > 0;
 			// The waist always gives one while there is ammo left, even with the weapon full
 			const bool canTake = in.capacity > 0 && in.reserve > 0;
+			// What the hand may start (Inputs::onlyFreeHand)
+			const bool mayReload = in.handFree || !in.onlyFreeHand;
 
 			// The weapon ran out: the bolt stays back until it's pulled
 			if (in.clip == 0 && m_LastClip != 0 && in.hasBolt && in.capacity > 0)
@@ -159,13 +165,14 @@ namespace Reload
 			if (in.pumpEveryShot && in.hasBolt && m_LastClip > 0 && in.clip < m_LastClip)
 				m_NeedsCycle = true;
 			m_LastClip = in.clip;
+			const bool mayTakeBolt = in.handFree || (mayReload && m_NeedsCycle);
 
 			unsigned events = Event_None;
 
 			switch (m_State)
 			{
 			case State::Idle:
-				if (in.hasBolt && ((in.holdsPump && in.trigger) || (triggerPressed && toBolt < kBoltGrabRadius * meters)))
+				if (in.hasBolt && ((in.holdsPump && in.trigger) || (mayTakeBolt && triggerPressed && toBolt < kBoltGrabRadius * meters)))
 				{
 					// Any time, not only when it's needed: it's seen moving either way. The hand holding the pump takes it
 					// as soon as the trigger is held, without pressing it again.
@@ -175,7 +182,7 @@ namespace Reload
 					m_BoltPulledThisGrab = false;
 					events |= Event_GrabbedBolt;
 				}
-				else if (pressed && !in.shells && canReload && toMagazine < kGrabRadius * meters)
+				else if (pressed && mayReload && !in.shells && canReload && toMagazine < kGrabRadius * meters)
 				{
 					m_State = State::HoldingOld;
 					m_MagazineOut = false;
@@ -183,7 +190,7 @@ namespace Reload
 					m_OldGrabOffset = in.palm - in.socket;
 					events |= Event_GrabbedOld;
 				}
-				else if (pressed && canTake && in.handFree && toWaist < kPouchRadius * meters)
+				else if (pressed && mayReload && canTake && toWaist < kPouchRadius * meters)
 				{
 					// One can be taken at any time. It only goes in once the old one is out.
 					m_State = State::HoldingFresh;
@@ -221,7 +228,7 @@ namespace Reload
 					m_State = State::Idle;
 					m_MagazineOut = false;
 				}
-				else if (pressed && toWaist < kPouchRadius * meters)
+				else if (pressed && mayReload && toWaist < kPouchRadius * meters)
 				{
 					m_State = State::HoldingFresh;
 					m_PressUsed = true;

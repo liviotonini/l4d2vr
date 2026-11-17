@@ -300,9 +300,9 @@ bool VR::AtLeftGunWell(const Vec3 &point) const
 	return GetTickCount64() - m_LeftGunWellMs < 250 && Length(point - m_LeftGunWell) < kMagazineWellReach * m_VRScale;
 }
 
-// The empty right hand reloads the left hand's gun (on the right grab, UpdateTracking): with the reload by hand it takes a
-// magazine (a shell) from the ammo bag, put in where the gun's goes (UpdateLeftGun); otherwise a grab there loads it.
-// True if the grab was for that.
+// The right hand reloads the left hand's gun (on the right grab, UpdateTracking), while it's empty, or holding its weapon
+// too with ReloadNeedsFreeHand off: with the reload by hand it takes a magazine (a shell) from the ammo bag, put in where
+// the gun's goes (UpdateLeftGun); otherwise a grab there loads it. True if the grab was for that.
 bool VR::TryRightReloadLeftGun()
 {
 	// With the reload by hand the right hand's grab was taken by it already (UpdateLeftGunReload)
@@ -311,7 +311,7 @@ bool VR::TryRightReloadLeftGun()
 
 	// Without it, a grab where the magazine goes loads it
 	const LeftGun::GunData *gun = LeftHandHoldsItem() ? LeftGun::Find(m_LeftItemId) : nullptr;
-	if (!m_RightHandEmpty || !gun || !LeftGunNeedsAmmo(*gun) || !AtLeftGunWell(GetFistPoint(true)))
+	if ((!m_RightHandEmpty && m_ReloadNeedsFreeHand) || !gun || !LeftGunNeedsAmmo(*gun) || !AtLeftGunWell(GetFistPoint(true)))
 		return false;
 	LoadLeftGun(*gun);
 	return true;
@@ -336,19 +336,21 @@ namespace
 // The parts are where the gun was last drawn (BuildBodyModelBones).
 void VR::UpdateLeftGunReload()
 {
-	// The mark, as on the right hand's weapon (UpdateManualReload), shown on the way out whatever that is. The right hand
-	// only reloads it while it's empty, and then the mark is this one's.
+	// The mark, as on the right hand's weapon (UpdateManualReload), shown on the way out whatever that is. It's this one's
+	// while the right hand is empty, and while this gun has one (the right hand holding its weapon reloads it only with
+	// ReloadNeedsFreeHand off); hidden here when it stops having one.
 	struct MarkerUpdate
 	{
 		VR *vr;
+		bool had = false;
 		bool show = false;
 		bool inReach = false;
 		~MarkerUpdate()
 		{
-			if (vr->m_RightHandEmpty)
+			if (vr->m_RightHandEmpty || show || had)
 				vr->UpdateBoltMarker(show, inReach, true);
 		}
-	} marker{ this };
+	} marker{ this, m_LeftMarkKind != 0 };
 	m_LeftMarkKind = 0;
 
 	m_LeftReloadTookGrab = false;
@@ -370,6 +372,7 @@ void VR::UpdateLeftGunReload()
 		m_LeftGunBoltPull = 0.0f;
 		m_LeftGunBlocked = false;
 		m_RightMagazine = false;
+		m_RightWorksLeftGun = false;
 		return;
 	}
 
@@ -381,8 +384,9 @@ void VR::UpdateLeftGunReload()
 
 	const Vec3 barrel = Normalized(Axis(frame, 2)), up = Normalized(Axis(frame, 1));
 	const Vec3 fist = GetFistPoint(true);
-	// The right hand only reloads it while it holds nothing of its own
+	// The right hand holding its own weapon reloads it only with ReloadNeedsFreeHand off (Reload::Inputs::onlyFreeHand)
 	const bool rightFree = m_RightHandEmpty;
+	const bool rightReloads = rightFree || !m_ReloadNeedsFreeHand;
 
 	Reload::Inputs in;
 	in.palm = fist;
@@ -396,8 +400,8 @@ void VR::UpdateLeftGunReload()
 	in.waist = m_WaistWorld;
 	in.unitsPerMeter = m_VRScale;
 	in.boltTravel = spec.boltTravel;
-	in.grip = rightFree && PressedDigitalAction(m_RightHandGrab);
-	in.trigger = rightFree && PressedDigitalAction(m_ActionPrimaryAttack) && !m_LeftScopeTookTrigger;
+	in.grip = PressedDigitalAction(m_RightHandGrab);
+	in.trigger = PressedDigitalAction(m_ActionPrimaryAttack) && !m_LeftScopeTookTrigger;
 	in.holdsPump = spec.everyShot && m_RightHoldsLeftGun;
 	in.pumpEveryShot = spec.everyShot;
 	in.clip = Read<int>(weapon, kClientClipOffset);
@@ -406,6 +410,7 @@ void VR::UpdateLeftGunReload()
 	in.shells = spec.shells;
 	in.hasBolt = spec.boltTravel > 0.0f;
 	in.handFree = rightFree;
+	in.onlyFreeHand = m_ReloadNeedsFreeHand;
 
 	const unsigned events = g_LeftMachine.Update(in);
 	const Reload::State state = g_LeftMachine.GetState();
@@ -414,14 +419,15 @@ void VR::UpdateLeftGunReload()
 	m_LeftGunBoltPull = g_LeftMachine.BoltPull();
 	m_LeftGunBlocked = g_LeftMachine.BlocksFire(in.clip, spec.shells);
 	m_RightMagazine = state == Reload::State::HoldingOld || state == Reload::State::HoldingFresh;
+	m_RightWorksLeftGun = state != Reload::State::Idle && state != Reload::State::NeedFresh;
 	m_LeftGunMagazineShown = !spec.shells;
-	if (state != Reload::State::Idle && state != Reload::State::NeedFresh)
+	if (m_RightWorksLeftGun)
 		m_RightHandHandledLeftGunMs = now;
 	m_RightMagazineIndex = m_LeftItemIndex;
 
 	// The mark: on the empty gun's magazine, to take it out; where the new one goes once it's out; then, if the gun ran
-	// empty, on the bolt (or the pump of a gun that isn't held by it)
-	if (m_ShowReloadMark)
+	// empty, on the bolt (or the pump of a gun that isn't held by it). Only when the right hand can do it.
+	if (m_ShowReloadMark && rightReloads)
 	{
 		const bool takeOut = !spec.shells && in.clip == 0 && in.reserve > 0 && state == Reload::State::Idle && !g_LeftMachine.MagazineIsOut();
 		const bool magazineOut = !spec.shells && g_LeftMachine.MagazineIsOut();
@@ -438,7 +444,7 @@ void VR::UpdateLeftGunReload()
 	}
 
 	// The right hand reaches the bag where it can take one: a faint tick
-	const bool atBag = rightFree && in.reserve > 0 && (state == Reload::State::Idle || state == Reload::State::NeedFresh)
+	const bool atBag = rightReloads && in.reserve > 0 && (state == Reload::State::Idle || state == Reload::State::NeedFresh)
 		&& Length(fist - m_WaistWorld) < Reload::kPouchRadius * m_VRScale;
 	if (atBag && !g_RightWasAtBag)
 		m_Haptics.Play(Haptics::Hand::WeaponHand, HapticEffects::Hint);
@@ -765,7 +771,8 @@ void VR::UpdateLeftGun(unsigned long long now)
 		if (gun)
 			LoadLeftGun(*gun);
 	}
-	const bool trigger = gun && PressedDigitalAction(m_ActionSecondaryAttack) && !m_ScopeZoomTookTrigger;
+	// Nor while the left trigger holds the right hand's weapon's bolt (ReloadNeedsFreeHand off)
+	const bool trigger = gun && PressedDigitalAction(m_ActionSecondaryAttack) && !m_ScopeZoomTookTrigger && !ManualReloadHoldsBolt();
 	const bool pressed = trigger && !m_LeftGunTriggerDown;
 	m_LeftGunTriggerDown = trigger;
 	if (!gun)

@@ -224,6 +224,8 @@ void VR::Update()
         UpdateTracking();
         UpdateBodyItems();
     }
+    // The game's laser sight goes with the right hand's weapon when that one isn't drawn (PatchLaserSightSlots)
+    m_HideRightLaser = m_RightHandEmpty || m_RightMagazine || m_LeftUseActive;
 
     {
         Diagnostics::ScopedTimer timer(Diagnostics::Section_Input);
@@ -694,9 +696,10 @@ void VR::ProcessInput()
     bool attackTrigger = m_LeftUseActive ? triggerHeld && m_LeftUseWasActive && m_ActiveWeaponId == m_LeftItemId : triggerHeld;
     if (!UpdateItemUse())
         attackTrigger = false;
-    // The right hand empty: its unseen weapon does nothing (EmptyRightHand)
+    // The right hand empty: its unseen weapon does nothing (EmptyRightHand). Neither while it holds the left hand's gun's
+    // magazine, bolt or pump, which its weapon is put aside for (ReloadNeedsFreeHand off)
     const bool rightHandEmpty = m_RightHandEmpty && !m_LeftUseActive;
-    if (rightHandEmpty)
+    if (rightHandEmpty || (m_RightWorksLeftGun && !m_LeftUseActive))
         attackTrigger = false;
     SetGameButton(GameButton_Attack, GetAttackButton(attackTrigger));
     SetGameButton(GameButton_Jump, PressedDigitalAction(m_ActionJump));
@@ -1072,7 +1075,9 @@ static bool PatchCodeBytes(uintptr_t address, const uint8_t *bytes, size_t size)
 
 // The laser sights are drawn on the primary weapons only: C_TerrorPlayer's update (around Offsets::ClientLaserSightCreate)
 // gives up, in first and in third person, when the weapon's slot (a virtual returning its script's slot) isn't 0. A pistol
-// takes a laser sight too (Hooks::dPlayerAddUpgrade): those two jumps are taken out, so any gun with one shows it.
+// takes a laser sight too (Hooks::dPlayerAddUpgrade): those two checks are taken out, so any gun with one shows it.
+// Giving up removes the player's laser effects, so the first person one gives up instead while the right hand's weapon
+// isn't drawn (m_HideRightLaser): put away by the empty hand, it's still the game's active weapon, with its laser.
 void VR::PatchLaserSightSlots()
 {
     const uintptr_t create = m_Game->m_Offsets->ClientLaserSightCreate.address;
@@ -1084,11 +1089,16 @@ void VR::PatchLaserSightSlots()
         && CodeBytesMatch(thirdPerson, { 0x8B, 0x82, 0xFC, 0x04, 0x00, 0x00, 0xFF, 0xD0, 0x85, 0xC0, 0x0F, 0x85 });
     if (!codeMatches)
     {
-        Diagnostics::Log("upgrades: the laser sights' slot check wasn't found in this game version, pistols show none");
+        Diagnostics::Log("upgrades: the laser sights' slot check wasn't found in this game version, pistols show none, and a weapon put away keeps its laser");
         return;
     }
+    // First person: "movzx eax, byte ptr [&m_HideRightLaser]; test eax, eax; nop", the jne kept. Past it, eax is 0
+    // as before, and the next instructions load ecx and edx again.
+    uint8_t firstPersonPatch[10] = { 0x0F, 0xB6, 0x05, 0, 0, 0, 0, 0x85, 0xC0, 0x90 };
+    const uint32_t hideAddress = (uint32_t)(uintptr_t)&m_HideRightLaser;
+    memcpy(&firstPersonPatch[3], &hideAddress, 4);
+    PatchCodeBytes(firstPerson, firstPersonPatch, sizeof(firstPersonPatch));
     const uint8_t nops[6] = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
-    PatchCodeBytes(firstPerson + 10, nops, sizeof(nops));
     PatchCodeBytes(thirdPerson + 10, nops, sizeof(nops));
 }
 
@@ -1322,8 +1332,9 @@ bool VR::UpdateScope()
             WriteScopeDebug(g_ScopeUpdateDebugTime, "update: not rendered, creating the overlays failed (error %d)", m_ScopeOverlayCreateError);
         return false;
     }
-    // The scope of the right hand's weapon, or of the left hand's gun when the right hand's has none (left_gun.cpp)
-    const ScopeInfo *scope = m_RightHandEmpty ? nullptr : FindScope(m_ActiveWeaponId);
+    // The scope of the right hand's weapon, or of the left hand's gun when the right hand's has none (left_gun.cpp), or
+    // is put aside while the right hand has that gun's magazine
+    const ScopeInfo *scope = m_RightHandEmpty || m_RightMagazine ? nullptr : FindScope(m_ActiveWeaponId);
     HandMath::Vec3 leftEyepiece;
     QAngle leftAngles;
     float leftRadius = 0.0f;
@@ -1746,7 +1757,8 @@ void VR::UpdateGrenadeThrow()
     // A grenade in the left hand (dual wield) is thrown with that hand and its trigger
     const bool leftHand = m_LeftUseActive;
     // An empty right hand throws nothing: its grenade is put away (EmptyRightHand)
-    const bool trigger = PressedDigitalAction(leftHand ? m_ActionSecondaryAttack : m_ActionPrimaryAttack) && (leftHand || !m_RightHandEmpty);
+    // Nor does the right hand while it works the left hand's gun (ReloadNeedsFreeHand off)
+    const bool trigger = PressedDigitalAction(leftHand ? m_ActionSecondaryAttack : m_ActionPrimaryAttack) && (leftHand || (!m_RightHandEmpty && !m_RightWorksLeftGun));
 
     const bool shoveButton = !leftHand && PressedDigitalAction(m_ActionSecondaryAttack);
     const bool shoveButtonPressed = shoveButton && !m_ShoveButtonDown;
@@ -2596,10 +2608,11 @@ void VR::UpdateTracking()
                 }
             }
 
-            // Check if reloading
+            // Check if reloading. The left hand holding its own item (dual wield) only with ReloadNeedsFreeHand off.
             float maxHandsDistanceToReload = 15.0f;
 
             if (!ManualReloadOwnsReloadButton()
+                && (m_LeftItemIndex == 0 || !m_ReloadNeedsFreeHand)
                 && isHoldingWeapon2Handed == false
                 && dotProduct_RightControllerUp_HandsDistLocalWorld <= -0.9f
                 && handsDistanceLocalInWorldLength <= maxHandsDistanceToReload)
@@ -2817,6 +2830,7 @@ void VR::ParseConfigFile()
     m_InteractWithHand = userConfig["InteractWithHand"] != "false"; // enabled if missing from config
     m_WristHudEnabled = userConfig["WristHudEnabled"] != "false"; // enabled if missing from config
     m_ManualReloadEnabled = userConfig["ManualReload"] != "false"; // enabled if missing from config
+    m_ReloadNeedsFreeHand = userConfig["ReloadNeedsFreeHand"] != "false"; // enabled if missing from config
     m_ShareBodyMovement = userConfig["ShareBodyMovement"] != "false"; // enabled if missing from config
     m_ShowOtherPlayersMovement = userConfig["ShowOtherPlayersMovement"] != "false"; // enabled if missing from config
 
@@ -2925,6 +2939,7 @@ bool VR::SaveConfigFile()
         { "WristHudEnabled", ConfigBoolString(m_WristHudEnabled) },
         { "ManualReload", ConfigBoolString(m_ManualReloadEnabled) },
         { "ShowReloadMark", ConfigBoolString(m_ShowReloadMark) },
+        { "ReloadNeedsFreeHand", ConfigBoolString(m_ReloadNeedsFreeHand) },
         { "SmallBodyItems", ConfigBoolString(m_SmallBodyItems) },
         { "DualWield", ConfigBoolString(m_DualWieldEnabled) },
         { "MagazinePouchSide", ConfigFloatString(m_MagazinePouchSide) },

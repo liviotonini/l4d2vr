@@ -403,8 +403,8 @@ bool VR::ManualReloadUsesLeftHand() const
 // Called by UpdateTracking every frame, before it looks at the grab buttons
 void VR::UpdateManualReload()
 {
-	// The bolt's mark is shown or hidden on the way out, whatever path that is. With the right hand empty the mark is
-	// the left hand's gun's (UpdateLeftGunReload).
+	// The bolt's mark is shown or hidden on the way out, whatever path that is. With the right hand empty, or while the
+	// left hand's gun has one (its m_LeftMarkKind is still last frame's here), the mark is that gun's (UpdateLeftGunReload).
 	struct MarkerUpdate
 	{
 		VR *vr;
@@ -412,7 +412,7 @@ void VR::UpdateManualReload()
 		bool inReach = false;
 		~MarkerUpdate()
 		{
-			if (!vr->m_RightHandEmpty)
+			if (!vr->m_RightHandEmpty && vr->m_LeftMarkKind == 0)
 				vr->UpdateBoltMarker(show, inReach, false);
 		}
 	} marker{ this };
@@ -506,11 +506,13 @@ void VR::UpdateManualReload()
 	inputs.waist = m_WaistWorld;
 	inputs.unitsPerMeter = m_VRScale;
 	inputs.boltTravel = profile->boltTravel;
-	inputs.grip = PressedDigitalAction(m_LeftHandGrab);
-	// Ammo is only taken with an empty hand (the left hand's item, dual wield)
+	// Not while the right hand has the left hand's gun's magazine: the left hand holds that gun
+	inputs.grip = PressedDigitalAction(m_LeftHandGrab) && !m_RightMagazine;
+	// The left hand holding its own item (dual wield) reloads only if ReloadNeedsFreeHand is off
 	inputs.handFree = m_LeftItemIndex == 0;
+	inputs.onlyFreeHand = m_ReloadNeedsFreeHand;
 	// The left trigger shoves no more, and only cancels a grenade, which has no reload
-	inputs.trigger = PressedDigitalAction(m_ActionSecondaryAttack) && !scopeTookTrigger;
+	inputs.trigger = PressedDigitalAction(m_ActionSecondaryAttack) && !scopeTookTrigger && !m_RightMagazine;
 	// Worked after every shot: holding the weapon with both hands, the trigger works it from wherever the other hand is
 	inputs.holdsPump = profile->firePoseMs > 0 && isHoldingWeapon2Handed;
 	inputs.pumpEveryShot = profile->firePoseMs > 0;
@@ -621,6 +623,12 @@ bool VR::ManualReloadBlocksNativeReload() const
 bool VR::ManualReloadHandIsBusy() const
 {
 	return m_ManualReloadEnabled && g_Machine.HandIsBusy();
+}
+
+// The left trigger holds the right hand's weapon's bolt or pump: it doesn't fire the left hand's gun meanwhile
+bool VR::ManualReloadHoldsBolt() const
+{
+	return m_ManualReloadEnabled && m_ReloadActive && g_Machine.GetState() == Reload::State::HoldingBolt;
 }
 
 void VR::ClearManualReloadCache()

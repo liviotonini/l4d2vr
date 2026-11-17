@@ -151,6 +151,9 @@ public:
 	vr::TrackedDeviceIndex_t m_RightControllerDeviceIndex = vr::k_unTrackedDeviceIndexInvalid;
 	vr::TrackedDeviceIndex_t m_LeftControllerDeviceIndex = vr::k_unTrackedDeviceIndexInvalid;
 	QAngle m_RightControllerAngAbs = { 0,0,0 }; // Weapon aim angles. Also read directly by the patched laser sight code in client.dll
+	// The right hand's weapon isn't drawn (put away, put aside, the left hand's item used): the game's first person laser
+	// sight is off. A byte read directly by the patched laser sight code in client.dll (PatchLaserSightSlots).
+	volatile uint8_t m_HideRightLaser = 0;
 
 	Vector m_ViewmodelPosOffset;
 	QAngle m_ViewmodelAngOffset;
@@ -425,6 +428,9 @@ public:
 
 	// Reloading with the hands (manual_reload.cpp, reload_logic.h)
 	bool m_ManualReloadEnabled = true;
+	// The hand that reloads the other hand's weapon (takes its magazine out, a new one from the bag, its bolt) has to hold
+	// nothing of its own. Both hands alike. ReloadNeedsFreeHand in config.txt.
+	bool m_ReloadNeedsFreeHand = true;
 	bool m_ReloadActive = false;
 	bool m_ReloadUsesShells = false;
 	int m_ReloadClip = 0;
@@ -544,7 +550,9 @@ public:
 	int m_LeftGunSeedNext = 0;
 	bool m_RightHoldsLeftGun = false;      // the empty right hand holds the left hand's gun too (TryRightHoldLeftGun)
 	bool m_RightHoldsLeftGunTest = false;  // held so by l4d2vr_dual_test, without the grab
-	bool m_RightMagazine = false;          // the empty right hand holds a magazine for the left hand's gun
+	bool m_RightMagazine = false;          // the right hand holds a magazine for the left hand's gun: its own weapon, if it
+	                                       // holds one (ReloadNeedsFreeHand off), isn't shown nor fired meanwhile
+	bool m_RightWorksLeftGun = false;      // ...or holds its bolt or pump with the trigger
 	bool m_RightMagazineTest = false;
 	int m_RightMagazineIndex = 0;          // the gun it's for
 	HandMath::Vec3 m_LeftGunWell;          // where the left hand's gun takes its magazine, as last drawn
@@ -695,6 +703,7 @@ public:
 	bool ManualReloadBlocksNativeReload() const;
 	bool ManualReloadOwnsReloadButton() const;
 	bool ManualReloadHandIsBusy() const;
+	bool ManualReloadHoldsBolt() const;
 	void ClearManualReloadCache();
 	bool BuildReloadViewmodel(const void *studioHeader, const void *customBones, void *outBones, void *outDetached, bool &drawDetached);
 	void PlayWeaponSound(const char *sound);

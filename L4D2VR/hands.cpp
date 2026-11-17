@@ -309,8 +309,9 @@ void VR::UpdateHands(float deltaSeconds)
 		}
 	};
 	readFingers(m_LeftHanded ? m_ActionSkeletonRight : m_ActionSkeletonLeft, m_LeftFingerCurls);
-	// The right hand's own fingers are only shown while it's empty: the left hand's item used, or its weapon put away
-	if (m_LeftUseActive || m_RightHandEmpty)
+	// The right hand's own fingers are only shown while it's empty: the left hand's item used, its weapon put away, or put
+	// aside while it has the left hand's gun's magazine
+	if (m_LeftUseActive || m_RightHandEmpty || m_RightMagazine)
 		readFingers(m_LeftHanded ? m_ActionSkeletonLeft : m_ActionSkeletonRight, m_RightFingerCurls);
 }
 
@@ -355,7 +356,7 @@ bool VR::BuildFirstPersonHands(const void *studioHeader, const void *customBones
 	// weapon isn't drawn (Hooks::DrawModelForVR): the left hand holds the item as before, and the right hand is on its own
 	// controller, empty.
 	Mat34 rightHand;
-	if (m_LeftUseActive || m_RightHandEmpty)
+	if (m_LeftUseActive || m_RightHandEmpty || m_RightMagazine)
 	{
 		if (GetRightHandTarget(rig, rightHand))
 		{
