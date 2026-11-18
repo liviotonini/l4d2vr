@@ -463,6 +463,7 @@
     <ClInclude Include="sigscanner.h" />
     <ClInclude Include="vr.h" />
     <ClInclude Include="vr_enabled.h" />
+    <ClInclude Include="aim_logic.h" />
     <ClInclude Include="movement_logic.h" />
     <ClInclude Include="vr_pose_protocol.h" />
     <ClInclude Include="wrist_hud_draw.h" />

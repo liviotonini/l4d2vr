@@ -92,6 +92,20 @@ public:
     // this->ApplyEffect(owner), the owner's buttons restored, owner->Weapon_Drop(this, 0, 0), UTIL_Remove(this). The
     // offsets of those virtuals are read from it (DualWield::ServerUseItem).
     Offset ItemUseFinish =               { "server.dll", 0x3C26E5, "8B 17 8B 82 ? ? ? ? 8B CF FF D0 84 C0 75 ? 8B 17 8B 82 ? ? ? ? 8B CF FF D0 84 C0 74 ? 8B 16 8B 82 ? ? ? ? 57 8B CE FF D0 8B 4D FC 8B 17 8B 82 ? ? ? ? 6A 00 6A 00 89 8F ? ? ? ? 56 8B CF FF D0 56 E8", 0, true };
+    // The end of CTerrorPlayer's giving of its pills or adrenaline to another player (the active weapon, to the player it
+    // finds where it looks): ThrowWeapon(weapon, target, speed, 0, 0) towards them, the weapon's OnGiven(giver, target)
+    // (the target picks it up, "weapon_given"), and the giver's line about it. The address of the speed and the three
+    // functions are read from it: VR players give the item of either hand to the player it touches (DualWield::
+    // ServerGiveItem).
+    Offset ServerGiveItemEnd =           { "server.dll", 0x31DFB6, "D9 05 ? ? ? ? 50 50 51 D9 1C 24 57 53 8B CE E8 ? ? ? ? 57 56 8B CB E8 ? ? ? ? 6A 00 6A 00 53 8B CE E8", 0, true };
+    // The pills' and adrenaline's secondary attack: given to the player looked at, else a shove (CTerrorWeapon::
+    // SecondaryAttack, the jump at +0x4D). VR players give by touching, theirs only shoves (Hooks::dServerPillsSecondary).
+    // GetTeamNumber is the call at +0x99.
+    Offset ServerPillsSecondary =        { "server.dll", 0x3C23B0, "53 56 8B D9 E8 ? ? ? ? 8B F0 85 F6 0F 84 ? ? ? ? 8B 06 8B 90 68 01 00 00 8B CE FF D2 84 C0 0F 84 ? ? ? ? F3 0F 10 83 ? ? ? ? 0F 2F 05 ? ? ? ? 0F 87 ? ? ? ? 6A 00 8B CE E8", 0, true };
+    // CBaseBackpackItem's target (the kit's, the ammo packs'): the owner, or for the secondary attack the player the owner
+    // looks at. A VR player's kit heals the player it touches, or nobody and the secondary attack shoves
+    // (Hooks::dServerBackpackTarget).
+    Offset ServerBackpackTarget =        { "server.dll", 0x3C1940, "55 8B EC 83 7D 0C 00 74 ? A1 ? ? ? ? D9 40 2C 8B 0D ? ? ? ? D9 41 2C 8B 4D 08 8B 11 D9 C9 8B 82 ? ? ? ? 6A 01 6A 00", 0, true };
 
     // CBasePlayer::m_pCurrentCommand, read by CLagCompensationManager::StartLagCompensation, which goes on with it null
     // after a warning: a shot fired outside the player's usercmds is given one (LeftGun::ServerFire). Points at the offset.
@@ -112,7 +126,13 @@ public:
     // where "use <class>" takes the first one of two of the same kind (DualWield::ServerSelectWeapon).
     Offset ServerSelectItem =            { "server.dll", 0x7A960, "55 8B EC 56 8B F1 8B 06 8B 90 ? ? ? ? FF D2 85 C0 75 ? 8B 06 8B 90 ? ? ? ? 57 8B 7D 08 57 8B CE FF D2 84 C0 74 ? 8B CE E8 ? ? ? ? 85 C0 74 ? 8B CE E8 ? ? ? ? 8B 10 8B C8 8B 82 ? ? ? ? FF D0 84 C0 74 ? 8B CE E8 ? ? ? ? 8B 16 8B 82 ? ? ? ? 6A 00 57 8B CE FF D0 5F 5E 5D C2 04 00", 0, true };
 
+    // FireTerrorBullets(player, origin, angles, weapon ID, mode, seed, time): the angles are the eyes' turned by the spread
+    // and the view's kick, the last argument the shot's time (for its sound), not its spread
     Offset ServerFireTerrorBullets =     { "server.dll", 0x3C78B0, "55 8B EC 81 EC ? ? ? ? A1 ? ? ? ? 33 C5 89 45 FC 8B 45 08 8B 4D 10" };
+    // In CTerrorGun::FireBullet: the gun's spread (m_flSpread, its offset at +4) read to turn the eye angles by a random
+    // amount up to it. The shots from the controller get it again (aim_logic.h, Hooks::dServerFireTerrorBullets).
+    Offset ServerGunSpreadRead =         { "server.dll", 0x3E978F, "F3 0F 10 86 ? ? ? ? F3 0F 11 45 F4 0F 57 05 ? ? ? ? D9 45 F4 6A 00 83 EC 08 D9 5C 24 04 F3 0F 11 45 F8 D9 45 F8 D9 1C 24 68", 0, true };
+    Offset ClientGunSpreadRead =         { "client.dll", 0x30C61B, "F3 0F 10 86 ? ? ? ? F3 0F 11 45 F8 0F 57 05 ? ? ? ? D9 45 F8 6A 00 83 EC 08 D9 5C 24 04 F3 0F 11 45 FC D9 45 FC D9 1C 24 68", 0, true };
     Offset ReadUserCmd =                 { "server.dll", 0x205710, "55 8B EC 53 8B 5D 10 56 57 8B 7D 0C 53" };
     // CBaseCSGrenade::StartGrenadeThrow, called when the trigger is let go: m_fThrowTime = curtime + 0.2
     Offset StartGrenadeThrow =           { "server.dll", 0x24E230, "55 8B EC 51 A1 ? ? ? ? F3 0F 10 40 0C F3 0F 58 05 ? ? ? ? 56 8B F1 F3 0F 10 8E ? ? ? ? 0F 2E C8" };

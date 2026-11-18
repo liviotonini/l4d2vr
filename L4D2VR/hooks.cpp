@@ -28,6 +28,50 @@ namespace
 	UseAim g_ClientUseAim;
 }
 
+// How a VR player's shots aim (aim_logic.h). The game's gun turns the eye angles by its spread and the view's kick before
+// FireTerrorBullets, whose angles the mod replaces with the controller's: the spread is added to them again, from the
+// same seed, so the client shows each shot where the server fires it.
+namespace
+{
+	// Bits of a VR player's usercmd buttons that the game doesn't use, taken off by the server before the game sees them
+	// (dReadUsercmd): the game's spread on (WeaponSpread), a long gun held with one hand (LongGunsNeedBothHands)
+	const int kButtonGameSpread = 1 << 29;
+	const int kButtonOneHandedLongGun = 1 << 30;
+
+	// The gun's spread now (m_flSpread), at the offset FireBullet reads it from (`readAt`, Offsets::*GunSpreadRead); -1
+	// if it isn't known
+	float GunSpread(const void *weapon, uintptr_t readAt)
+	{
+		if (!weapon || !readAt)
+			return -1.0f;
+		__try
+		{
+			const int offset = *(const int *)(readAt + 4);
+			if (offset < 0x100 || offset > 0x4000)
+				return -1.0f;
+			const float spread = *(const float *)((const uint8_t *)weapon + offset);
+			return std::isfinite(spread) && spread >= 0.0f && spread <= 90.0f ? spread : -1.0f;
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			return -1.0f;
+		}
+	}
+
+	// The controller's aim turned by the shot's spread, which comes back in `spread`. Not a gun: the aim.
+	QAngle SpreadShot(const QAngle &aim, int weaponId, int seed, float gunSpread, bool gameSpread, bool oneHanded, float &spread)
+	{
+		spread = 0.0f;
+		const Aim::GunScript *gun = Aim::FindGun(weaponId);
+		if (!gun)
+			return aim;
+		spread = Aim::ShotSpread(*gun, gunSpread, gameSpread, oneHanded);
+		float pitch = 0.0f, yaw = 0.0f;
+		Aim::SpreadAngles(seed, spread, pitch, yaw);
+		return QAngle(aim.x + pitch, aim.y + yaw, aim.z);
+	}
+}
+
 Hooks::Hooks(Game *game)
 {
 	if (MH_Initialize() != MH_OK)
@@ -118,6 +162,10 @@ Hooks::Hooks(Game *game)
 		hkGrenadeLauncherCreate.enableHook();
 	if (hkPlayerAddUpgrade.pTarget)
 		hkPlayerAddUpgrade.enableHook();
+	if (hkServerPillsSecondary.pTarget)
+		hkServerPillsSecondary.enableHook();
+	if (hkServerBackpackTarget.pTarget)
+		hkServerBackpackTarget.enableHook();
 }
 
 Hooks::~Hooks()
@@ -403,22 +451,45 @@ void __fastcall Hooks::dCalcViewModelView(void *ecx, void *edx, void *owner, con
 	return hkCalcViewModelView.fOriginal(ecx, owner, vecNewOrigin, vecNewAngles);
 }
 
+// a4 the weapon ID, a6 the seed, a7 the shot's time
 int Hooks::dServerFireTerrorBullets(int playerId, const Vector &vecOrigin, const QAngle &vecAngles, int a4, int a5, int a6, float a7)
 {
 	Vector vecNewOrigin = vecOrigin;
 	QAngle vecNewAngles = vecAngles;
+	bool vrShooter = false, gameSpread = false, oneHanded = false;
 
 	// Server host
 	if (m_VR->m_IsVREnabled && playerId == m_Game->m_EngineClient->GetLocalPlayer())
 	{
 		vecNewOrigin = m_VR->GetRightControllerAbsPos();
 		vecNewAngles = m_VR->GetRightControllerAbsAngle();
+		vrShooter = true;
+		gameSpread = m_VR->m_WeaponSpread;
+		oneHanded = m_VR->AimsLongGunWithOneHand();
 	}
 	// Clients
 	else if (m_Game->IsValidPlayerIndex(playerId) && m_Game->m_PlayersVRInfo[playerId].isUsingVR)
 	{
-		vecNewOrigin = m_Game->m_PlayersVRInfo[playerId].controllerPos;
-		vecNewAngles = m_Game->m_PlayersVRInfo[playerId].controllerAngle;
+		const Player &player = m_Game->m_PlayersVRInfo[playerId];
+		vecNewOrigin = player.controllerPos;
+		vecNewAngles = player.controllerAngle;
+		vrShooter = true;
+		gameSpread = player.gameSpread;
+		oneHanded = player.oneHandedLongGun;
+	}
+
+	if (vrShooter)
+	{
+		typedef Server_WeaponCSBase *(__thiscall *tGetActiveWep)(void *thisptr);
+		static tGetActiveWep oGetActiveWep = (tGetActiveWep)(m_Game->m_Offsets->GetActiveWeapon.address);
+		void *shooter = DualWield::ServerEntity(playerId);
+		Server_WeaponCSBase *weapon = shooter ? oGetActiveWep(shooter) : nullptr;
+		const float gunSpread = weapon && weapon->GetWeaponID() == a4 ? GunSpread(weapon, m_Game->m_Offsets->ServerGunSpreadRead.address) : -1.0f;
+		float spread = 0.0f;
+		vecNewAngles = SpreadShot(vecNewAngles, a4, a6, gunSpread, gameSpread, oneHanded, spread);
+		if (GetTickCount64() < m_VR->m_AimLogUntil)
+			Diagnostics::Log("aim: the server fires player %d's weapon %d with %.2f (the gun's spread %.2f, %s)", playerId, a4, spread, gunSpread,
+				oneHanded ? "one hand on a long gun" : "both hands or a short gun");
 	}
 
 	return hkServerFireTerrorBullets.fOriginal(playerId, vecNewOrigin, vecNewAngles, a4, a5, a6, a7);
@@ -442,18 +513,26 @@ int Hooks::dClientFireTerrorBullets(int playerId, const Vector &vecOrigin, const
 			return 0;
 		}
 		vecNewOrigin = m_VR->GetRightControllerAbsPos();
-		vecNewAngles = m_VR->GetRightControllerAbsAngle();
+
+		// Shown where the server fires it (dServerFireTerrorBullets): the same seed, the gun's spread as predicted here
+		C_BasePlayer *local = (C_BasePlayer *)m_Game->GetClientEntity(playerId);
+		C_WeaponCSBase *weapon = local ? (C_WeaponCSBase *)local->GetActiveWeapon() : nullptr;
+		const float gunSpread = weapon && weapon->GetWeaponID() == a4 ? GunSpread(weapon, m_Game->m_Offsets->ClientGunSpreadRead.address) : -1.0f;
+		const bool oneHanded = m_VR->AimsLongGunWithOneHand();
+		float spread = 0.0f;
+		vecNewAngles = SpreadShot(m_VR->GetRightControllerAbsAngle(), a4, a6, gunSpread, m_VR->m_WeaponSpread, oneHanded, spread);
+		m_VR->OnRightGunShot(a4, a6, oneHanded, gunSpread, spread);
 	}
 
 	return hkClientFireTerrorBullets.fOriginal(playerId, vecNewOrigin, vecNewAngles, a4, a5, a6, a7);
 }
 
 
-int Hooks::FireServerBullets(int playerIndex, const Vector &origin, const QAngle &angles, int weaponId, int seed, float spread)
+int Hooks::FireServerBullets(int playerIndex, const Vector &origin, const QAngle &angles, int weaponId, int seed, float time)
 {
 	__try
 	{
-		return hkServerFireTerrorBullets.fOriginal(playerIndex, origin, angles, weaponId, 0, seed, spread);
+		return hkServerFireTerrorBullets.fOriginal(playerIndex, origin, angles, weaponId, 0, seed, time);
 	}
 	__except (EXCEPTION_EXECUTE_HANDLER)
 	{
@@ -464,13 +543,13 @@ int Hooks::FireServerBullets(int playerIndex, const Vector &origin, const QAngle
 
 // The hits and tracers of the shot here, at once (the server's go to the other players). The game draws the tracers
 // from the weapon in the right hand: they leave from `origin` instead (dClientParticleTracer).
-int Hooks::FireClientBullets(int playerIndex, const Vector &origin, const QAngle &angles, int weaponId, int seed, float spread)
+int Hooks::FireClientBullets(int playerIndex, const Vector &origin, const QAngle &angles, int weaponId, int seed, float time)
 {
 	m_LeftShotStart = &origin;
 	int result = 0;
 	__try
 	{
-		result = hkClientFireTerrorBullets.fOriginal(playerIndex, origin, angles, weaponId, 0, seed, spread);
+		result = hkClientFireTerrorBullets.fOriginal(playerIndex, origin, angles, weaponId, 0, seed, time);
 	}
 	__except (EXCEPTION_EXECUTE_HANDLER)
 	{
@@ -602,6 +681,11 @@ int Hooks::dReadUsercmd(void *buf, CUserCmd *move, CUserCmd *from)
 
 		m_Game->m_PlayersVRInfo[i].isUsingVR = true;
 
+		// How the player's guns aim (dServerFireTerrorBullets), off the buttons before the game sees them
+		m_Game->m_PlayersVRInfo[i].gameSpread = (move->buttons & kButtonGameSpread) != 0;
+		m_Game->m_PlayersVRInfo[i].oneHandedLongGun = (move->buttons & kButtonOneHandedLongGun) != 0;
+		move->buttons &= ~(kButtonGameSpread | kButtonOneHandedLongGun);
+
 		bool throwGesture;
 		int throwSequence;
 		Vector throwArmVelocity;
@@ -648,6 +732,8 @@ int Hooks::dReadUsercmd(void *buf, CUserCmd *move, CUserCmd *from)
 	else
 	{
 		m_Game->m_PlayersVRInfo[i].isUsingVR = false;
+		m_Game->m_PlayersVRInfo[i].gameSpread = false;
+		m_Game->m_PlayersVRInfo[i].oneHandedLongGun = false;
 	}
 	static_assert(sizeof(CUserCmd) <= sizeof(Player::lastCmd), "the copy of the usercmd is too small");
 	memcpy(m_Game->m_PlayersVRInfo[i].lastCmd, move, sizeof(CUserCmd));
@@ -672,6 +758,13 @@ int Hooks::dWriteUsercmd(void *buf, CUserCmd *to, CUserCmd *from)
 		to->tick_count *= -1;
 
 		int originalCommandNum = to->command_number;
+
+		// How this player's guns aim, for the host (dReadUsercmd, dServerFireTerrorBullets)
+		const int originalButtons = to->buttons;
+		if (m_VR->m_WeaponSpread)
+			to->buttons |= kButtonGameSpread;
+		if (m_VR->AimsLongGunWithOneHand())
+			to->buttons |= kButtonOneHandedLongGun;
 
 		QAngle controllerAngles = m_VR->GetRightControllerAbsAngle();
 		short throwMousedx, throwMousedy;
@@ -709,6 +802,7 @@ int Hooks::dWriteUsercmd(void *buf, CUserCmd *to, CUserCmd *from)
 		hkWriteUsercmd.fOriginal(buf, to, from);
 
 		to->viewangles.x = xAngle;
+		to->buttons = originalButtons;
 		to->tick_count *= -1;
 		to->viewangles.z = 0;
 		to->upmove = 0;
@@ -1262,6 +1356,55 @@ void Hooks::initWeaponStateHooks()
 		hkGrenadeLauncherCreate.createHook((LPVOID)(createCall + 5 + *(const int32_t *)(createCall + 1)), &dGrenadeLauncherCreate);
 	else
 		Diagnostics::Log("grenade launcher: its fire wasn't found in this game version, the grenade leaves from the eyes");
+
+	// Giving and healing by touching: the pills' secondary attack only shoves for VR players (the shove is where it jumps
+	// to when there's nobody to give them to), and the kit's target is the player it touches
+	const uint8_t *pills = (const uint8_t *)offsets->ServerPillsSecondary.address;
+	if (pills && pills[0x4D] == 0xE9)
+	{
+		m_ServerShove = (tSecondaryAttack)(pills + 0x52 + *(const int32_t *)(pills + 0x4E));
+		hkServerPillsSecondary.createHook((LPVOID)pills, &dServerPillsSecondary);
+	}
+	if (offsets->ServerBackpackTarget.address)
+		hkServerBackpackTarget.createHook((LPVOID)offsets->ServerBackpackTarget.address, &dServerBackpackTarget);
+	Diagnostics::Log("giving: the pills' secondary attack %s, the kit's target %s, the game's giving %s", hkServerPillsSecondary.pTarget ? "found" : "NOT found",
+		hkServerBackpackTarget.pTarget ? "found" : "NOT found", offsets->ServerGiveItemEnd.address ? "found" : "NOT found");
+}
+
+// The pills' and adrenaline's secondary attack gives them to the player looked at, or shoves. VR players give them by
+// touching another player (DualWield::ServerGiveItem): their secondary attack, which the arm's swing presses, only shoves.
+void __fastcall Hooks::dServerPillsSecondary(void *ecx, void *edx)
+{
+	bool isLocalPlayer;
+	const int playerIndex = m_GetGrenadeOwner ? GetServerEntityIndex(m_GetGrenadeOwner(ecx)) : -1;
+	if (m_ServerShove && playerIndex > 0 && IsVRThrower(playerIndex, isLocalPlayer))
+	{
+		m_ServerShove(ecx);
+		return;
+	}
+	hkServerPillsSecondary.fOriginal(ecx);
+}
+
+// The target of a kit's (or ammo pack's) action: with the secondary attack the game takes the player looked at. A VR
+// player's kit heals the player it touches, as the player said (DualWield::ServerHealTarget); nobody, and the secondary
+// attack shoves, when it touches nobody. The game checks the target as usual after this (needs healing, not down...).
+void *__fastcall Hooks::dServerBackpackTarget(void *ecx, void *edx, void *owner, int secondary)
+{
+	bool isLocalPlayer;
+	const int playerIndex = secondary && owner ? GetServerEntityIndex(owner) : -1;
+	if (playerIndex > 0 && IsVRThrower(playerIndex, isLocalPlayer))
+		return DualWield::ServerHealTarget(owner, playerIndex);
+	return hkServerBackpackTarget.fOriginal(ecx, owner, secondary);
+}
+
+float Hooks::ServerEyeDistance(void *player, void *other)
+{
+	if (!player || !other || !hkServerPlayerEyePosition.pTarget)
+		return -1.0f;
+	Vector a, b;
+	hkServerPlayerEyePosition.fOriginal(player, &a);
+	hkServerPlayerEyePosition.fOriginal(other, &b);
+	return VectorLength(a - b);
 }
 
 // The grenade launcher's grenade fired by a VR player leaves from the weapon in the hand, where it points. The game's

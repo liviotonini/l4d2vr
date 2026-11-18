@@ -691,9 +691,10 @@ void VR::ProcessInput()
 
     UpdateGrenadeThrow();
 
-    // While the left hand's item is used, its trigger is the attack, once the item is out (dual wield)
+    // While the left hand's item is used, its trigger is the attack, once the item is out (dual wield). Not for the kit on
+    // another player, which is the secondary attack (KitHealsOther).
     const bool triggerHeld = PressedDigitalAction(m_LeftUseActive ? m_ActionSecondaryAttack : m_ActionPrimaryAttack);
-    bool attackTrigger = m_LeftUseActive ? triggerHeld && m_LeftUseWasActive && m_ActiveWeaponId == m_LeftItemId : triggerHeld;
+    bool attackTrigger = m_LeftUseActive ? triggerHeld && m_LeftUseWasActive && m_ActiveWeaponId == m_LeftItemId && m_KitUse[0] != KitUse_Other : triggerHeld;
     if (!UpdateItemUse())
         attackTrigger = false;
     // The right hand empty: its unseen weapon does nothing (EmptyRightHand). Neither while it holds the left hand's gun's
@@ -719,7 +720,10 @@ void VR::ProcessInput()
     // Nor does the right arm while it works the left hand's gun (a quick pump is a fast swing)
     const bool rightShoves = (rightHandEmpty || !m_Game->m_IsMeleeWeaponActive) && GetTickCount64() - m_RightHandHandledLeftGunMs > kNoShoveAfterLeftGunMs;
     const bool shove = m_IsTrackingManualPush && !IsGrenadeThrowInProgress() && ((VectorLength(m_LeftControllerPose.TrackedDeviceVel) > 4.0 && leftShoves) || (rightShoves && VectorLength(m_RightControllerPose.TrackedDeviceVel) > 4.0));
-    SetGameButton(GameButton_Attack2, shove);
+    // The kit healing another player, and the right hand's pills given the game's way (a host without the mod), are the
+    // secondary attack too (UpdateGiving, KitHealsOther)
+    const bool secondaryForItem = KitHealsOther() || GetTickCount64() < m_GivePressUntil;
+    SetGameButton(GameButton_Attack2, shove || secondaryForItem);
     // The game's shove animation isn't shown, the arm already swung (ApplyThrowPose)
     if (shove && !m_ShoveDown)
         m_ShoveHoldUntil = GetTickCount64() + kShoveAnimationMs;
@@ -934,6 +938,40 @@ bool VR::CheckOverlayIntersectionForController(vr::VROverlayHandle_t overlayHand
 QAngle VR::GetRightControllerAbsAngle()
 {
     return m_RightControllerAngAbs;
+}
+
+static_assert(Aim::Pistol == C_WeaponCSBase::PISTOL && Aim::Uzi == C_WeaponCSBase::UZI && Aim::PumpShotgun == C_WeaponCSBase::PUMPSHOTGUN
+    && Aim::AutoShotgun == C_WeaponCSBase::AUTOSHOTGUN && Aim::Rifle == C_WeaponCSBase::M16A1 && Aim::HuntingRifle == C_WeaponCSBase::HUNTING_RIFLE
+    && Aim::Mac10 == C_WeaponCSBase::MAC10 && Aim::ChromeShotgun == C_WeaponCSBase::SHOTGUN_CHROME && Aim::Scar == C_WeaponCSBase::SCAR
+    && Aim::MilitarySniper == C_WeaponCSBase::SNIPER_MILITARY && Aim::Spas == C_WeaponCSBase::SPAS && Aim::GrenadeLauncher == C_WeaponCSBase::GRENADE_LAUNCHER
+    && Aim::Ak47 == C_WeaponCSBase::AK47 && Aim::Magnum == C_WeaponCSBase::MAGNUM && Aim::Mp5 == C_WeaponCSBase::MP5 && Aim::Sg552 == C_WeaponCSBase::SG552
+    && Aim::Awp == C_WeaponCSBase::AWP && Aim::Scout == C_WeaponCSBase::SCOUT && Aim::M60 == C_WeaponCSBase::M60,
+    "the weapon IDs of aim_logic.h are the game's");
+
+// The right hand's weapon is a long gun (aim_logic.h) that the left hand doesn't hold too: it spreads and kicks more
+bool VR::AimsLongGunWithOneHand() const
+{
+    return m_LongGunsNeedBothHands && !isHoldingWeapon2Handed && Aim::NeedsBothHands(m_ActiveWeaponId);
+}
+
+// A shot of the right hand's gun as this client shows it (Hooks::dClientFireTerrorBullets): with one hand on a long gun
+// it kicks the aim. The game runs a usercmd again when the server corrects it, with the same seed: once per seed.
+void VR::OnRightGunShot(int weaponId, int seed, bool oneHanded, float gunSpread, float spread)
+{
+    for (int i = 0; i < 8; ++i)
+    {
+        if (m_RightShotSeeds[i] == seed)
+            return;
+    }
+    m_RightShotSeeds[m_RightShotSeedNext] = seed;
+    m_RightShotSeedNext = (m_RightShotSeedNext + 1) % 8;
+
+    const Aim::GunScript *gun = Aim::FindGun(weaponId);
+    if (gun && gun->longGun && oneHanded)
+        m_AimKick.Shot(*gun, seed);
+    if (GetTickCount64() < m_AimLogUntil)
+        Diagnostics::Log("aim: a shot of weapon %d with %s, the gun's spread %.2f, fired with %.2f, the aim kicked %.1f up and %.1f left",
+            weaponId, oneHanded && gun && gun->longGun ? "one hand" : "both hands or a short gun", gunSpread, spread, m_AimKick.pitch, m_AimKick.yaw);
 }
 
 Vector VR::GetRightControllerAbsPos()
@@ -2544,8 +2582,9 @@ void VR::UpdateTracking()
         {
             if (isPressingRightGrab == false)
             {
-                // The empty right hand reloads the left hand's gun, or holds it too when on its barrel (left_gun.cpp)
-                if (!TryRightReloadLeftGun() && !TryRightHoldLeftGun())
+                // The empty right hand reloads the left hand's gun, or holds it too when on its barrel (left_gun.cpp).
+                // Its pills or kit touching another player are given or used on them instead (UpdateGiving).
+                if (!m_ItemTouching[1] && !TryRightReloadLeftGun() && !TryRightHoldLeftGun())
                     UpdateBodyGrab(true, rightControllerPosLocalInWorld, weaponId);
 
                 isPressingRightGrab = true;
@@ -2622,7 +2661,7 @@ void VR::UpdateTracking()
 
             if (isHoldingWeapon2Handed == false && isPressingLeftGrab == false)
             {
-                if (!ManualReloadHandIsBusy())
+                if (!ManualReloadHandIsBusy() && !m_ItemTouching[0])
                     UpdateBodyGrab(false, leftControllerPosLocalInWorld, weaponId);
 
                 isPressingLeftGrab = true;
@@ -2640,6 +2679,20 @@ void VR::UpdateTracking()
         isPressingRightGrab = false;
         isPressingLeftGrab = false;
         temp = false;
+    }
+
+    // A long gun held with one hand kicks the aim up with its shots (OnRightGunShot): the gun drawn, its laser, its scope
+    // and its next shots go with it, until it comes back
+    m_AimKick.Update(deltaTime * 0.001f);
+    m_LeftAimKick.Update(deltaTime * 0.001f);
+    if (m_AimKick.Active())
+    {
+        const Vector right = rightControllerRight_2handAdjust;
+        rightControllerForward_2handAdjust = VectorRotate(rightControllerForward_2handAdjust, right, m_AimKick.pitch);
+        rightControllerUp_2handAdjust = VectorRotate(rightControllerUp_2handAdjust, right, m_AimKick.pitch);
+        const Vector up = rightControllerUp_2handAdjust;
+        rightControllerForward_2handAdjust = VectorRotate(rightControllerForward_2handAdjust, up, m_AimKick.yaw);
+        rightControllerRight_2handAdjust = VectorRotate(rightControllerRight_2handAdjust, up, m_AimKick.yaw);
     }
 
     // controller angles
@@ -2831,6 +2884,8 @@ void VR::ParseConfigFile()
     m_WristHudEnabled = userConfig["WristHudEnabled"] != "false"; // enabled if missing from config
     m_ManualReloadEnabled = userConfig["ManualReload"] != "false"; // enabled if missing from config
     m_ReloadNeedsFreeHand = userConfig["ReloadNeedsFreeHand"] != "false"; // enabled if missing from config
+    m_WeaponSpread = userConfig["WeaponSpread"] != "false"; // enabled if missing from config
+    m_LongGunsNeedBothHands = userConfig["LongGunsNeedBothHands"] != "false"; // enabled if missing from config
     m_ShareBodyMovement = userConfig["ShareBodyMovement"] != "false"; // enabled if missing from config
     m_ShowOtherPlayersMovement = userConfig["ShowOtherPlayersMovement"] != "false"; // enabled if missing from config
 
@@ -2940,6 +2995,8 @@ bool VR::SaveConfigFile()
         { "ManualReload", ConfigBoolString(m_ManualReloadEnabled) },
         { "ShowReloadMark", ConfigBoolString(m_ShowReloadMark) },
         { "ReloadNeedsFreeHand", ConfigBoolString(m_ReloadNeedsFreeHand) },
+        { "WeaponSpread", ConfigBoolString(m_WeaponSpread) },
+        { "LongGunsNeedBothHands", ConfigBoolString(m_LongGunsNeedBothHands) },
         { "SmallBodyItems", ConfigBoolString(m_SmallBodyItems) },
         { "DualWield", ConfigBoolString(m_DualWieldEnabled) },
         { "MagazinePouchSide", ConfigFloatString(m_MagazinePouchSide) },

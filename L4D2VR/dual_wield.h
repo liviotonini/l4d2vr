@@ -48,10 +48,21 @@ namespace DualWield
 	void ServerUseItem(edict_t *edict, int playerIndex, int itemIndex);
 	// A weapon or item dropped from a hand
 	void ServerDropItem(edict_t *edict, int playerIndex, int weaponIndex, const Vector &velocity);
+	// Pills or adrenaline given from either hand to the player it touches, the way the game gives them
+	void ServerGiveItem(edict_t *edict, int playerIndex, int itemIndex, int targetIndex);
+	// The player the kit touches, to heal (l4d2vr_heal_target), 0 for nobody
+	void ServerSetHealTarget(int playerIndex, int targetIndex);
+	// The player a VR player's kit heals with its secondary attack (Hooks::dServerBackpackTarget): the one it touches if
+	// they're near, null for nobody
+	void *ServerHealTarget(void *player, int playerIndex);
 	// The player's weapon is taken out. False if it failed.
 	bool ServerTakeOut(void *player, void *weapon);
 	// The weapon `index` of `player`, null if the player doesn't have it
 	void *ServerPlayersWeapon(void *player, int index);
+	// The server's entity `index`, null if none
+	void *ServerEntity(int index);
+	// The server's time (gpGlobals->curtime), 0 if it isn't known
+	float ServerCurtime();
 	// The gun a laser sight goes on (Hooks::dPlayerAddUpgrade): the left hand's for a VR player who took it with that
 	// hand, otherwise the gun out (pistols too). Null for the game's own choice, the primary weapon.
 	void *ServerUpgradeWeapon(void *player);

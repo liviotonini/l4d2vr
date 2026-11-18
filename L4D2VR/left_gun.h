@@ -16,7 +16,6 @@ namespace LeftGun
 		int weaponId;
 		float cycleSeconds;      // between two shots (the scripts' CycleTime, longer for the pump and bolt guns)
 		FireMode mode;
-		float spread;            // MinStandingSpread of the script
 		const char *shotSound;   // the script's single_shot
 		bool pistolClick;        // the empty click of a pistol, otherwise a rifle's
 		bool twoHanded;          // a long gun, which the right hand can hold too

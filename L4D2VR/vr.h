@@ -11,6 +11,7 @@
 #include <vector>
 #include "hand_rig.h"
 #include "movement_logic.h"
+#include "aim_logic.h"
 
 #define MAX_STR_LEN 256
 
@@ -139,6 +140,17 @@ public:
 	// still (measured: up to about 60 it barely creeps, from 75 on it gets going, at about 0.72 of
 	// the speed asked)
 	static constexpr float kSlowestMoveSpeed = 75.0f;
+
+	// How the guns aim (aim_logic.h): their shots spread as the game spreads them, which the shots from the controller
+	// lost (WeaponSpread), and a long gun held with one hand spreads as if running and kicks up with every shot
+	// (LongGunsNeedBothHands). Each player's own choice, which the host follows (Hooks::dWriteUsercmd).
+	bool m_WeaponSpread = true;
+	bool m_LongGunsNeedBothHands = true;
+	Aim::Kick m_AimKick;                   // the right hand's gun's, in its aim (UpdateTracking)
+	Aim::Kick m_LeftAimKick;               // the left hand's gun's (GetLeftItemFrame)
+	int m_RightShotSeeds[8] = {};          // the last shots of the right hand's gun, each seen once (OnRightGunShot)
+	int m_RightShotSeedNext = 0;
+	unsigned long long m_AimLogUntil = 0;  // l4d2vr_dual_test aim: every shot in the log
 
 	Vector m_LeftControllerPosAbs;
 	QAngle m_LeftControllerAngAbs;
@@ -521,6 +533,7 @@ public:
 	int m_LeftItemIndex = 0;               // entity index, 0 when the hand is empty
 	int m_LeftItemId = 0;
 	int m_ExtraWeaponIndex = 0;            // the weapon in the slot of its own (DualWield::kExtraSlot), the left shoulder's
+	int m_ExtraToRightIndex = 0;           // given to the right hand: keeps the extra slot until the one it replaces is dropped
 	int m_SentLeftItemIndex = -1;
 	int m_SentExtraWeaponIndex = -1;
 	unsigned long long m_LeftItemSentMs = 0;
@@ -751,6 +764,10 @@ public:
 	bool WeaponHasLaser(const void *weapon);
 	void PlaceLeftGunParts(const void *clipBones, const HandMath::Mat34 &frame, HandMath::Mat34 *bones, int boneCount);
 	bool IsLeftGunShot(int seed) const;
+	bool AimsLongGunWithOneHand() const;
+	bool LeftGunWithOneHand() const;
+	void OnRightGunShot(int weaponId, int seed, bool oneHanded, float gunSpread, float spread);
+	bool GetPlayerMotion(const void *player, float &speed, bool &ducking, bool &onGround);
 	bool TryRightHoldLeftGun();
 	bool TryRightReloadLeftGun();
 	void UpdateLeftGunReload();
@@ -782,6 +799,26 @@ public:
 	bool ItemUseGestureReady(bool leftHand, int weaponId);
 	bool UpdateItemUse();
 	bool m_ItemTriggerDown[2] = {};          // left, right: the triggers on the last update, for the adrenaline's cap
+	// Giving pills or adrenaline, and the kit on another player: the hand holding it touches their body with its trigger
+	// and grab held. The kit on oneself: brought against the body with the trigger (body_items.cpp).
+	enum KitUse { KitUse_None, KitUse_Self, KitUse_Other };
+	KitUse m_KitUse[2] = { KitUse_None, KitUse_None }; // left, right
+	int m_ItemTouching[2] = {};              // left, right: the player the hand's pills, adrenaline or kit touch, 0 none
+	bool m_GiveDown[2] = {};                 // the giving gesture on the last update
+	int m_HealTargetSent = 0;                // the player the server was told the kit is for
+	unsigned long long m_HealPressAt = 0;    // the secondary attack waits for the server to know who the kit is for
+	unsigned long long m_GivePressUntil = 0; // a host without the mod: the game's own giving, to the player looked at
+	static constexpr unsigned long long kHealPressDelayMs = 100;
+	HandMath::Vec3 ItemFist(bool leftHand) const;
+	int PlayerTouchedBy(const HandMath::Vec3 &fist);
+	bool KitAtOwnBody(bool leftHand) const;
+	int GetActiveWeaponIndex();
+	void UpdateGiving(bool leftItem, bool rightItem, bool hostHasMod);
+	bool UpdateRightKit();
+	void BeginKitUse(bool leftHand, KitUse use, int target);
+	void EndKitUse(bool leftHand);
+	bool KitHealsOther();
+	void LogTouchTest();
 	// The thumbstick clicks: a short click, or held to drop what the hand holds (UpdateStickHold)
 	struct StickHold
 	{

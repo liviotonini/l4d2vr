@@ -24,7 +24,8 @@ using namespace HandMath;
 // - grabbing one in the world (TryGrabWorld): the server is told it's for the left hand. A weapon taken that way takes
 //   the place of the one it had, which goes to the ground.
 // - holding the hands together with the item in the right hand, and the left grab for 2 seconds: the right hand is left
-//   empty. The right grab does the opposite.
+//   empty. The right grab does the opposite, and a weapon given to it takes the place of the one of its slot, which goes
+//   to the ground (the left hand has one weapon too: the one it had goes to the ground, TakeIntoLeftHand).
 // While the left hand works the weapon (magazine, shell, bolt, two handed grip) its item is put away for a moment.
 // Its trigger uses a grenade or a kit: they become the active weapon in the left hand until used.
 // ---------------------------------------------------------------------------------------------------------------
@@ -189,6 +190,7 @@ void VR::ClearLeftItem()
 	m_LeftItemIndex = 0;
 	m_LeftItemId = 0;
 	m_LeftUseActive = false;
+	EndKitUse(true);
 }
 
 // A grab with the left hand at the chest: the grenade or the pills seen there go to the left hand, or the one in the
@@ -470,6 +472,7 @@ void VR::UpdateDualWield(C_BasePlayer *local, int activeWeaponId, float deltaSec
 		if (m_LeftItemIndex)
 			ClearLeftItem();
 		m_ExtraWeaponIndex = 0;
+		m_ExtraToRightIndex = 0;
 		DualWield::ClientSetExtraWeapon(0);
 		return;
 	}
@@ -497,6 +500,29 @@ void VR::UpdateDualWield(C_BasePlayer *local, int activeWeaponId, float deltaSec
 		m_ExtraWeaponIndex = 0;
 	if (m_LeftItemIndex && !carried(m_LeftItemIndex, m_LeftItemId))
 		ClearLeftItem();
+
+	// The left hand's weapon given to the right one (GiveToRightHand) goes to its own slot once the weapon it replaces has
+	// left the inventory. Not if the left hand took it back.
+	if (m_ExtraToRightIndex && (m_ExtraToRightIndex != m_ExtraWeaponIndex || m_ExtraToRightIndex == m_LeftItemIndex))
+		m_ExtraToRightIndex = 0;
+	if (m_ExtraToRightIndex)
+	{
+		int slot = 0;
+		for (int i = 0; i < count; ++i)
+		{
+			if (items[i].index == m_ExtraToRightIndex)
+				slot = GetWeaponSlot(items[i].id);
+		}
+		bool slotTaken = false;
+		for (int i = 0; i < count; ++i)
+			slotTaken |= items[i].index != m_ExtraToRightIndex && GetWeaponSlot(items[i].id) == slot;
+		if (!slotTaken)
+		{
+			Diagnostics::Log("dual wield: entity %d is back in its own slot", m_ExtraToRightIndex);
+			m_ExtraWeaponIndex = 0;
+			m_ExtraToRightIndex = 0;
+		}
+	}
 
 	// Just grabbed something in the world with the left hand: what's new in the inventory goes to it, in place of what it
 	// held (a weapon taken that way took the extra slot from the one it had, which the game dropped)
@@ -569,17 +595,26 @@ void VR::UpdateDualWield(C_BasePlayer *local, int activeWeaponId, float deltaSec
 
 // The trigger of the left hand throws its grenade or uses its kit, defibrillator or upgrade pack: it's taken as the
 // active weapon, and the trigger is the attack until it's used (UpdateGrenadeThrow, ProcessInput). Pills and adrenaline
-// are used without that, at the mouth or against the body (VR::UpdateItemUse).
+// are used without that, at the mouth or against the body (VR::UpdateItemUse). The kit is used on oneself brought
+// against the body with the trigger, on another player it touches with the trigger and the grab (their secondary attack,
+// VR::KitHealsOther); the trigger can be pressed before it gets there.
 void VR::UpdateLeftUse(unsigned long long now, int activeIndex, const InventoryItem *items, int count)
 {
 	const bool trigger = PressedDigitalAction(m_ActionSecondaryAttack);
 	const bool pressed = trigger && !m_LeftTriggerDown;
 	m_LeftTriggerDown = trigger;
+	const bool grab = PressedDigitalAction(m_LeftHandGrab);
 
 	if (!m_LeftUseActive)
 	{
+		const bool kit = m_LeftItemId == C_WeaponCSBase::FIRST_AID_KIT;
+		KitUse kitUse = KitUse_None;
+		if (kit && trigger && LeftHandHoldsItem())
+			kitUse = grab ? (m_ItemTouching[0] ? KitUse_Other : KitUse_None) : (KitAtOwnBody(true) ? KitUse_Self : KitUse_None);
+		const bool start = kit ? kitUse != KitUse_None : pressed;
+
 		// Not when the trigger took the right hand's weapon's bolt (ReloadNeedsFreeHand off)
-		if (pressed && LeftHandHoldsItem() && DualWield::IsLeftUseItem(m_LeftItemId) && !m_ScopeZoomTookTrigger && activeIndex != m_LeftItemIndex
+		if (start && LeftHandHoldsItem() && DualWield::IsLeftUseItem(m_LeftItemId) && !m_ScopeZoomTookTrigger && activeIndex != m_LeftItemIndex
 			&& !ManualReloadHoldsBolt())
 		{
 			m_LeftUseActive = true;
@@ -587,7 +622,10 @@ void VR::UpdateLeftUse(unsigned long long now, int activeIndex, const InventoryI
 			m_LeftUseStartMs = now;
 			m_LeftUseReleaseMs = 0;
 			SelectWeapon(m_LeftItemIndex);
-			m_Haptics.Play(Haptics::Hand::OtherHand, HapticEffects::Confirm);
+			if (kit)
+				BeginKitUse(true, kitUse, m_ItemTouching[0]);
+			else
+				m_Haptics.Play(Haptics::Hand::OtherHand, HapticEffects::Confirm);
 			Diagnostics::Log("dual wield: using the left hand's item (weapon %d)", m_LeftItemId);
 		}
 		return;
@@ -595,7 +633,8 @@ void VR::UpdateLeftUse(unsigned long long now, int activeIndex, const InventoryI
 
 	if (activeIndex && activeIndex == m_LeftItemIndex)
 		m_LeftUseWasActive = true;
-	if (trigger)
+	// The kit on another player is held with the grab too
+	if (trigger && (m_KitUse[0] != KitUse_Other || grab))
 		m_LeftUseReleaseMs = 0;
 	else if (!m_LeftUseReleaseMs)
 		m_LeftUseReleaseMs = now;
@@ -613,6 +652,7 @@ void VR::UpdateLeftUse(unsigned long long now, int activeIndex, const InventoryI
 		return;
 
 	m_LeftUseActive = false;
+	EndKitUse(true);
 	Diagnostics::Log("dual wield: end of the left hand's use (%s)", reason);
 	if (activeIndex == 0 || activeIndex == m_LeftItemIndex || !m_LeftItemIndex)
 		SelectWeapon(PickRightWeapon(items, count, m_LeftItemIndex, m_RightWeaponIndex));
@@ -892,23 +932,33 @@ void VR::GiveToLeftHand(int activeIndex, int activeWeaponId, const InventoryItem
 	Diagnostics::Log("dual wield: the item went from the right hand to the left");
 }
 
-// What the left hand holds goes to the right hand. A weapon of the extra slot goes back to its own slot, unless the
-// player has another weapon there: then it keeps the extra slot while the right hand has it.
+// What the left hand holds goes to the right hand. A weapon of the extra slot goes back to its own slot: the weapon the
+// player has there goes to the ground, and the one given takes its place. It keeps the extra slot until the server
+// dropped the other one (UpdateDualWield), so two weapons never share a slot.
 void VR::GiveToRightHand(const InventoryItem *items, int count)
 {
 	const int index = m_LeftItemIndex, id = m_LeftItemId;
 	ClearLeftItem();
+	m_RightHandEmpty = false;
+	// Taken out first: the one it replaces isn't the active weapon when it's dropped
+	SelectWeapon(index);
+	int replaced = 0;
 	if (index == m_ExtraWeaponIndex)
 	{
-		bool slotTaken = false;
 		for (int i = 0; i < count; ++i)
-			slotTaken |= items[i].index != index && GetWeaponSlot(items[i].id) == GetWeaponSlot(id);
-		if (!slotTaken)
+		{
+			if (items[i].index != index && GetWeaponSlot(items[i].id) == GetWeaponSlot(id))
+			{
+				SendDrop(items[i].index);
+				++replaced;
+			}
+		}
+		if (replaced)
+			m_ExtraToRightIndex = index;
+		else
 			m_ExtraWeaponIndex = 0;
 	}
-	m_RightHandEmpty = false;
-	SelectWeapon(index);
-	Diagnostics::Log("dual wield: the item went from the left hand to the right%s", index == m_ExtraWeaponIndex ? ", in the extra slot" : "");
+	Diagnostics::Log("dual wield: the item went from the left hand to the right%s", replaced ? ", in place of the weapon of its slot" : "");
 }
 
 // Another player says what their left hand holds (relayed by the server)
@@ -963,6 +1013,42 @@ void VR::DualWieldTest(const char *action)
 		{
 			Diagnostics::Log("dual wield test: nothing to take near");
 		}
+		return;
+	}
+
+	// touch: who a hand would touch at each other player's chest, and their health and pills, in the log.
+	// give_<player>: the pills or adrenaline carried given to that player (entity index) as by touching them.
+	// heal_<player>: the kit out, for that player: the console's +attack2 then heals them.
+	if (strcmp(action, "touch") == 0)
+	{
+		LogTouchTest();
+		return;
+	}
+	if ((strncmp(action, "give", 4) == 0 || strncmp(action, "heal", 4) == 0) && filter)
+	{
+		InventoryItem items[64];
+		const int count = GetInventory(local, items, 64);
+		const bool give = action[0] == 'g';
+		for (int i = 0; i < count; ++i)
+		{
+			const bool pills = items[i].id == C_WeaponCSBase::PAIN_PILLS || items[i].id == C_WeaponCSBase::ADRENALINE;
+			if (give ? !pills : items[i].id != C_WeaponCSBase::FIRST_AID_KIT)
+				continue;
+			char command[48];
+			if (give)
+			{
+				snprintf(command, sizeof(command), "l4d2vr_give %d %d", items[i].index, atoi(filter));
+			}
+			else
+			{
+				snprintf(command, sizeof(command), "l4d2vr_heal_target %d", atoi(filter));
+				SelectWeapon(items[i].index);
+			}
+			m_Game->m_EngineClient->ServerCmd(command, true);
+			Diagnostics::Log("dual wield test: %s", command);
+			return;
+		}
+		Diagnostics::Log("dual wield test: nothing to %s", give ? "give" : "heal with");
 		return;
 	}
 
@@ -1145,6 +1231,14 @@ void VR::DualWieldTest(const char *action)
 		return;
 	}
 
+	// aim: every shot in the log for 30 s, with its spread and kick (aim_logic.h)
+	if (strcmp(action, "aim") == 0)
+	{
+		m_AimLogUntil = NowMs() + 30000;
+		Diagnostics::Log("aim: shots in the log for 30 s, the game's spread %s, long guns %s",
+			m_WeaponSpread ? "on" : "off", m_LongGunsNeedBothHands ? "need both hands" : "with one hand too");
+		return;
+	}
 	// lasertest: the left hand's gun's laser sight, from the eyes for 5 s (without the hand drawn)
 	if (strcmp(action, "lasertest") == 0)
 	{
@@ -1432,6 +1526,107 @@ namespace
 		Virtual<tDrop>(player, code.drop)(player, weapon, nullptr, &velocity);
 		return true;
 	}
+
+	// How the game gives pills and adrenaline once it found who to (the end of the giving, Offsets::ServerGiveItemEnd):
+	// fld [speed], the speed and two zeros, the target and the weapon pushed, then the giver's ThrowWeapon (the call at
+	// +0x10), the weapon's OnGiven(giver, target) (+0x19: it remembers both, and the target picks it up with
+	// "weapon_given") and the giver's line about it (+0x25). The players' team (GetTeamNumber) is the call at +0x99 of the
+	// pills' secondary attack (Offsets::ServerPillsSecondary), IsPlayer the virtual it calls at +0x15.
+	struct GiveCode
+	{
+		bool found = false;
+		int isPlayer = 0;
+		const float *speed = nullptr;
+		bool(__thiscall *throwWeapon)(void *giver, void *weapon, void *target, float speed, int, int) = nullptr;
+		void(__thiscall *onGiven)(void *weapon, void *giver, void *target) = nullptr;
+		void(__thiscall *speak)(void *giver, void *weapon, int, int) = nullptr;
+		int(__thiscall *teamOf)(void *entity) = nullptr;
+	};
+
+	const uint8_t *CallTarget(const uint8_t *call)
+	{
+		return call[0] == 0xE8 ? call + 5 + *(const int32_t *)(call + 1) : nullptr;
+	}
+
+	const GiveCode &GetGiveCode()
+	{
+		static GiveCode code;
+		static bool read = false;
+		if (read)
+			return code;
+		read = true;
+
+		const uint8_t *end = (const uint8_t *)g_ServerGame->m_Offsets->ServerGiveItemEnd.address;
+		const uint8_t *pills = (const uint8_t *)g_ServerGame->m_Offsets->ServerPillsSecondary.address;
+		if (end && pills)
+		{
+			code.speed = *(const float *const *)(end + 2);
+			code.throwWeapon = (decltype(code.throwWeapon))CallTarget(end + 0x10);
+			code.onGiven = (decltype(code.onGiven))CallTarget(end + 0x19);
+			code.speak = (decltype(code.speak))CallTarget(end + 0x25);
+			// mov eax, [ecx + m_iTeamNum]; ret
+			const uint8_t *team = CallTarget(pills + 0x99);
+			if (team && team[0] == 0x8B && team[1] == 0x81 && team[6] == 0xC3)
+				code.teamOf = (decltype(code.teamOf))team;
+			// mov edx, [eax + IsPlayer]
+			if (pills[0x15] == 0x8B && pills[0x16] == 0x90)
+				code.isPlayer = *(const int32_t *)(pills + 0x17);
+		}
+		code.found = code.speed && code.throwWeapon && code.onGiven && code.speak && code.teamOf && code.isPlayer > 0 && code.isPlayer < 0x1000
+			&& Hooks::m_PlayerWeaponSlotOffset > 0;
+		Diagnostics::Log("dual wield: the game's giving of pills %s (speed %.0f)", code.found ? "found" : "NOT understood, VR players can't give them",
+			code.speed ? *code.speed : 0.0f);
+		return code;
+	}
+
+	const int kTeamSurvivors = 2;
+	const int kPillsSlot = 4; // pills and adrenaline, Weapon_GetSlot's
+	// How far apart the eyes of two players can be for one to give the other something or heal them by touching: what
+	// the hand reaches, and some for the time the command takes (game units)
+	const float kTouchServerReach = 128.0f;
+	// The kit's target waits this long for the kit's action to start, in case the player doesn't say it's over
+	const unsigned long long kHealTargetMs = 10000;
+
+	// A survivor, alive and not down. Any entity: the players' virtuals are asked only of players.
+	bool CanTakePartUnsafe(void *player, const ItemUseCode &use, const GiveCode &give)
+	{
+		typedef bool(__thiscall *tTest)(void *thisptr);
+		return Virtual<tTest>(player, give.isPlayer)(player) && give.teamOf(player) == kTeamSurvivors && Virtual<tTest>(player, use.alive)(player)
+			&& !Virtual<tTest>(player, use.incapacitated)(player);
+	}
+
+	bool IsPlayer(void *entity)
+	{
+		const GiveCode &give = GetGiveCode();
+		if (!entity || !give.isPlayer)
+			return false;
+		__try
+		{
+			typedef bool(__thiscall *tTest)(void *thisptr);
+			return Virtual<tTest>(entity, give.isPlayer)(entity);
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			return false;
+		}
+	}
+
+	// Null if given, or why not
+	const char *GiveNowUnsafe(void *player, void *item, void *target, const ItemUseCode &use, const GiveCode &give)
+	{
+		typedef void *(__thiscall *tWeaponSlot)(void *player, int slot);
+		if (!CanTakePartUnsafe(player, use, give))
+			return "the giver is down, dead or not a survivor";
+		if (!CanTakePartUnsafe(target, use, give))
+			return "the other player is down, dead or not a survivor";
+		if (Virtual<tWeaponSlot>(target, Hooks::m_PlayerWeaponSlotOffset)(target, kPillsSlot))
+			return "the other player has pills or adrenaline already";
+		if (!give.throwWeapon(player, item, target, *give.speed, 0, 0))
+			return "the game didn't let it go";
+		give.onGiven(item, player, target);
+		give.speak(player, item, 0, 0);
+		return nullptr;
+	}
 }
 
 // The player's pills or adrenaline used at once, as the game does once its animation is over: from the hand that
@@ -1485,6 +1680,84 @@ void DualWield::ServerDropItem(edict_t *edict, int playerIndex, int weaponIndex,
 	Diagnostics::Log("dual wield: player %d dropped weapon %d", playerIndex, ((Server_WeaponCSBase *)weapon)->GetWeaponID());
 }
 
+// Pills or adrenaline given by touching another player with them (VR::UpdateItemUse), from either hand: the end of the
+// game's own giving, with the item of that hand and that player, after the game's checks
+void DualWield::ServerGiveItem(edict_t *edict, int playerIndex, int itemIndex, int targetIndex)
+{
+	if (!g_ServerGame || !edict || !edict->m_pUnk)
+		return;
+	void *player = edict->m_pUnk->GetBaseEntity();
+	void *item = PlayersWeapon(player, itemIndex);
+	const int id = WeaponIdOf(item);
+	if (id != C_WeaponCSBase::PAIN_PILLS && id != C_WeaponCSBase::ADRENALINE)
+		return;
+	void *target = targetIndex >= 1 && targetIndex < kMaxPlayers && targetIndex != playerIndex ? EntityByIndex(targetIndex) : nullptr;
+	if (!IsPlayer(target))
+		target = nullptr;
+	const ItemUseCode &use = GetItemUseCode();
+	const GiveCode &give = GetGiveCode();
+	if (!target || !use.found || !give.found)
+	{
+		Diagnostics::Log("dual wield: player %d can't give their item to player %d (%s)", playerIndex, targetIndex, target ? "the game's giving wasn't found" : "nobody there");
+		return;
+	}
+	const float distance = Hooks::ServerEyeDistance(player, target);
+	if (distance > kTouchServerReach)
+	{
+		Diagnostics::Log("dual wield: player %d is too far from player %d to give them their item (%.0f units)", playerIndex, targetIndex, distance);
+		return;
+	}
+
+	const char *refused = nullptr;
+	__try
+	{
+		refused = GiveNowUnsafe(player, item, target, use, give);
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		Diagnostics::Log("dual wield: giving the item of player %d failed", playerIndex);
+		return;
+	}
+	Diagnostics::Log("dual wield: player %d %s %s to player %d%s%s", playerIndex, refused ? "doesn't give" : "gives",
+		id == C_WeaponCSBase::PAIN_PILLS ? "pills" : "adrenaline", targetIndex, refused ? ": " : "", refused ? refused : "");
+}
+
+void DualWield::ServerSetHealTarget(int playerIndex, int targetIndex)
+{
+	if (!g_ServerGame || !g_ServerGame->IsValidPlayerIndex(playerIndex))
+		return;
+	Player &vrPlayer = g_ServerGame->m_PlayersVRInfo[playerIndex];
+	const int target = targetIndex >= 1 && targetIndex < kMaxPlayers && targetIndex != playerIndex ? targetIndex : 0;
+	if (target != vrPlayer.healTarget)
+		Diagnostics::Log("dual wield: player %d's kit %s", playerIndex, target ? "touches another player, to heal" : "touches nobody");
+	vrPlayer.healTarget = target;
+	vrPlayer.healTargetUntil = target ? GetTickCount64() + kHealTargetMs : 0;
+}
+
+// The kit's secondary attack heals the player it touches, while it touches them and they're near. Otherwise nobody: the
+// game shoves instead, as when it finds nobody looked at.
+void *DualWield::ServerHealTarget(void *player, int playerIndex)
+{
+	if (!g_ServerGame || !g_ServerGame->IsValidPlayerIndex(playerIndex))
+		return nullptr;
+	const Player &vrPlayer = g_ServerGame->m_PlayersVRInfo[playerIndex];
+	if (!vrPlayer.healTarget || GetTickCount64() >= vrPlayer.healTargetUntil)
+		return nullptr;
+	void *target = EntityByIndex(vrPlayer.healTarget);
+	if (!target || target == player || !IsPlayer(target))
+		return nullptr;
+
+	static int s_LoggedTarget = 0;
+	const float distance = Hooks::ServerEyeDistance(player, target);
+	const bool inReach = distance <= kTouchServerReach;
+	if (s_LoggedTarget != (inReach ? vrPlayer.healTarget : -vrPlayer.healTarget))
+	{
+		s_LoggedTarget = inReach ? vrPlayer.healTarget : -vrPlayer.healTarget;
+		Diagnostics::Log("dual wield: player %d's kit is for player %d, %.0f units away%s", playerIndex, vrPlayer.healTarget, distance, inReach ? "" : ": too far");
+	}
+	return inReach ? target : nullptr;
+}
+
 void DualWield::ServerInit(Game *game)
 {
 	g_ServerGame = game;
@@ -1500,6 +1773,8 @@ void DualWield::ServerReset()
 	for (Player &player : g_ServerGame->m_PlayersVRInfo)
 	{
 		player.useAimLeft = false;
+		player.healTarget = 0;
+		player.healTargetUntil = 0;
 		player.leftItemIndex = 0;
 		player.leftItem = nullptr;
 		player.leftItemId = 0;
@@ -1621,6 +1896,30 @@ bool DualWield::ServerTakeOut(void *player, void *weapon)
 void *DualWield::ServerPlayersWeapon(void *player, int index)
 {
 	return PlayersWeapon(player, index);
+}
+
+void *DualWield::ServerEntity(int index)
+{
+	return EntityByIndex(index);
+}
+
+float DualWield::ServerCurtime()
+{
+	if (!g_ServerGame)
+		return 0.0f;
+	__try
+	{
+		// CBaseEntity::entindex reads gpGlobals (EntityByIndexUnsafe); curtime is at +0xC
+		const uint8_t *code = (const uint8_t *)g_ServerGame->m_Offsets->CBaseEntity_entindex.address;
+		if (code[8] != 0x8B || code[9] != 0x0D)
+			return 0.0f;
+		const uint8_t *globals = **(const uint8_t ***)(code + 10);
+		return globals ? *(const float *)(globals + 0xC) : 0.0f;
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		return 0.0f;
+	}
 }
 
 void *DualWield::ServerUpgradeWeapon(void *player)

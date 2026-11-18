@@ -100,6 +100,8 @@ typedef void *(__thiscall *tWeaponOfId)(void *thisptr, int weaponId);
 typedef void(__cdecl *tParticleTracer)(const char *name, const Vector &start, const Vector &end, int entityIndex, int attachment, bool whiz);
 typedef bool(__thiscall *tPlayerAddUpgrade)(void *thisptr, int type);
 typedef void *(__cdecl *tGrenadeLauncherCreate)(const Vector &origin, const QAngle &angles, const Vector &velocity, const Vector &angularVelocity, void *owner, int flags);
+typedef void(__thiscall *tSecondaryAttack)(void *thisptr);
+typedef void *(__thiscall *tBackpackTarget)(void *thisptr, void *owner, int secondary);
 
 // A Vector passed by value (CBaseCSGrenade::EmitGrenade takes its vectors by value)
 struct VectorValue { float x, y, z; };
@@ -167,6 +169,10 @@ public:
 	static inline Hook<tParticleTracer> hkClientParticleTracer;
 	static inline Hook<tGrenadeLauncherCreate> hkGrenadeLauncherCreate;
 	static inline Hook<tPlayerAddUpgrade> hkPlayerAddUpgrade;
+	// Giving pills and healing with the kit, VR players by touching (DualWield::ServerGiveItem, ServerHealTarget)
+	static inline Hook<tSecondaryAttack> hkServerPillsSecondary;
+	static inline Hook<tBackpackTarget> hkServerBackpackTarget;
+	static inline tSecondaryAttack m_ServerShove = nullptr; // CTerrorWeapon::SecondaryAttack, read from the pills' one
 	// Read from CTerrorPlayer::AddUpgrade (Offsets::ServerPlayerAddUpgrade), 0 / null if it doesn't look as expected
 	static inline int m_PlayerWeaponSlotOffset = 0;
 	static inline int m_WeaponAddUpgradeOffset = 0;
@@ -218,8 +224,8 @@ public:
 	static int dServerFireTerrorBullets(int playerId, const Vector &vecOrigin, const QAngle &vecAngles, int a4, int a5, int a6, float a7);
 	static int dClientFireTerrorBullets(int playerId, const Vector &vecOrigin, const QAngle &vecAngles, int a4, int a5, int a6, float a7);
 	// Bullets from where the mod says, past the hooks that move them to the right hand (the left hand's gun)
-	static int FireServerBullets(int playerIndex, const Vector &origin, const QAngle &angles, int weaponId, int seed, float spread);
-	static int FireClientBullets(int playerIndex, const Vector &origin, const QAngle &angles, int weaponId, int seed, float spread);
+	static int FireServerBullets(int playerIndex, const Vector &origin, const QAngle &angles, int weaponId, int seed, float time);
+	static int FireClientBullets(int playerIndex, const Vector &origin, const QAngle &angles, int weaponId, int seed, float time);
 	static float __fastcall dProcessUsercmds(void *ecx, void *edx, edict_t *player, void *buf, int numcmds, int totalcmds, int dropped_packets, bool ignore, bool paused);
 	static int dReadUsercmd(void *buf, CUserCmd *move, CUserCmd *from);
 	static void __fastcall dWriteUsercmdDeltaToBuffer(void *ecx, void *edx, int a1, void *buf, int from, int to, bool isnewcommand);
@@ -272,6 +278,10 @@ public:
 	static bool __fastcall dServerAddDualWeapon(void *ecx, void *edx);
 	static bool __fastcall dPlayerAddUpgrade(void *ecx, void *edx, int type);
 	static void *__cdecl dGrenadeLauncherCreate(const Vector &origin, const QAngle &angles, const Vector &velocity, const Vector &angularVelocity, void *owner, int flags);
+	static void __fastcall dServerPillsSecondary(void *ecx, void *edx);
+	static void *__fastcall dServerBackpackTarget(void *ecx, void *edx, void *owner, int secondary);
+	// How far apart two players' eyes are on the server, game units (-1 if it can't be known)
+	static float ServerEyeDistance(void *player, void *other);
 	static void TraceMeleeSwing(void *weapon, const QAngle &from, const QAngle &to, const Vector *hand, bool newSwing);
 	static bool GetServerHandAim(void *player, Vector &origin, QAngle &angles);
 	static int GetServerEntityIndex(void *entity);

@@ -30,27 +30,27 @@ namespace
 {
 	const LeftGun::GunData kGuns[] =
 	{
-		{ C_WeaponCSBase::PISTOL, 0.15f, LeftGun::Semi, 1.5f, "Pistol.Fire", true, false, false, 0, "Pistol.ClipIn", "weapon_muzzle_flash_pistol", "weapon_shell_casing_9mm_L4D2", 6.0f, false },
-		{ C_WeaponCSBase::MAGNUM, 0.15f, LeftGun::Semi, 1.25f, "Magnum.Fire", true, false, false, 0, "Magnum.ClipIn", "weapon_muzzle_flash_autoshotgun", "weapon_shell_casing_desert_eagle", 10.0f, false },
-		{ C_WeaponCSBase::UZI, 0.0625f, LeftGun::Auto, 1.0f, "SMG.Fire", false, true, false, 650, "SMG.ClipIn", "weapon_muzzle_flash_smg", "weapon_shell_casing_9mm", 3.0f, false },
-		{ C_WeaponCSBase::MAC10, 0.0625f, LeftGun::Auto, 1.2f, "SMG_Silenced.Fire", false, true, false, 650, "SMG_Silenced.ClipIn", "weapon_muzzle_flash_smg_silenced", "weapon_shell_casing_9mm_L4D2", 3.0f, false },
-		{ C_WeaponCSBase::MP5, 0.075f, LeftGun::Auto, 1.1f, "Weapon_MP5Navy.Single", false, true, false, 650, "SMG.ClipIn", "weapon_muzzle_flash_smg", "weapon_shell_casing_9mm", 2.5f, false },
+		{ C_WeaponCSBase::PISTOL, 0.15f, LeftGun::Semi, "Pistol.Fire", true, false, false, 0, "Pistol.ClipIn", "weapon_muzzle_flash_pistol", "weapon_shell_casing_9mm_L4D2", 6.0f, false },
+		{ C_WeaponCSBase::MAGNUM, 0.15f, LeftGun::Semi, "Magnum.Fire", true, false, false, 0, "Magnum.ClipIn", "weapon_muzzle_flash_autoshotgun", "weapon_shell_casing_desert_eagle", 10.0f, false },
+		{ C_WeaponCSBase::UZI, 0.0625f, LeftGun::Auto, "SMG.Fire", false, true, false, 650, "SMG.ClipIn", "weapon_muzzle_flash_smg", "weapon_shell_casing_9mm", 3.0f, false },
+		{ C_WeaponCSBase::MAC10, 0.0625f, LeftGun::Auto, "SMG_Silenced.Fire", false, true, false, 650, "SMG_Silenced.ClipIn", "weapon_muzzle_flash_smg_silenced", "weapon_shell_casing_9mm_L4D2", 3.0f, false },
+		{ C_WeaponCSBase::MP5, 0.075f, LeftGun::Auto, "Weapon_MP5Navy.Single", false, true, false, 650, "SMG.ClipIn", "weapon_muzzle_flash_smg", "weapon_shell_casing_9mm", 2.5f, false },
 		// The pump shotguns are pumped between shots
-		{ C_WeaponCSBase::PUMPSHOTGUN, 0.8f, LeftGun::Semi, 0.8f, "Shotgun.Fire", false, true, true, 56, nullptr, "weapon_muzzle_flash_autoshotgun", "weapon_shell_casing_shotgun", 9.0f, true },
-		{ C_WeaponCSBase::SHOTGUN_CHROME, 0.8f, LeftGun::Semi, 0.8f, "Shotgun_Chrome.Fire", false, true, true, 56, nullptr, "weapon_muzzle_flash_autoshotgun", "weapon_shell_casing_shotgun", 9.0f, true },
-		{ C_WeaponCSBase::AUTOSHOTGUN, 0.15f, LeftGun::Semi, 0.8f, "AutoShotgun.Fire", false, true, true, 90, nullptr, "weapon_muzzle_flash_autoshotgun", "weapon_shell_casing_shotgun", 7.0f, false },
-		{ C_WeaponCSBase::SPAS, 0.15f, LeftGun::Semi, 0.75f, "AutoShotgun_Spas.Fire", false, true, true, 90, nullptr, "weapon_muzzle_flash_autoshotgun", "weapon_shell_casing_shotgun", 7.0f, false },
-		{ C_WeaponCSBase::M16A1, 0.0875f, LeftGun::Auto, 0.4f, "Rifle.Fire", false, true, false, 360, "Rifle.ClipIn", "weapon_muzzle_flash_assaultrifle", "weapon_shell_casing_rifle", 3.0f, false },
-		{ C_WeaponCSBase::SCAR, 0.07f, LeftGun::Burst, 0.35f, "Rifle_Desert.Fire", false, true, false, 360, "Rifle_Desert.ClipIn", "weapon_muzzle_flash_assaultrifle", "weapon_shell_casing_rifle", 3.5f, false },
-		{ C_WeaponCSBase::AK47, 0.13f, LeftGun::Auto, 1.0f, "AK47.Fire", false, true, false, 360, "AK47.ClipIn", "weapon_muzzle_flash_smg", "weapon_shell_casing_rifle", 4.0f, false },
-		{ C_WeaponCSBase::SG552, 0.0825f, LeftGun::Auto, 0.4f, "Weapon_SG552.Single", false, true, false, 360, "Rifle.ClipIn", "weapon_muzzle_flash_assaultrifle", "weapon_shell_casing_rifle", 3.0f, false },
+		{ C_WeaponCSBase::PUMPSHOTGUN, 0.8f, LeftGun::Semi, "Shotgun.Fire", false, true, true, 56, nullptr, "weapon_muzzle_flash_autoshotgun", "weapon_shell_casing_shotgun", 9.0f, true },
+		{ C_WeaponCSBase::SHOTGUN_CHROME, 0.8f, LeftGun::Semi, "Shotgun_Chrome.Fire", false, true, true, 56, nullptr, "weapon_muzzle_flash_autoshotgun", "weapon_shell_casing_shotgun", 9.0f, true },
+		{ C_WeaponCSBase::AUTOSHOTGUN, 0.15f, LeftGun::Semi, "AutoShotgun.Fire", false, true, true, 90, nullptr, "weapon_muzzle_flash_autoshotgun", "weapon_shell_casing_shotgun", 7.0f, false },
+		{ C_WeaponCSBase::SPAS, 0.15f, LeftGun::Semi, "AutoShotgun_Spas.Fire", false, true, true, 90, nullptr, "weapon_muzzle_flash_autoshotgun", "weapon_shell_casing_shotgun", 7.0f, false },
+		{ C_WeaponCSBase::M16A1, 0.0875f, LeftGun::Auto, "Rifle.Fire", false, true, false, 360, "Rifle.ClipIn", "weapon_muzzle_flash_assaultrifle", "weapon_shell_casing_rifle", 3.0f, false },
+		{ C_WeaponCSBase::SCAR, 0.07f, LeftGun::Burst, "Rifle_Desert.Fire", false, true, false, 360, "Rifle_Desert.ClipIn", "weapon_muzzle_flash_assaultrifle", "weapon_shell_casing_rifle", 3.5f, false },
+		{ C_WeaponCSBase::AK47, 0.13f, LeftGun::Auto, "AK47.Fire", false, true, false, 360, "AK47.ClipIn", "weapon_muzzle_flash_smg", "weapon_shell_casing_rifle", 4.0f, false },
+		{ C_WeaponCSBase::SG552, 0.0825f, LeftGun::Auto, "Weapon_SG552.Single", false, true, false, 360, "Rifle.ClipIn", "weapon_muzzle_flash_assaultrifle", "weapon_shell_casing_rifle", 3.0f, false },
 		// The M60 isn't reloaded, as in the game
-		{ C_WeaponCSBase::M60, 0.11f, LeftGun::Auto, 1.0f, "M60.Fire", false, true, false, 0, nullptr, "weapon_muzzle_flash_assaultrifle", "weapon_shell_casing_m60", 3.5f, false },
-		{ C_WeaponCSBase::HUNTING_RIFLE, 0.25f, LeftGun::Semi, 0.1f, "HuntingRifle.Fire", false, true, false, 150, "HuntingRifle.ClipIn", "weapon_muzzle_flash_huntingrifle", "weapon_shell_casing_rifle", 6.0f, false },
-		{ C_WeaponCSBase::SNIPER_MILITARY, 0.25f, LeftGun::Semi, 0.5f, "Sniper_Military.Fire", false, true, false, 180, "Sniper_Military.ClipIn", "weapon_muzzle_flash_huntingrifle", "weapon_shell_casing_rifle", 6.0f, false },
+		{ C_WeaponCSBase::M60, 0.11f, LeftGun::Auto, "M60.Fire", false, true, false, 0, nullptr, "weapon_muzzle_flash_assaultrifle", "weapon_shell_casing_m60", 3.5f, false },
+		{ C_WeaponCSBase::HUNTING_RIFLE, 0.25f, LeftGun::Semi, "HuntingRifle.Fire", false, true, false, 150, "HuntingRifle.ClipIn", "weapon_muzzle_flash_huntingrifle", "weapon_shell_casing_rifle", 6.0f, false },
+		{ C_WeaponCSBase::SNIPER_MILITARY, 0.25f, LeftGun::Semi, "Sniper_Military.Fire", false, true, false, 180, "Sniper_Military.ClipIn", "weapon_muzzle_flash_huntingrifle", "weapon_shell_casing_rifle", 6.0f, false },
 		// The bolt action rifles are worked between shots
-		{ C_WeaponCSBase::AWP, 1.05f, LeftGun::Semi, 0.1f, "Weapon_AWP.Single", false, true, false, 180, "HuntingRifle.ClipIn", "weapon_muzzle_flash_huntingrifle", "weapon_shell_casing_rifle", 9.0f, true },
-		{ C_WeaponCSBase::SCOUT, 0.9f, LeftGun::Semi, 0.1f, "Weapon_Scout.Single", false, true, false, 180, "HuntingRifle.ClipIn", "weapon_muzzle_flash_huntingrifle", "weapon_shell_casing_rifle", 7.0f, true },
+		{ C_WeaponCSBase::AWP, 1.05f, LeftGun::Semi, "Weapon_AWP.Single", false, true, false, 180, "HuntingRifle.ClipIn", "weapon_muzzle_flash_huntingrifle", "weapon_shell_casing_rifle", 9.0f, true },
+		{ C_WeaponCSBase::SCOUT, 0.9f, LeftGun::Semi, "Weapon_Scout.Single", false, true, false, 180, "HuntingRifle.ClipIn", "weapon_muzzle_flash_huntingrifle", "weapon_shell_casing_rifle", 7.0f, true },
 	};
 
 	// The guns' world models (LeftGun::GunModel). The magazine's middle is the middle of its vertices' box; the shotguns'
@@ -194,6 +194,14 @@ bool VR::GetLeftItemFrame(Mat34 &frame) const
 		const Vec3 left = Cross(up, forward);
 		forward = Normalized(toRight);
 		up = Normalized(up - forward * Dot(up, forward), Cross(forward, left));
+	}
+	// A long gun held with one hand kicks up with its shots (FireLeftGun), turning about the fist, and comes back
+	if (m_LeftAimKick.Active())
+	{
+		const float kDegrees = 3.14159265f / 180.0f;
+		const Mat34 kick = Multiply(AxisAngle(up, m_LeftAimKick.yaw * kDegrees), AxisAngle(Cross(up, forward), -m_LeftAimKick.pitch * kDegrees));
+		forward = Normalized(RotateVector(kick, forward));
+		up = Normalized(RotateVector(kick, up));
 	}
 	frame = FromAxes(Cross(up, forward), up, forward, Vec3());
 	SetAxis(frame, 3, fist - RotateVector(frame, Origin(LeftGunGrip())));
@@ -739,6 +747,12 @@ void VR::ApplyLeftGunShot(Mat34 &frame)
 		m_LeftGunDrawnPull = std::max(m_LeftGunDrawnPull, kBlowbackTravel * sinf(3.14159265f * (float)since / (float)kBlowbackMs));
 }
 
+// The left hand's gun is a long gun (aim_logic.h) that the right hand doesn't hold too: it spreads and kicks more
+bool VR::LeftGunWithOneHand() const
+{
+	return m_LongGunsNeedBothHands && !m_RightHoldsLeftGun && Aim::NeedsBothHands(m_LeftItemId);
+}
+
 bool VR::IsLeftGunShot(int seed) const
 {
 	const unsigned long long now = GetTickCount64();
@@ -861,11 +875,36 @@ void VR::FireLeftGun(const LeftGun::GunData &gun, const Vector &origin, const QA
 	// The empty case out of the ejection port, the way its attachment points (to the right)
 	if (!gun.workedByHand && GetTickCount64() - m_LeftGunShellMs < 250)
 		Hooks::ClientParticle(gun.brass, ToVector(m_LeftGunShell), ToVector(m_LeftGunShell + m_LeftGunShellDir * kMuzzleFlashLength));
-	Hooks::FireClientBullets(m_Game->m_EngineClient->GetLocalPlayer(), origin, angles, gun.weaponId, seed, gun.spread);
+
+	// Where the shot goes: the aim turned by the spread the game would give the gun (aim_logic.h), from how the player
+	// moves (the game only updates the spread of the right hand's weapon), more with one hand on a long gun, which also
+	// kicks it up. The server fires it where it's shown here.
+	QAngle shot = angles;
+	if (const Aim::GunScript *script = Aim::FindGun(gun.weaponId))
+	{
+		const int playerIndex = m_Game->m_EngineClient->GetLocalPlayer();
+		float speed = 0.0f;
+		bool ducking = false, onGround = true;
+		const float gunSpread = GetPlayerMotion(m_Game->GetClientEntity(playerIndex), speed, ducking, onGround)
+			? Aim::MovementSpread(*script, speed, ducking, onGround) : script->minStanding;
+		const bool oneHanded = LeftGunWithOneHand();
+		const float spread = Aim::ShotSpread(*script, gunSpread, m_WeaponSpread, oneHanded);
+		float pitch = 0.0f, yaw = 0.0f;
+		Aim::SpreadAngles(seed, spread, pitch, yaw);
+		shot = QAngle(angles.x + pitch, angles.y + yaw, angles.z);
+		if (oneHanded && script->longGun)
+			m_LeftAimKick.Shot(*script, seed);
+		if (GetTickCount64() < m_AimLogUntil)
+			Diagnostics::Log("aim: a shot of the left hand's weapon %d with %s, moving at %.0f%s%s, fired with %.2f, the aim kicked %.1f up",
+				gun.weaponId, oneHanded && script->longGun ? "one hand" : "both hands or a short gun", speed, ducking ? ", crouched" : "",
+				onGround ? "" : ", in the air", spread, m_LeftAimKick.pitch);
+	}
+
+	Hooks::FireClientBullets(m_Game->m_EngineClient->GetLocalPlayer(), origin, shot, gun.weaponId, seed, 0.0f);
 	m_LeftGunShotMs = GetTickCount64();
 	m_LeftGunShotId = gun.weaponId;
 
-	snprintf(command, sizeof(command), "l4d2vr_left_fire %.1f %.1f %.1f %.2f %.2f %.2f %d", origin.x, origin.y, origin.z, angles.x, angles.y, angles.z, seed);
+	snprintf(command, sizeof(command), "l4d2vr_left_fire %.1f %.1f %.1f %.2f %.2f %.2f %d", origin.x, origin.y, origin.z, shot.x, shot.y, shot.z, seed);
 	m_Game->m_EngineClient->ServerCmd(command, false);
 	m_Haptics.Play(Haptics::Hand::OtherHand, kShotHaptic);
 }
@@ -974,6 +1013,7 @@ void LeftGun::ServerFire(edict_t *edict, int playerIndex, const Vector &origin, 
 	--clip;
 	DualWield::ServerNetworkChanged(gun);
 	vrPlayer.leftFireMs = now;
-	Hooks::FireServerBullets(playerIndex, origin, angles, data->weaponId, seed, data->spread);
+	// The angles come with the shot's spread (VR::FireLeftGun); the time is for its sound on the other players
+	Hooks::FireServerBullets(playerIndex, origin, angles, data->weaponId, seed, DualWield::ServerCurtime());
 	*current = saved;
 }

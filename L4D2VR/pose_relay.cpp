@@ -813,6 +813,22 @@ bool PoseRelay::HandleServerCommand(edict_t *player, const void *commandObject)
 		return true;
 	}
 
+	// Pills or adrenaline given by touching another player with them: the item's entity index and the player's index.
+	// The player the kit touches, to heal with its secondary attack: their index, 0 for nobody (body_items.cpp).
+	if (strcmp(name, "l4d2vr_give") == 0 || strcmp(name, "l4d2vr_heal_target") == 0)
+	{
+		const int index = ServerPlayerIndex(m_Game, player);
+		const bool give = name[7] == 'g';
+		if (m_Game->IsValidPlayerIndex(index) && args.Count() == (give ? 3 : 2))
+		{
+			if (give)
+				DualWield::ServerGiveItem(player, index, std::clamp(atoi(args.Arg(1)), 0, 4095), atoi(args.Arg(2)));
+			else
+				DualWield::ServerSetHealTarget(index, atoi(args.Arg(1)));
+		}
+		return true;
+	}
+
 	// A shot of the left hand's gun: x y z pitch yaw roll seed (left_gun.cpp)
 	if (strcmp(name, "l4d2vr_left_fire") == 0)
 	{

@@ -131,6 +131,38 @@ namespace
 		// The bottom above the top (crouched far down): the chest is still there
 		CHECK(NeedleAtBody(Vec3(3.0f, 0.0f, 0.0f), Vec3(-1.0f, 0.0f, 0.0f), top, 2.0f, 5.0f, 0.3f));
 	}
+
+	void TestTouchingPlayers()
+	{
+		// The game's scale: 43.2 units per meter. A player standing at (100, 0, 0), another one crouched at (0, 100, 0).
+		const float scale = 43.2f;
+		const Vec3 feet[2] = { Vec3(100.0f, 0.0f, 0.0f), Vec3(0.0f, 100.0f, 0.0f) };
+		const bool crouched[2] = { false, true };
+
+		// A hand 0.2 m in front of the chest of the one standing touches it; 0.4 m away it doesn't
+		CHECK(TouchedPlayer(Vec3(100.0f + 0.2f * scale, 0.0f, 50.0f), feet, crouched, 2, scale) == 0);
+		CHECK(TouchedPlayer(Vec3(100.0f + 0.4f * scale, 0.0f, 50.0f), feet, crouched, 2, scale) == -1);
+		// On the head, yes; above it, or at the feet, no
+		CHECK(TouchedPlayer(Vec3(100.0f, 5.0f, 70.0f), feet, crouched, 2, scale) == 0);
+		CHECK(TouchedPlayer(Vec3(100.0f, 0.0f, 66.0f + 0.4f * scale), feet, crouched, 2, scale) == -1);
+		CHECK(TouchedPlayer(Vec3(100.0f, 0.0f, 1.0f), feet, crouched, 2, scale) == -1);
+
+		// Where a standing player's chest is, the one crouched has nothing
+		CHECK(TouchedPlayer(Vec3(0.0f, 100.0f, 60.0f), feet, crouched, 2, scale) == -1);
+		CHECK(TouchedPlayer(Vec3(0.0f, 100.0f + 0.2f * scale, 35.0f), feet, crouched, 2, scale) == 1);
+
+		// Between two players the nearer one; nobody around, none
+		const Vec3 close[2] = { Vec3(0.0f, 0.0f, 0.0f), Vec3(20.0f, 0.0f, 0.0f) };
+		const bool standing[2] = { false, false };
+		CHECK(TouchedPlayer(Vec3(8.0f, 0.0f, 40.0f), close, standing, 2, scale) == 0);
+		CHECK(TouchedPlayer(Vec3(12.0f, 0.0f, 40.0f), close, standing, 2, scale) == 1);
+		CHECK(TouchedPlayer(Vec3(8.0f, 0.0f, 40.0f), close, standing, 0, scale) == -1);
+
+		// The distance to a body line: from its ends above and below it
+		CHECK_NEAR(DistanceToBodyLine(Vec3(3.0f, 0.0f, -5.0f), Vec3(0.0f, 0.0f, 0.0f), -10.0f), 3.0f, 0.001f);
+		CHECK_NEAR(DistanceToBodyLine(Vec3(0.0f, 0.0f, 4.0f), Vec3(0.0f, 0.0f, 0.0f), -10.0f), 4.0f, 0.001f);
+		CHECK_NEAR(DistanceToBodyLine(Vec3(0.0f, 0.0f, -13.0f), Vec3(0.0f, 0.0f, 0.0f), -10.0f), 3.0f, 0.001f);
+	}
 }
 
 void RunBodyTests()
@@ -141,4 +173,5 @@ void RunBodyTests()
 	TestItemSpots();
 	TestBodyYaw();
 	TestNeedle();
+	TestTouchingPlayers();
 }

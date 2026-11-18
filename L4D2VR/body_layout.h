@@ -92,17 +92,61 @@ namespace BodyLayout
 		return WrapDegrees(bodyYaw);
 	}
 
+	// From `point` to the nearest point of a body around the vertical line from `top` down to the height `bottomZ`. Any
+	// units.
+	inline Vec3 ToBodyLine(const Vec3 &point, const Vec3 &top, float bottomZ)
+	{
+		const float down = std::max(top.z - bottomZ, 0.0f);
+		const float along = std::clamp(top.z - point.z, 0.0f, down);
+		return Vec3(top.x, top.y, top.z - along) - point;
+	}
+
+	inline float DistanceToBodyLine(const Vec3 &point, const Vec3 &top, float bottomZ)
+	{
+		return HandMath::Length(ToBodyLine(point, top, bottomZ));
+	}
+
 	// A needle with its tip at `tip`, pointing along `needle` (unit), is against a body around the vertical line from
 	// `top` down to the height `bottomZ`: its tip within `reach` of the line and pointing at it (cosine above
 	// `minCosine`). Any units.
 	inline bool NeedleAtBody(const Vec3 &tip, const Vec3 &needle, const Vec3 &top, float bottomZ, float reach, float minCosine)
 	{
-		const float down = std::max(top.z - bottomZ, 0.0f);
-		const float along = std::clamp(top.z - tip.z, 0.0f, down);
-		const Vec3 toLine = Vec3(top.x, top.y, top.z - along) - tip;
+		const Vec3 toLine = ToBodyLine(tip, top, bottomZ);
 		const float distance = HandMath::Length(toLine);
 		if (distance >= reach)
 			return false;
 		return distance < 1e-3f || HandMath::Dot(needle, toLine * (1.0f / distance)) > minCosine;
+	}
+
+	// Another player's body, from where they stand (their origin, at the feet), game units: the line goes from the knees to
+	// the top of the head, lower when they crouch. A hand touches it within kTouchReach meters of the line (the middle of
+	// the chest is about 0.15 m in front of it, the outside of the arm 0.25 to the side).
+	constexpr float kBodyLineFromFeet = 18.0f;
+	constexpr float kBodyLineTopStanding = 66.0f;
+	constexpr float kBodyLineTopCrouched = 46.0f;
+	constexpr float kTouchReach = 0.32f;
+
+	inline float DistanceToPlayer(const Vec3 &point, const Vec3 &feet, bool crouched)
+	{
+		const Vec3 top(feet.x, feet.y, feet.z + (crouched ? kBodyLineTopCrouched : kBodyLineTopStanding));
+		return DistanceToBodyLine(point, top, feet.z + kBodyLineFromFeet);
+	}
+
+	// Of the players whose feet are at `feet` (game units), the one whose body `point` touches, the nearest: its place in
+	// the list, -1 if none. `unitsPerMeter` is the game's scale.
+	inline int TouchedPlayer(const Vec3 &point, const Vec3 *feet, const bool *crouched, int count, float unitsPerMeter)
+	{
+		int best = -1;
+		float bestDistance = kTouchReach * unitsPerMeter;
+		for (int i = 0; i < count; ++i)
+		{
+			const float distance = DistanceToPlayer(point, feet[i], crouched[i]);
+			if (distance < bestDistance)
+			{
+				bestDistance = distance;
+				best = i;
+			}
+		}
+		return best;
 	}
 }

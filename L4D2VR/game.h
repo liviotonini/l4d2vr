@@ -40,12 +40,19 @@ struct Player
 
     bool manualReload = false;  // reloads with the hands: the game doesn't reload this player's weapon by itself
     bool reloadButton = false;  // has the reload button pressed in the last usercmd
+    // How their guns aim (aim_logic.h), as their last usercmd says: with the game's spread, a long gun with one hand
+    bool gameSpread = false;
+    bool oneHandedLongGun = false;
 
     // Where this player's hand aims the use for a moment, after grabbing something in the world
     Vector useAimOrigin = { 0,0,0 };
     QAngle useAimAngles = { 0,0,0 };
     unsigned long long useAimUntil = 0;
     bool useAimLeft = false;    // grabbed with the left hand: what it takes goes to the left hand
+    // The player this one's kit touches, to be healed with the kit's secondary attack (Hooks::dServerBackpackTarget):
+    // as the player says, until then
+    int healTarget = 0;
+    unsigned long long healTargetUntil = 0;
 
     // Dual wield (dual_wield.cpp). What the left hand holds, as the player says, and the weapon in the extra slot. Both
     // are checked after every batch of usercmds: the entity has to belong to this player.

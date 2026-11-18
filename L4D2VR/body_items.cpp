@@ -118,6 +118,14 @@ namespace
 	int g_MaxSpeedOffset = -1;
 	// Where a player looks, as the game has it (DT_TerrorPlayer, pitch and yaw): what its animation aims the weapon at
 	int g_EyeAnglesOffset = -1;
+	// How the local player moves (DT_LocalPlayerExclusive) and its flags (DT_BasePlayer: on the ground, crouched)
+	int g_VelocityOffset = -1;
+	int g_FlagsOffset = -1;
+	// Who can be given pills or healed (PlayerTouchedBy): the team, alive, not down
+	int g_TeamOffset = -1;
+	int g_LifeStateOffset = -1;
+	int g_IncapacitatedOffset = -1;
+	int g_HealthOffset = -1;
 	bool g_NetvarsLookedUp = false;
 
 	bool HasPlayerClass(const ClientClass *clientClass)
@@ -181,6 +189,19 @@ namespace
 			if (FindPlayerProp(classes, "m_angEyeAngles[0]", pitchOffset, unused) && FindPlayerProp(classes, "m_angEyeAngles[1]", yawOffset, unused)
 				&& pitchOffset > 0 && yawOffset == pitchOffset + 4)
 				g_EyeAnglesOffset = pitchOffset;
+
+			int velocityX = -1, velocityY = -1, velocityZ = -1;
+			if (FindPlayerProp(classes, "m_vecVelocity[0]", velocityX, unused) && FindPlayerProp(classes, "m_vecVelocity[1]", velocityY, unused)
+				&& FindPlayerProp(classes, "m_vecVelocity[2]", velocityZ, unused) && velocityX > 0 && velocityY == velocityX + 4 && velocityZ == velocityX + 8)
+				g_VelocityOffset = velocityX;
+			FindPlayerProp(classes, "m_fFlags", g_FlagsOffset, unused);
+			Diagnostics::Log("body items: m_vecVelocity at 0x%X, m_fFlags at 0x%X", g_VelocityOffset, g_FlagsOffset);
+			FindPlayerProp(classes, "m_iTeamNum", g_TeamOffset, unused);
+			FindPlayerProp(classes, "m_lifeState", g_LifeStateOffset, unused);
+			FindPlayerProp(classes, "m_isIncapacitated", g_IncapacitatedOffset, unused);
+			FindPlayerProp(classes, "m_iHealth", g_HealthOffset, unused);
+			Diagnostics::Log("body items: m_iTeamNum at 0x%X, m_lifeState at 0x%X, m_isIncapacitated at 0x%X, m_iHealth at 0x%X", g_TeamOffset, g_LifeStateOffset,
+				g_IncapacitatedOffset, g_HealthOffset);
 		}
 		Diagnostics::Log("body items: m_nModelIndex at 0x%X, m_hOwnerEntity at 0x%X, m_iWorldModelIndex at 0x%X, m_angEyeAngles at 0x%X", g_ModelIndexOffset,
 			g_OwnerOffset, g_WorldModelIndexOffset, g_EyeAnglesOffset);
@@ -307,6 +328,8 @@ namespace
 	const float kBodyLineForward = -0.05f;
 	const float kBodyReach = 0.24f;
 	const float kNeedleTowardsBody = 0.3f;
+	// The kit is used on oneself with the fist holding it this close to that line (it reaches 0.15 m past the fist)
+	const float kKitBodyReach = 0.30f;
 
 	// The fist of another player's left hand from the wrist they send, meters: along the fingers, towards the palm
 	const float kRemoteFistForward = 0.075f;
@@ -381,6 +404,31 @@ namespace
 	}
 
 	Vec3 ToVec3(const Vector &v) { return Vec3(v.x, v.y, v.z); }
+
+	const int kTeamSurvivors = 2;
+	const int kFlagDucking = 1 << 1; // FL_DUCKING
+
+	// A player another can give pills to or heal, where they stand (IClientRenderable::GetRenderOrigin, at the feet)
+	bool ReadTouchablePlayer(const void *player, Vec3 &feet, bool &crouched)
+	{
+		__try
+		{
+			if (Read<int>(player, g_TeamOffset) != kTeamSurvivors || Read<uint8_t>(player, g_LifeStateOffset) != 0)
+				return false;
+			if (g_IncapacitatedOffset > 0 && Read<uint8_t>(player, g_IncapacitatedOffset) != 0)
+				return false;
+			crouched = g_FlagsOffset > 0 && (Read<int>(player, g_FlagsOffset) & kFlagDucking) != 0;
+			void *renderable = (uint8_t *)player + 4;
+			typedef const Vector &(__thiscall *tGetOrigin)(void *thisptr);
+			const Vector &origin = ((tGetOrigin)(*(void ***)renderable)[1])(renderable);
+			feet = Vec3(origin.x, origin.y, origin.z);
+			return true;
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			return false;
+		}
+	}
 }
 
 void VR::ClearBodyModels()
@@ -669,6 +717,9 @@ bool VR::UpdateItemUse()
 	m_ItemTriggerDown[0] = leftTrigger;
 	m_ItemTriggerDown[1] = rightTrigger;
 
+	// Given to another player, touching them with the trigger and the grab
+	UpdateGiving(leftItem, rightItem, hostHasMod);
+
 	int itemIndex = 0;
 	bool leftHand = false;
 	if (leftItem && PressedDigitalAction(m_ActionSecondaryAttack) && ItemUseGestureReady(true, m_LeftItemId))
@@ -678,15 +729,9 @@ bool VR::UpdateItemUse()
 	}
 	else if (rightItem && PressedDigitalAction(m_ActionPrimaryAttack) && ItemUseGestureReady(false, m_ActiveWeaponId))
 	{
-		itemIndex = -1;
-		C_BasePlayer *local = (C_BasePlayer *)m_Game->GetClientEntity(m_Game->m_EngineClient->GetLocalPlayer());
-		InventoryItem items[64];
-		const int count = local ? GetInventory(local, items, 64) : 0;
-		for (int i = 0; i < count; ++i)
-		{
-			if (items[i].weapon == (void *)local->GetActiveWeapon())
-				itemIndex = items[i].index;
-		}
+		itemIndex = GetActiveWeaponIndex();
+		if (!itemIndex)
+			itemIndex = -1;
 	}
 
 	const bool ready = itemIndex != 0;
@@ -705,7 +750,232 @@ bool VR::UpdateItemUse()
 		}
 	}
 	m_ItemGestureReady = ready;
-	return !rightItem || (!hostHasMod && ready);
+
+	// The kit in the right hand: the trigger heals only with it against the body
+	const bool kitLetsTriggerAttack = UpdateRightKit();
+	return (!rightItem || (!hostHasMod && ready)) && kitLetsTriggerAttack;
+}
+
+// The fist holding the hand's item, where it's drawn: the left one's grip, the right one's fist
+Vec3 VR::ItemFist(bool leftHand) const
+{
+	Mat34 grip;
+	if (leftHand && GetLeftGripFrame(grip))
+		return Origin(grip);
+	return GetFistPoint(!leftHand);
+}
+
+// The other survivor whose body `fist` touches (BodyLayout::TouchedPlayer), alive and not down: their entity index, 0 if
+// none. Standing or crouched, from where the game draws them.
+int VR::PlayerTouchedBy(const Vec3 &fist)
+{
+	if (!g_NetvarsLookedUp)
+		LookUpNetvars(m_Game);
+	if (g_TeamOffset < 0 || g_LifeStateOffset < 0)
+		return 0;
+
+	const int kMaxPlayers = 32;
+	const int local = m_Game->m_EngineClient->GetLocalPlayer();
+	Vec3 feet[kMaxPlayers];
+	bool crouched[kMaxPlayers];
+	int indices[kMaxPlayers];
+	int count = 0;
+	for (int i = 1; i <= kMaxPlayers; ++i)
+	{
+		const void *player = i != local ? m_Game->GetClientEntity(i) : nullptr;
+		if (player && ReadTouchablePlayer(player, feet[count], crouched[count]))
+			indices[count++] = i;
+	}
+	const int touched = BodyLayout::TouchedPlayer(fist, feet, crouched, count, m_VRScale);
+	return touched >= 0 ? indices[touched] : 0;
+}
+
+// The kit in the hand is against the player's own body, to heal themselves: near the line the needle goes in at
+// (ItemUseGestureReady)
+bool VR::KitAtOwnBody(bool leftHand) const
+{
+	const Vec3 head = ToVec3(m_HmdPosAbs), headForward = ToVec3(m_HmdForward), headUp = ToVec3(m_HmdUp);
+	const Mat34 body = BodyFrame(head, headForward, headUp, ToVec3(m_BodyFacing), m_VRScale);
+	const Vec3 top = TransformPoint(body, Vec3(kBodyLineForward, 0.0f, -kChestBelowEyes) * m_VRScale);
+	const float bottomZ = m_HolsterValid ? m_HolsterPoint.z : top.z - 0.5f * m_VRScale;
+	return BodyLayout::DistanceToBodyLine(ItemFist(leftHand), top, bottomZ) < kKitBodyReach * m_VRScale;
+}
+
+// l4d2vr_dual_test touch: each other player who can be given pills or healed, and who a hand in front of their chest
+// touches (PlayerTouchedBy), close and a bit further; their health and pills
+void VR::LogTouchTest()
+{
+	if (!g_NetvarsLookedUp)
+		LookUpNetvars(m_Game);
+	const int local = m_Game->m_EngineClient->GetLocalPlayer();
+	const Vec3 eyes = ToVec3(m_SetupOrigin);
+	int listed = 0;
+	for (int i = 1; i <= 32; ++i)
+	{
+		C_BasePlayer *player = i != local ? (C_BasePlayer *)m_Game->GetClientEntity(i) : nullptr;
+		Vec3 feet;
+		bool crouched = false;
+		if (!player || !ReadTouchablePlayer(player, feet, crouched))
+			continue;
+		const Vec3 chest = feet + Vec3(0.0f, 0.0f, crouched ? 30.0f : 48.0f);
+		const Vec3 towardsEyes = Normalized(Vec3(eyes.x - chest.x, eyes.y - chest.y, 0.0f), Vec3(1.0f, 0.0f, 0.0f));
+		InventoryItem items[64];
+		const int count = GetInventory(player, items, 64);
+		int pills = 0;
+		for (int k = 0; k < count; ++k)
+		{
+			if (items[k].id == C_WeaponCSBase::PAIN_PILLS || items[k].id == C_WeaponCSBase::ADRENALINE)
+				pills = items[k].id;
+		}
+		Diagnostics::Log("touch test: player %d at %.0f %.0f %.0f%s, %.2f m from the eyes, health %d, %s; a hand 0.2 m in front of the chest touches player %d, 0.5 m in front %d",
+			i, feet.x, feet.y, feet.z, crouched ? " (crouched)" : "", Length(chest - eyes) / m_VRScale, g_HealthOffset > 0 ? Read<int>(player, g_HealthOffset) : -1,
+			pills == C_WeaponCSBase::PAIN_PILLS ? "has pills" : pills ? "has adrenaline" : "no pills",
+			PlayerTouchedBy(chest + towardsEyes * (0.2f * m_VRScale)), PlayerTouchedBy(chest + towardsEyes * (0.5f * m_VRScale)));
+		++listed;
+	}
+	Diagnostics::Log("touch test: %d other players can be given pills or healed (team at 0x%X, life at 0x%X, down at 0x%X)", listed, g_TeamOffset, g_LifeStateOffset,
+		g_IncapacitatedOffset);
+}
+
+// The entity index of the active weapon, 0 if it isn't known
+int VR::GetActiveWeaponIndex()
+{
+	C_BasePlayer *local = (C_BasePlayer *)m_Game->GetClientEntity(m_Game->m_EngineClient->GetLocalPlayer());
+	if (!local)
+		return 0;
+	InventoryItem items[64];
+	const int count = GetInventory(local, items, 64);
+	const void *active = local->GetActiveWeapon();
+	for (int i = 0; i < count; ++i)
+	{
+		if (items[i].weapon == active)
+			return items[i].index;
+	}
+	return 0;
+}
+
+// Pills or adrenaline are given to another player by touching them with them, with the trigger and the grab of that hand
+// held. With the mod on the host, from either hand, at once: the end of the game's own giving with that item and that
+// player (DualWield::ServerGiveItem). Otherwise only from the right hand, the game's way: its secondary attack, which
+// gives them to the player looked at. Each hand holding pills, adrenaline or a kit vibrates when it touches someone.
+void VR::UpdateGiving(bool leftItem, bool rightItem, bool hostHasMod)
+{
+	for (int hand = 0; hand < 2; ++hand)
+	{
+		const bool left = hand == 0;
+		const bool kit = left ? LeftHandHoldsItem() && m_LeftItemId == C_WeaponCSBase::FIRST_AID_KIT
+			: !m_LeftUseActive && !m_RightHandEmpty && !m_RightWorksLeftGun && m_ActiveWeaponId == C_WeaponCSBase::FIRST_AID_KIT;
+		const bool pills = left ? leftItem : rightItem;
+		const int touched = (pills || kit) ? PlayerTouchedBy(ItemFist(left)) : 0;
+		const Haptics::Hand haptic = left ? Haptics::Hand::OtherHand : Haptics::Hand::WeaponHand;
+		if (touched && touched != m_ItemTouching[hand])
+			m_Haptics.Play(haptic, HapticEffects::Hint);
+		m_ItemTouching[hand] = touched;
+
+		const bool gesture = pills && touched && PressedDigitalAction(left ? m_ActionSecondaryAttack : m_ActionPrimaryAttack)
+			&& PressedDigitalAction(left ? m_LeftHandGrab : m_RightHandGrab);
+		if (gesture && !m_GiveDown[hand])
+		{
+			const int itemIndex = left ? m_LeftItemIndex : GetActiveWeaponIndex();
+			if (hostHasMod && itemIndex)
+			{
+				char command[48];
+				snprintf(command, sizeof(command), "l4d2vr_give %d %d", itemIndex, touched);
+				m_Game->m_EngineClient->ServerCmd(command, true);
+				m_Haptics.Play(haptic, HapticEffects::Confirm);
+			}
+			else if (!left)
+			{
+				m_GivePressUntil = GetTickCount64() + 250;
+				m_Haptics.Play(haptic, HapticEffects::Confirm);
+			}
+			Diagnostics::Log("items: the %s hand gives %s to player %d%s", left ? "left" : "right",
+				(left ? m_LeftItemId : m_ActiveWeaponId) == C_WeaponCSBase::PAIN_PILLS ? "pills" : "adrenaline", touched,
+				hostHasMod ? "" : !left ? " (the game's way, to the player looked at)" : " (can't: the host doesn't have the mod)");
+		}
+		m_GiveDown[hand] = gesture;
+	}
+}
+
+// The kit in the right hand (the active weapon) is used on oneself brought against the body with the trigger, on another
+// player it touches with the trigger and the grab, until they're let go. The trigger can be pressed before it gets there.
+// False while the trigger mustn't attack.
+bool VR::UpdateRightKit()
+{
+	const bool kit = !m_LeftUseActive && !m_RightHandEmpty && !m_RightWorksLeftGun && m_ActiveWeaponId == C_WeaponCSBase::FIRST_AID_KIT;
+	if (!kit)
+	{
+		if (m_KitUse[1] != KitUse_None)
+			EndKitUse(false);
+		return true;
+	}
+
+	const bool trigger = PressedDigitalAction(m_ActionPrimaryAttack), grab = PressedDigitalAction(m_RightHandGrab);
+	switch (m_KitUse[1])
+	{
+	case KitUse_None:
+		if (trigger && grab && m_ItemTouching[1])
+			BeginKitUse(false, KitUse_Other, m_ItemTouching[1]);
+		else if (trigger && !grab && KitAtOwnBody(false))
+			BeginKitUse(false, KitUse_Self, 0);
+		break;
+	case KitUse_Self:
+		if (!trigger)
+			EndKitUse(false);
+		break;
+	case KitUse_Other:
+		if (!trigger || !grab)
+			EndKitUse(false);
+		break;
+	}
+	return m_KitUse[1] == KitUse_Self;
+}
+
+// The kit's use begins: on another player, the server is told first who it's for (DualWield::ServerHealTarget), and the
+// secondary attack waits for that
+void VR::BeginKitUse(bool leftHand, KitUse use, int target)
+{
+	m_KitUse[leftHand ? 0 : 1] = use;
+	if (use == KitUse_Other)
+	{
+		if (m_Game->m_PoseRelay->IsServerCapable() && target != m_HealTargetSent)
+		{
+			char command[40];
+			snprintf(command, sizeof(command), "l4d2vr_heal_target %d", target);
+			m_Game->m_EngineClient->ServerCmd(command, true);
+			m_HealTargetSent = target;
+		}
+		m_HealPressAt = GetTickCount64() + kHealPressDelayMs;
+	}
+	m_Haptics.Play(leftHand ? Haptics::Hand::OtherHand : Haptics::Hand::WeaponHand, HapticEffects::Confirm);
+	Diagnostics::Log("items: the %s hand's kit %s", leftHand ? "left" : "right", use == KitUse_Other ? "on another player" : "on oneself");
+}
+
+void VR::EndKitUse(bool leftHand)
+{
+	KitUse &use = m_KitUse[leftHand ? 0 : 1];
+	if (use == KitUse_None)
+		return;
+	if (use == KitUse_Other && m_HealTargetSent && m_KitUse[leftHand ? 1 : 0] != KitUse_Other)
+	{
+		if (m_Game->m_PoseRelay->IsServerCapable())
+			m_Game->m_EngineClient->ServerCmd("l4d2vr_heal_target 0", true);
+		m_HealTargetSent = 0;
+	}
+	use = KitUse_None;
+	Diagnostics::Log("items: the %s hand's kit is let go", leftHand ? "left" : "right");
+}
+
+// The secondary attack is held for the kit healing another player: the right hand's, or the left one's once it's out, with
+// both its trigger and grab held
+bool VR::KitHealsOther()
+{
+	if (GetTickCount64() < m_HealPressAt)
+		return false;
+	if (m_LeftUseActive)
+		return m_KitUse[0] == KitUse_Other && m_LeftUseWasActive && m_ActiveWeaponId == m_LeftItemId && PressedDigitalAction(m_ActionSecondaryAttack)
+			&& PressedDigitalAction(m_LeftHandGrab);
+	return m_KitUse[1] == KitUse_Other;
 }
 
 // Which way the body faces (BodyLayout::FollowBodyYaw), in the play area: the thumbstick turns it with the head
@@ -759,6 +1029,22 @@ float VR::GetLocalRunSpeed(const void *player)
 		LookUpNetvars(m_Game);
 	const float speed = player && g_MaxSpeedOffset > 0 ? Read<float>(player, g_MaxSpeedOffset) : 0.0f;
 	return speed >= 50.0f && speed <= 1000.0f ? speed : 220.0f;
+}
+
+// How fast the player moves, and whether crouched and on the ground (FL_DUCKING, FL_ONGROUND): what the game spreads its
+// guns by (aim_logic.h). False if it isn't known.
+bool VR::GetPlayerMotion(const void *player, float &speed, bool &ducking, bool &onGround)
+{
+	if (!g_NetvarsLookedUp)
+		LookUpNetvars(m_Game);
+	if (!player || g_VelocityOffset <= 0 || g_FlagsOffset <= 0)
+		return false;
+	const float x = Read<float>(player, g_VelocityOffset), y = Read<float>(player, g_VelocityOffset + 4), z = Read<float>(player, g_VelocityOffset + 8);
+	const int flags = Read<int>(player, g_FlagsOffset);
+	speed = sqrtf(x * x + y * y + z * z);
+	ducking = (flags & 2) != 0;
+	onGround = (flags & 1) != 0;
+	return std::isfinite(speed);
 }
 
 // A gun of the player has a laser sight (m_upgradeBitVec)
