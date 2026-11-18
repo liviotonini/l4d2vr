@@ -35,6 +35,9 @@ namespace DualWield
 	// CBasePlayer::PlayerUse: a weapon taken with the left hand gets the extra slot
 	void ServerBeginUse(void *player, int playerIndex);
 	void ServerEndUse(void *player, int playerIndex);
+	// During that use: true if `weapon`, theirs, is the other hand's (the left hand's is the one in the extra slot, in it
+	// or behind the shoulder)
+	bool ServerOtherHandHolds(void *player, void *weapon);
 	// After the usercmds of a player: checks what the left hand holds, and traces its melee swing
 	void ServerAfterUsercmds(edict_t *edict, void *player, int playerIndex);
 	// Commands from the player (PoseRelay::HandleServerCommand). `extraIndex` is the weapon in the extra slot, -1 if the

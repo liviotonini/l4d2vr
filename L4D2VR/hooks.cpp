@@ -1518,12 +1518,23 @@ void *__fastcall Hooks::dServerWeaponOfId(void *ecx, void *edx, int weaponId)
 	return hkServerWeaponOfId.fOriginal(ecx, weaponId);
 }
 
-// The same for a weapon spawn (CWeaponSpawn::Use): it gives a new pistol instead
+// The same for a weapon spawn (CWeaponSpawn::Use): it gives a new pistol instead. Nor does it see the other hand's
+// weapon of that kind: the spawn would only top up its ammo, or do nothing when it's full, where the hand that takes gets
+// one of its own (in place of the weapon of that hand's slot, which goes to the ground). A weapon lying on the ground
+// doesn't look for one (but a pistol): it's taken anyway.
 void *__fastcall Hooks::dServerWeaponById(void *ecx, void *edx, int weaponId)
 {
-	if (weaponId == C_WeaponCSBase::PISTOL && ecx == g_VRUsePlayer)
+	if (ecx != g_VRUsePlayer)
+		return hkServerWeaponById.fOriginal(ecx, weaponId);
+	if (weaponId == C_WeaponCSBase::PISTOL)
 		return nullptr;
-	return hkServerWeaponById.fOriginal(ecx, weaponId);
+	void *weapon = hkServerWeaponById.fOriginal(ecx, weaponId);
+	if (weapon && DualWield::UsesExtraSlot(weaponId) && DualWield::ServerOtherHandHolds(ecx, weapon))
+	{
+		Diagnostics::Log("dual wield: weapon %d is the other hand's, the hand that takes gets one of its own", weaponId);
+		return nullptr;
+	}
+	return weapon;
 }
 
 // The tracers of the left hand's gun's shot leave from its muzzle, not from the weapon in the right hand (FireClientBullets)

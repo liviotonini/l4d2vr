@@ -1843,6 +1843,18 @@ void DualWield::ServerEndUse(void *player, int playerIndex)
 	}
 }
 
+bool DualWield::ServerOtherHandHolds(void *player, void *weapon)
+{
+	if (!g_ServerGame || !player || !weapon)
+		return false;
+	const int playerIndex = EntIndex(player);
+	if (!g_ServerGame->IsValidPlayerIndex(playerIndex))
+		return false;
+	const bool leftHandHolds = g_ServerGame->m_PlayersVRInfo[playerIndex].extraWeapon == weapon;
+	const bool leftHandTakes = g_LeftPickupPlayer == player;
+	return leftHandHolds != leftHandTakes;
+}
+
 void DualWield::ServerSetLeftItem(edict_t *edict, int playerIndex, int itemIndex, int extraIndex)
 {
 	if (!g_ServerGame || !g_ServerGame->IsValidPlayerIndex(playerIndex) || !edict || !edict->m_pUnk)
