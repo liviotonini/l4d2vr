@@ -54,6 +54,43 @@ namespace BodyLayout
 		return holster;
 	}
 
+	// A melee weapon on the thigh, smaller to fit there. `boxMin`/`boxMax` is its extent in the frame of the bone it's
+	// held by (any units). Its longest side goes along the thigh with the end farther from that bone down (the blade or
+	// the head, the handle up), its next longest forward, its thinnest against the leg. Returns where that bone goes in
+	// the thigh's frame (x out of the leg, y down along it, z forward), scaled to at most `maxLength` long and at most
+	// `maxScale`, with the middle of the box at the frame's origin.
+	inline HandMath::Mat34 HungOnThigh(const Vec3 &boxMin, const Vec3 &boxMax, float maxLength, float maxScale)
+	{
+		const float low[3] = { boxMin.x, boxMin.y, boxMin.z }, high[3] = { boxMax.x, boxMax.y, boxMax.z };
+		int longest = 0, thinnest = 0;
+		for (int axis = 1; axis < 3; ++axis)
+		{
+			if (high[axis] - low[axis] > high[longest] - low[longest])
+				longest = axis;
+			if (high[axis] - low[axis] < high[thinnest] - low[thinnest])
+				thinnest = axis;
+		}
+		if (thinnest == longest)
+			thinnest = (longest + 1) % 3;
+		const int middle = 3 - longest - thinnest;
+
+		const float length = high[longest] - low[longest];
+		const float scale = length > 1e-3f ? std::min(maxScale, maxLength / length) : maxScale;
+
+		// Where each of the bone's axes goes, turned without mirroring
+		Vec3 axes[3];
+		axes[longest] = Vec3(0.0f, high[longest] >= -low[longest] ? 1.0f : -1.0f, 0.0f);
+		axes[middle] = Vec3(0.0f, 0.0f, 1.0f);
+		axes[thinnest] = Vec3(1.0f, 0.0f, 0.0f);
+		if (HandMath::Dot(HandMath::Cross(axes[0], axes[1]), axes[2]) < 0.0f)
+			axes[thinnest] = axes[thinnest] * -1.0f;
+
+		HandMath::Mat34 placed = HandMath::FromAxes(axes[0] * scale, axes[1] * scale, axes[2] * scale);
+		const Vec3 center = (boxMin + boxMax) * 0.5f;
+		HandMath::SetAxis(placed, 3, HandMath::RotateVector(placed, center) * -1.0f);
+		return placed;
+	}
+
 	// Where the pills (0) and the grenade (1) are when config.txt doesn't say: on the chest, where the user put them for a
 	// height of 1.68 m (0.35 and 0.29 m below the eyes). Meters from the eyes.
 	struct ItemSpot

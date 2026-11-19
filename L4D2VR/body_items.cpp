@@ -316,6 +316,14 @@ namespace
 	// its barrel, whether it's there or not
 	const float kHolsterGrabRadius = 0.12f; // meters
 	const float kHolsterLengthMeters = 0.18f; // the pistol's models go 7.6 units along the barrel from the grip, 9.9 the magnum's
+	// A melee weapon (or the chainsaw) on the thigh is made this long at most, and never bigger than this share of its size
+	// (the knife), in the middle of that place. The game's go from 14 units (knife) to 68 (pitchfork).
+	const float kThighMeleeLengthMeters = 0.30f;
+	const float kThighMeleeMaxScale = 0.75f;
+	// While the weapon hand holds what goes on the thigh, a see-through copy of it is there: fainter, stronger with the
+	// fist where the grab puts it away
+	const float kHolsterMarkBlend = 0.3f;
+	const float kHolsterMarkBlendAtHolster = 0.6f;
 
 	// Using pills and adrenaline (VR::ItemUseGestureReady), meters. The mouth from the eyes, and how close the fist with
 	// the pills gets to it.
@@ -556,8 +564,31 @@ void VR::UpdateBodyItems()
 		}
 	}
 
-	// The pistol on the thigh of the weapon hand, pointing down along it, where the grab takes it (IsAtHolster). Its
-	// weapon bone has y along the grip and z along the barrel: the grip sticks out backwards.
+	// The secondary weapon on the thigh of the weapon hand, where the grab takes it (IsAtHolster). The pistol points down
+	// along it: its weapon bone has y along the grip and z along the barrel, so the grip sticks out backwards. A melee
+	// weapon hangs along it, smaller, in the middle of that place.
+	const Vec3 holsterSlide = RotateVector(body, holster.slide);
+	auto thighDraw = [&](C_WeaponCSBase *weapon, int weaponId, BodyModelDraw &draw)
+	{
+		draw.model = GetWorldModel(weapon);
+		draw.alignWeaponBone = true;
+		if (weaponId == C_WeaponCSBase::PISTOL || weaponId == C_WeaponCSBase::MAGNUM)
+		{
+			draw.frame = FromAxes(Cross(holsterSlide, m_HolsterBarrel), holsterSlide, m_HolsterBarrel, m_HolsterPoint);
+			draw.onePistol = true; // two pistols are one on the thigh
+		}
+		else
+		{
+			const Vec3 middle = m_HolsterPoint + m_HolsterBarrel * (0.5f * kHolsterLengthMeters * m_VRScale);
+			draw.frame = FromAxes(Cross(m_HolsterBarrel, holsterSlide), m_HolsterBarrel, holsterSlide, middle);
+			draw.fitLength = kThighMeleeLengthMeters * m_VRScale;
+			draw.scale = kThighMeleeMaxScale;
+		}
+		return draw.model != nullptr;
+	};
+	const bool holsterInView = Dot(Normalized(m_HolsterPoint - ToVec3(m_HmdPosAbs)), ToVec3(m_HmdForward)) > kChestViewCosine;
+
+	bool thighTaken = false;
 	for (int i = 0; i < g_MyWeaponsCount && m_BodyDrawCount < kMaxBodyDraws; ++i)
 	{
 		const int handle = Read<int>(local, g_MyWeaponsOffset + i * 4);
@@ -569,22 +600,28 @@ void VR::UpdateBodyItems()
 		if (!weapon || weapon == active || index == m_LeftItemIndex || index == m_ExtraWeaponIndex)
 			continue;
 		const int weaponId = weapon->GetWeaponID();
-		if (weaponId != C_WeaponCSBase::PISTOL && weaponId != C_WeaponCSBase::MAGNUM)
+		if (GetWeaponSlot(weaponId) != 2)
 			continue;
 
-		const void *model = GetWorldModel(weapon);
-		const bool inView = Dot(Normalized(m_HolsterPoint - ToVec3(m_HmdPosAbs)), ToVec3(m_HmdForward)) > kChestViewCosine;
-		if (model && inView)
+		thighTaken = true;
+		BodyModelDraw draw;
+		if (holsterInView && thighDraw(weapon, weaponId, draw))
+			m_BodyDraws[m_BodyDrawCount++] = draw;
+		break;
+	}
+
+	// The weapon hand holds it: where it goes, see-through
+	if (!thighTaken && active && holsterInView && m_BodyDrawCount < kMaxBodyDraws && !m_LeftUseActive)
+	{
+		C_WeaponCSBase *weapon = (C_WeaponCSBase *)active;
+		const int weaponId = weapon->GetWeaponID();
+		BodyModelDraw draw;
+		const bool leftHands = m_LeftItemIndex && (const void *)m_Game->GetClientEntity(m_LeftItemIndex) == active;
+		if (GetWeaponSlot(weaponId) == 2 && !leftHands && thighDraw(weapon, weaponId, draw))
 		{
-			const Vec3 slide = RotateVector(body, holster.slide);
-			BodyModelDraw draw;
-			draw.model = model;
-			draw.frame = FromAxes(Cross(slide, m_HolsterBarrel), slide, m_HolsterBarrel, m_HolsterPoint);
-			draw.alignWeaponBone = true;
-			draw.onePistol = true; // two pistols are one on the thigh
+			draw.blend = IsAtHolster(GetFistPoint(true)) ? kHolsterMarkBlendAtHolster : kHolsterMarkBlend;
 			m_BodyDraws[m_BodyDrawCount++] = draw;
 		}
-		break;
 	}
 
 	for (int spot = 0; spot < 2; ++spot)
@@ -1129,6 +1166,29 @@ namespace
 		return bone;
 	}
 
+	// How far a model goes in the frame of the bone it's held by, from its hitboxes (the melee weapons' world models have
+	// one around all their vertices, but the machete). Without them, a blade held at one end like the machete's.
+	struct ModelBox
+	{
+		Vec3 min = Vec3(-0.4f, -1.9f, -1.6f), max = Vec3(0.4f, 23.8f, 1.1f);
+	};
+
+	const ModelBox &ModelBoxOf(const void *studioHeader, int heldBone)
+	{
+		static std::unordered_map<const void *, ModelBox> s_Found;
+		auto found = s_Found.find(studioHeader);
+		if (found != s_Found.end())
+			return found->second;
+
+		ModelBox box;
+		const bool hitboxes = Studio::HitboxBounds(studioHeader, heldBone, box.min, box.max);
+		if (!hitboxes)
+			box = ModelBox();
+		Diagnostics::Log("body items: %s goes %.1f..%.1f, %.1f..%.1f, %.1f..%.1f from its bone (%s)", Studio::ModelName(studioHeader), box.min.x, box.max.x,
+			box.min.y, box.max.y, box.min.z, box.max.z, hitboxes ? "its hitboxes" : "no hitboxes, a blade like the machete's");
+		return s_Found[studioHeader] = box;
+	}
+
 	// A weapon's magazine in its world model: "weapon_bone_Clip", and the bullets in it, -1 if none. And its muzzle: the
 	// "muzzle_flash" attachment, on a bone, and its ejection port: the "shell" one, pointing out of it.
 	struct ClipBones
@@ -1343,10 +1403,18 @@ void VR::BuildBodyModelBones(const void *studioHeader, const BodyModelDraw &draw
 	// Held: the bone the model is held by goes where the hand holds it
 	const SyringeBones *syringe = draw.syringe ? &SyringeBonesOf(studioHeader) : nullptr;
 	const ClipBones *clip = draw.magazine || draw.leftGun ? &ClipBonesOf(studioHeader) : nullptr;
-	const int heldBone = syringe ? syringe->syringe : draw.magazine ? clip->clip : draw.alignWeaponBone ? WeaponBoneOf(studioHeader) : -1;
+	int heldBone = syringe ? syringe->syringe : draw.magazine ? clip->clip : draw.alignWeaponBone ? WeaponBoneOf(studioHeader) : -1;
+	// Hung on the thigh: by its weapon bone, or its first one
+	if (heldBone < 0 && draw.fitLength > 0.0f && boneCount > 0)
+		heldBone = 0;
 	if (heldBone >= 0 && heldBone < boneCount)
 	{
 		Mat34 frame = draw.frame;
+		if (draw.fitLength > 0.0f)
+		{
+			const ModelBox &box = ModelBoxOf(studioHeader, heldBone);
+			frame = Multiply(draw.frame, BodyLayout::HungOnThigh(box.min, box.max, draw.fitLength, draw.scale));
+		}
 		// The magazine of one of the game's guns is held by its middle (its bone is elsewhere)
 		const int weaponBone = draw.magazine && clip->parts ? WeaponBoneOf(studioHeader) : -1;
 		if (weaponBone >= 0 && weaponBone < boneCount)

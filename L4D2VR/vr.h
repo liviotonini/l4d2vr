@@ -487,6 +487,10 @@ public:
 		bool onePistol = false;       // the model of two pistols shows only one
 		bool leftGun = false;         // the left hand's gun: where its magazine goes is kept (m_LeftGunWell)
 		bool magazine = false;        // only the weapon's magazine, held by its "weapon_bone_Clip" at the frame
+		// With alignWeaponBone: hung on the thigh, made at most this long (game units) and at most `scale`, the middle of
+		// the model at the frame (BodyLayout::HungOnThigh)
+		float fitLength = 0.0f;
+		float blend = 1.0f;           // below 1 see-through and darker: where the weapon in the hand goes
 	};
 	// A weapon the player carries
 	struct InventoryItem

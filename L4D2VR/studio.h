@@ -118,4 +118,44 @@ namespace Studio
 	}
 
 	const int kMaxBones = 128;
+
+	// The model's hitboxes (its first set) together, as a box in the frame of the bone `inBone` as the model was made.
+	// The weapons' world models have one around all their vertices. False if it has none.
+	inline bool HitboxBounds(const void *header, int inBone, HandMath::Vec3 &boxMin, HandMath::Vec3 &boxMax)
+	{
+		const uint8_t *base = (const uint8_t *)header;
+		const int32_t sets = *(const int32_t *)(base + 172), setIndex = *(const int32_t *)(base + 176);
+		const int bones = BoneCount(header);
+		if (sets <= 0 || inBone < 0 || inBone >= bones)
+			return false;
+
+		const uint8_t *set = base + setIndex;
+		const int32_t count = *(const int32_t *)(set + 4), index = *(const int32_t *)(set + 8);
+		bool found = false;
+		for (int i = 0; i < count && i < 64; ++i)
+		{
+			const uint8_t *box = set + index + i * 68;
+			const int32_t bone = *(const int32_t *)box;
+			if (bone < 0 || bone >= bones)
+				continue;
+			float corners[6];
+			memcpy(corners, box + 8, sizeof(corners));
+
+			// From the hitbox's bone to the model, then to the other bone
+			const HandMath::Mat34 toBone = HandMath::Multiply(PoseToBone(header, inBone), HandMath::InvertRigid(PoseToBone(header, bone)));
+			for (int corner = 0; corner < 8; ++corner)
+			{
+				const HandMath::Vec3 point = HandMath::TransformPoint(toBone,
+					HandMath::Vec3(corners[(corner & 1) ? 3 : 0], corners[(corner & 2) ? 4 : 1], corners[(corner & 4) ? 5 : 2]));
+				if (!found)
+				{
+					boxMin = boxMax = point;
+					found = true;
+				}
+				boxMin = HandMath::Vec3(fminf(boxMin.x, point.x), fminf(boxMin.y, point.y), fminf(boxMin.z, point.z));
+				boxMax = HandMath::Vec3(fmaxf(boxMax.x, point.x), fmaxf(boxMax.y, point.y), fmaxf(boxMax.z, point.z));
+			}
+		}
+		return found;
+	}
 }

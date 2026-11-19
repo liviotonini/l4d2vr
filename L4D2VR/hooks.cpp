@@ -1006,7 +1006,33 @@ void Hooks::DrawBodyModel(int flags, void *renderable, int entityIndex, const vo
 	alignas(16) unsigned char bones[sizeof(HandMath::Mat34) * Studio::kMaxBones];
 	m_VR->BuildBodyModelBones(state.studioHeader, draw, bones);
 	info.flags = flags;
+
+	// See-through and darker (where the weapon in the hand goes): in the blend and colour the engine draws models with,
+	// which DrawModelExecute gives the studio renderer (IVRenderView 4 SetBlend, 5 GetBlend, 6 SetColorModulation,
+	// 7 GetColorModulation, read in engine.dll)
+	typedef void(__thiscall *tSetBlend)(void *thisptr, float blend);
+	typedef float(__thiscall *tGetBlend)(void *thisptr);
+	typedef void(__thiscall *tSetColor)(void *thisptr, const float *color);
+	typedef void(__thiscall *tGetColor)(void *thisptr, float *color);
+	void *renderView = draw.blend < 1.0f ? m_Game->m_EngineViewRender : nullptr;
+	void **renderViewTable = renderView ? *(void ***)renderView : nullptr;
+	float savedBlend = 1.0f, savedColor[3] = { 1.0f, 1.0f, 1.0f };
+	if (renderViewTable)
+	{
+		static const float kMarkColor[3] = { 0.55f, 0.55f, 0.55f };
+		savedBlend = ((tGetBlend)renderViewTable[5])(renderView);
+		((tGetColor)renderViewTable[7])(renderView, savedColor);
+		((tSetBlend)renderViewTable[4])(renderView, draw.blend);
+		((tSetColor)renderViewTable[6])(renderView, kMarkColor);
+	}
+
 	hkDrawModelExecute.fOriginal(m_Game->m_ModelRender, &state, info, bones);
+
+	if (renderViewTable)
+	{
+		((tSetBlend)renderViewTable[4])(renderView, savedBlend);
+		((tSetColor)renderViewTable[6])(renderView, savedColor);
+	}
 
 	if (!m_LoggedBodyModel)
 		Diagnostics::Log("body items: drawn with the weapon (%s)", Studio::ModelName(state.studioHeader));

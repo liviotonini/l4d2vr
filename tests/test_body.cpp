@@ -165,9 +165,66 @@ namespace
 	}
 }
 
+namespace
+{
+	// Turned without mirroring, every axis scaled the same
+	void CheckProperScaled(const Mat34 &m, float scale)
+	{
+		CHECK_NEAR(Length(Axis(m, 0)), scale, 0.001f);
+		CHECK_NEAR(Length(Axis(m, 1)), scale, 0.001f);
+		CHECK_NEAR(Length(Axis(m, 2)), scale, 0.001f);
+		CHECK(Dot(Cross(Axis(m, 0), Axis(m, 1)), Axis(m, 2)) > 0.0f);
+	}
+
+	// The game's melee world models, measured from their vertices in the frame of their weapon bone (units)
+	void TestMeleeOnThigh()
+	{
+		const float maxLength = 13.0f, maxScale = 0.75f;
+
+		// The katana: the blade (y) down along the thigh with the handle up, the edge (z, wider than x) forward, as long
+		// as the place
+		const Vec3 katanaMin(-1.3f, -9.0f, -2.0f), katanaMax(1.3f, 29.6f, 1.7f);
+		const Mat34 katana = HungOnThigh(katanaMin, katanaMax, maxLength, maxScale);
+		const float katanaScale = maxLength / 38.6f;
+		CheckProperScaled(katana, katanaScale);
+		CHECK(TransformPoint(katana, Vec3(0.0f, 29.6f, 0.0f)).y > 0.0f);
+		CHECK(TransformPoint(katana, Vec3(0.0f, -9.0f, 0.0f)).y < 0.0f);
+		CHECK_NEAR(TransformPoint(katana, Vec3(0.0f, 29.6f, 0.0f)).y - TransformPoint(katana, Vec3(0.0f, -9.0f, 0.0f)).y, maxLength, 0.01f);
+		CHECK_NEAR(fabsf(Axis(katana, 2).z), katanaScale, 0.001f);
+		CHECK_NEAR(fabsf(Axis(katana, 0).x), katanaScale, 0.001f);
+		// Its middle in the middle of the place
+		const Vec3 middle = TransformPoint(katana, (katanaMin + katanaMax) * 0.5f);
+		CHECK_NEAR(Length(middle), 0.0f, 0.001f);
+
+		// The knife is shorter than the place: only made smaller by the most it's ever made smaller
+		CheckProperScaled(HungOnThigh(Vec3(-0.6f, -1.7f, -1.5f), Vec3(0.7f, 12.7f, 1.1f), maxLength, maxScale), maxScale);
+
+		// The chainsaw's bar goes along -z from where it's held: the bar down, the handle up
+		const Mat34 chainsaw = HungOnThigh(Vec3(-5.8f, -7.5f, -38.9f), Vec3(4.0f, 3.5f, 4.4f), maxLength, maxScale);
+		CheckProperScaled(chainsaw, maxLength / 43.3f);
+		CHECK(TransformPoint(chainsaw, Vec3(0.0f, 0.0f, -38.9f)).y > 0.0f);
+		CHECK_NEAR(fabsf(Axis(chainsaw, 2).y), maxLength / 43.3f, 0.001f);
+
+		// The riot shield is thin along z: that side against the leg, its face along it
+		const Mat34 shield = HungOnThigh(Vec3(-3.6f, -19.8f, -0.8f), Vec3(16.6f, 20.7f, 4.2f), maxLength, maxScale);
+		CheckProperScaled(shield, maxLength / 40.5f);
+		CHECK_NEAR(fabsf(Axis(shield, 2).x), maxLength / 40.5f, 0.001f);
+		CHECK_NEAR(fabsf(Axis(shield, 0).z), maxLength / 40.5f, 0.001f);
+
+		// The frying pan: the handle up, the pan down, its flat face against the leg
+		const Mat34 pan = HungOnThigh(Vec3(-0.2f, -2.4f, -6.2f), Vec3(1.8f, 15.9f, 6.2f), maxLength, maxScale);
+		CHECK(TransformPoint(pan, Vec3(0.0f, 15.9f, 0.0f)).y > 0.0f);
+		CHECK_NEAR(fabsf(Axis(pan, 0).x), maxLength / 18.3f, 0.001f);
+
+		// A box with no size doesn't break it
+		CHECK(std::isfinite(HungOnThigh(Vec3(), Vec3(), maxLength, maxScale).m[0][0]));
+	}
+}
+
 void RunBodyTests()
 {
 	printf("Body layout\n");
+	TestMeleeOnThigh();
 	TestHolsterStanding();
 	TestHolsterCrouching();
 	TestItemSpots();
