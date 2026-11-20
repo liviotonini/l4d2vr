@@ -4,10 +4,11 @@
 
 The addon is a campaign of one map, "L4D2VR Test Room", listed with the other add-on campaigns (Play Campaign), so it
 can be played with friends who have the same VPK in left4dead2/addons. The map, l4d2vr_testroom, is a copy of the
-game's c2m1_highway (taken from the game folder, so the VPK is ~37 MB) with two more things in its entity lump:
+game's c2m1_highway (taken from the game folder, so the VPK is ~40 MB) with more things in its entity lump:
 a logic_script that runs scripts/vscripts/l4d2vr_testroom.nut (no infected, no bots) and an output on the
 info_director that calls L4D2VR_TestRoom() a second after gameplay starts, which puts every weapon and item on tables
-around the survivors. The mission file (missions/l4d2vr_testroom.txt) also turns on every melee weapon.
+around the survivors, plus a logic_timer that calls L4D2VR_Refill() every half second to put back what was taken
+from the tables. The mission file (missions/l4d2vr_testroom.txt) also turns on every melee weapon.
 
 The cubemaps embedded in the map are in materials/maps/c2m1_highway/, but the engine looks for the ones models use
 (weapons, props) in materials/maps/<name of the loaded map>/: without copies under the new name, models are drawn white.
@@ -48,6 +49,15 @@ SCRIPT_ENTITY = '''{
 "targetname" "l4d2vr_testroom"
 "vscripts" "l4d2vr_testroom"
 "classname" "logic_script"
+}
+{
+"origin" "10740 7870 -470"
+"targetname" "l4d2vr_testroom_refill"
+"RefireTime" "0.5"
+"UseRandomTime" "0"
+"StartDisabled" "0"
+"OnTimer" "l4d2vr_testroom\x1bRunScriptCode\x1bL4D2VR_Refill()\x1b0\x1b-1"
+"classname" "logic_timer"
 }
 '''
 PLACE_OUTPUT = '"OnGameplayStart" "l4d2vr_testroom\x1bRunScriptCode\x1bL4D2VR_TestRoom()\x1b1\x1b-1"\n'

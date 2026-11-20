@@ -87,6 +87,10 @@ const DOOR_SPACING = 80.0
 ::L4D2VR_Spawned <- 0
 ::L4D2VR_Placed <- []
 
+// The weapons and items on the tables, put back when taken: the count and "infinite" flag of the weapon_*_spawn
+// entities aren't enough (grenades, pills and adrenaline disappeared once taken). { classname, keyvalues, entity }
+::L4D2VR_Refills <- []
+
 ::L4D2VR_Precache <- function()
 {
 	PrecacheModel(TABLE_MODEL)
@@ -112,10 +116,30 @@ const DOOR_SPACING = 80.0
 	{
 		::L4D2VR_Spawned++
 		::L4D2VR_Placed.append(entity)
+		if (classname.find("weapon_") == 0 && classname != "weapon_ammo_spawn")
+			::L4D2VR_Refills.append({ classname = classname, keyvalues = keyvalues, entity = entity, home = entity.GetOrigin() })
 	}
 	else
 		Msg("L4D2VR test room: couldn't spawn " + classname + "\n")
 	return entity
+}
+
+// Called every half second by a logic_timer in the map: spawns again what was taken from the tables. A spawn counts
+// as taken when it's gone or when it left its place (in case the spawn itself becomes the weapon in the hand).
+::L4D2VR_Refill <- function()
+{
+	foreach (item in ::L4D2VR_Refills)
+	{
+		local entity = item.entity
+		if (entity && entity.IsValid() && (entity.GetOrigin() - item.home).Length() < 16.0)
+			continue
+		item.entity = SpawnEntityFromTable(item.classname, item.keyvalues)
+		if (item.entity)
+		{
+			item.home = item.entity.GetOrigin()
+			::L4D2VR_Placed.append(item.entity)
+		}
+	}
 }
 
 // The floor under `point` (the map isn't flat everywhere), or `point` itself when nothing is found
@@ -169,6 +193,7 @@ const DOOR_SPACING = 80.0
 			entity.Kill()
 	}
 	::L4D2VR_Placed = []
+	::L4D2VR_Refills = []
 	::L4D2VR_Spawned = 0
 	::L4D2VR_ApplyDirectorOptions()
 
