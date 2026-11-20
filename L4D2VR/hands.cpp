@@ -36,12 +36,6 @@ namespace
 	HeldAttachment g_HeldAttachments[32];
 	// The right hand bone of each weapon model in first person (-1 if it has none)
 	std::unordered_map<const void *, int> g_ViewmodelRightHands;
-	// The syringe of the adrenaline's first person model ("weapon_clip") and the pieces of its cap, -1 if none
-	struct ViewmodelSyringe
-	{
-		int syringe = -1, capPieces[2] = { -1, -1 };
-	};
-	std::unordered_map<const void *, ViewmodelSyringe> g_ViewmodelSyringes;
 	// After the throw the hand stays as it was until the game changes weapon
 	const auto kThrownGrenadeTime = std::chrono::milliseconds(1500);
 
@@ -78,7 +72,6 @@ void VR::ClearModelCaches()
 	m_ArmsRig = nullptr;
 	g_ThrowPoses.clear();
 	g_ViewmodelRightHands.clear();
-	g_ViewmodelSyringes.clear();
 	ClearBodyModels();
 	Hooks::m_ModelKinds.clear();
 }
@@ -161,33 +154,17 @@ const void *VR::ApplyItemInHand(const void *studioHeader, const void *customBone
 		bones[i] = Multiply(move, source[i]);
 
 	// The adrenaline's needle, to stab it into the body (ItemUseGestureReady): the syringe is the "weapon_clip" bone, the
-	// needle at its end along -y. With the trigger held the cap is off, ready to be stabbed in.
+	// needle at its end along -y. With the trigger held the cap comes off, ready to be stabbed in, as in the left hand;
+	// otherwise it's where the game's animation has it.
 	if (m_ActiveWeaponId == C_WeaponCSBase::ADRENALINE)
 	{
-		auto found = g_ViewmodelSyringes.find(studioHeader);
-		if (found == g_ViewmodelSyringes.end())
+		const int syringe = PlaceSyringePieces(studioHeader, bones, boneCount, SyringeUncapSeconds(false));
+		if (syringe >= 0)
 		{
-			ViewmodelSyringe syringe;
-			syringe.syringe = Studio::FindBone(studioHeader, "ValveBiped.weapon_clip");
-			syringe.capPieces[0] = Studio::FindBone(studioHeader, "ValveBiped.weapon_bolt");
-			syringe.capPieces[1] = Studio::FindBone(studioHeader, "ValveBiped.weapon_trigger");
-			found = g_ViewmodelSyringes.emplace(studioHeader, syringe).first;
-		}
-		const ViewmodelSyringe &syringe = found->second;
-		if (syringe.syringe >= 0 && syringe.syringe < boneCount)
-		{
-			const Mat34 &clip = bones[syringe.syringe];
+			const Mat34 &clip = bones[syringe];
 			m_RightNeedleDir = Normalized(Axis(clip, 1)) * -1.0f;
 			m_RightNeedleTip = Origin(clip) + m_RightNeedleDir * kSyringeNeedleUnits;
 			m_RightNeedleMs = GetTickCount64();
-			if (PressedDigitalAction(m_ActionPrimaryAttack))
-			{
-				for (int piece : syringe.capPieces)
-				{
-					if (piece >= 0 && piece < boneCount)
-						bones[piece] = CollapsedAt(Origin(clip));
-				}
-			}
 		}
 	}
 	return bones;

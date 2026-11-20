@@ -132,6 +132,61 @@ namespace
 		CHECK(NeedleAtBody(Vec3(3.0f, 0.0f, 0.0f), Vec3(-1.0f, 0.0f, 0.0f), top, 2.0f, 5.0f, 0.3f));
 	}
 
+	void TestSyringeCap()
+	{
+		// From v_adrenaline's vertices, game units: the needle's tip on the syringe, the cap from its bone, a flap from its
+		const float needleTipY = -7.1f, capBottom = -3.3f, capTop = 1.5f, flapBottom = -0.1f;
+
+		// Capped as in the game's idle animation: the cap over the whole needle, the flaps closed in it. The same as the
+		// trigger is pressed, nothing jumps.
+		for (float seconds : { -1.0f, 0.0f })
+		{
+			const SyringePieces capped = UncappedSyringe(seconds);
+			CHECK(capped.capShown);
+			CHECK_NEAR(Origin(capped.cap).y, kSyringeCapY, 0.001f);
+			CHECK(Origin(capped.cap).y + capBottom < needleTipY);
+			CHECK_NEAR(Axis(capped.flaps[0], 1).y, 1.0f, 0.001f);
+			CHECK_NEAR(Origin(capped.flaps[0]).x, -kSyringeFlapX, 0.001f);
+			CHECK_NEAR(Origin(capped.flaps[1]).x, kSyringeFlapX, 0.001f);
+		}
+
+		// The cap goes off along the needle, and is only gone once it's past its tip. The flaps open once it has left them.
+		float previousY = kSyringeCapY, lastShownTop = 0.0f;
+		bool gone = false;
+		for (float seconds = 0.005f; seconds < 0.4f; seconds += 0.005f)
+		{
+			const SyringePieces pieces = UncappedSyringe(seconds);
+			const float capY = Origin(pieces.cap).y;
+			if (pieces.capShown)
+			{
+				CHECK(!gone);
+				CHECK(capY < previousY);
+				previousY = capY;
+				lastShownTop = capY + capTop;
+			}
+			gone = gone || !pieces.capShown;
+			for (const Mat34 &flap : pieces.flaps)
+			{
+				if (Axis(flap, 1).y < 0.999f)
+					CHECK(!pieces.capShown || capY + capTop < kSyringeFlapY + flapBottom);
+				CHECK_NEAR(Length(Axis(flap, 0)), 1.0f, 0.001f);
+				CHECK_NEAR(Dot(Axis(flap, 0), Axis(flap, 1)), 0.0f, 0.001f);
+			}
+		}
+		CHECK(gone);
+		CHECK(lastShownTop < needleTipY);
+
+		// Open as the game's use animation has them: each flap 80 degrees out to its side
+		const SyringePieces open = UncappedSyringe(1.0f);
+		CHECK(!open.capShown);
+		CHECK_NEAR(Axis(open.flaps[0], 1).x, -0.985f, 0.01f);
+		CHECK_NEAR(Axis(open.flaps[0], 1).y, 0.174f, 0.01f);
+		CHECK_NEAR(Axis(open.flaps[1], 1).x, 0.985f, 0.01f);
+		CHECK_NEAR(Axis(open.flaps[1], 1).y, 0.174f, 0.01f);
+		CHECK_NEAR(Axis(open.flaps[0], 2).z, 1.0f, 0.001f);
+		CHECK_NEAR(Origin(open.flaps[1]).y, kSyringeFlapY, 0.001f);
+	}
+
 	void TestTouchingPlayers()
 	{
 		// The game's scale: 43.2 units per meter. A player standing at (100, 0, 0), another one crouched at (0, 100, 0).
@@ -230,5 +285,6 @@ void RunBodyTests()
 	TestItemSpots();
 	TestBodyYaw();
 	TestNeedle();
+	TestSyringeCap();
 	TestTouchingPlayers();
 }

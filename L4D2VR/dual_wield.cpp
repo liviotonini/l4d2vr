@@ -339,14 +339,17 @@ bool VR::GetLeftItemDraw(BodyModelDraw &draw)
 	}
 
 	// The adrenaline's model has its cap on. With the trigger held, ready to be stabbed in, it's the first person one
-	// instead, which shows the needle (out by the little finger).
-	if (m_LeftItemId == C_WeaponCSBase::ADRENALINE && m_LeftTriggerDown)
+	// instead, whose cap comes off and shows the needle (out by the little finger), as in the right hand
+	// (PlaceSyringePieces). Capped, both are the same in the hand.
+	const float uncap = m_LeftItemId == C_WeaponCSBase::ADRENALINE ? SyringeUncapSeconds(true) : -1.0f;
+	if (uncap >= 0.0f)
 	{
 		if (const void *syringe = GetSyringeModel())
 		{
 			draw.model = syringe;
 			draw.alignWeaponBone = false;
 			draw.syringe = true;
+			draw.syringeSeconds = uncap;
 		}
 	}
 	if (!GetLeftItemFrame(draw.frame))

@@ -155,6 +155,54 @@ namespace BodyLayout
 		return distance < 1e-3f || HandMath::Dot(needle, toLine * (1.0f / distance)) > minCosine;
 	}
 
+	// The adrenaline's first person model (v_adrenaline) is a syringe on its "weapon_clip" bone with the needle along -y.
+	// Over the needle goes its cap ("weapon_clip_bullets"), and inside the cap two flaps ("weapon_bolt" at -x,
+	// "weapon_trigger" at +x) that open once it's off. Where the game's animations have them in the syringe's frame, game
+	// units, read from the model: capped in its idle one; its use animation pulls the cap off along the needle and opens
+	// the flaps 80 degrees about z. In the model's bind pose the cap is over the middle of the syringe instead.
+	constexpr float kSyringeCapY = -3.91f;
+	constexpr float kSyringeFlapX = 0.44f;
+	constexpr float kSyringeFlapY = -5.09f;
+	constexpr float kSyringeFlapOpenDegrees = 80.0f;
+	// Taking the cap off from the trigger's press, seconds: it loosens, then flies off along the needle and is gone where
+	// it got to (game units, the game's goes on out of view). The flaps open once it has left them.
+	constexpr float kCapLoosenSeconds = 0.1f;
+	constexpr float kCapLoosenTravel = 0.43f;
+	constexpr float kCapFlySeconds = 0.12f;
+	constexpr float kCapFlyToY = -18.0f;
+	constexpr float kFlapsOpenFrom = 0.15f;
+	constexpr float kFlapsOpenSeconds = 0.07f;
+
+	struct SyringePieces
+	{
+		HandMath::Mat34 cap;      // in the syringe's frame
+		bool capShown = true;
+		HandMath::Mat34 flaps[2]; // at -x, at +x
+	};
+
+	// `seconds` since the trigger was pressed, negative: capped
+	inline SyringePieces UncappedSyringe(float seconds)
+	{
+		SyringePieces pieces;
+		float capY = kSyringeCapY;
+		if (seconds > 0.0f)
+		{
+			capY -= kCapLoosenTravel * std::min(seconds / kCapLoosenSeconds, 1.0f);
+			const float fly = std::clamp((seconds - kCapLoosenSeconds) / kCapFlySeconds, 0.0f, 1.0f);
+			capY += (kCapFlyToY - capY) * fly * fly;
+			pieces.capShown = seconds < kCapLoosenSeconds + kCapFlySeconds;
+		}
+		pieces.cap = HandMath::FromAxes(Vec3(1.0f, 0.0f, 0.0f), Vec3(0.0f, 1.0f, 0.0f), Vec3(0.0f, 0.0f, 1.0f), Vec3(0.0f, capY, 0.0f));
+
+		// Each flap turns out to its side, about the syringe's z
+		const float open = std::clamp((seconds - kFlapsOpenFrom) / kFlapsOpenSeconds, 0.0f, 1.0f);
+		const float angle = kSyringeFlapOpenDegrees * (3.14159265f / 180.0f) * open * open * (3.0f - 2.0f * open);
+		const float c = cosf(angle), s = sinf(angle);
+		pieces.flaps[0] = HandMath::FromAxes(Vec3(c, s, 0.0f), Vec3(-s, c, 0.0f), Vec3(0.0f, 0.0f, 1.0f), Vec3(-kSyringeFlapX, kSyringeFlapY, 0.0f));
+		pieces.flaps[1] = HandMath::FromAxes(Vec3(c, -s, 0.0f), Vec3(s, c, 0.0f), Vec3(0.0f, 0.0f, 1.0f), Vec3(kSyringeFlapX, kSyringeFlapY, 0.0f));
+		return pieces;
+	}
+
 	// Another player's body, from where they stand (their origin, at the feet), game units: the line goes from the knees to
 	// the top of the head, lower when they crouch. A hand touches it within kTouchReach meters of the line (the middle of
 	// the chest is about 0.15 m in front of it, the outside of the arm 0.25 to the side).

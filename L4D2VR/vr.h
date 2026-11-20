@@ -482,7 +482,8 @@ public:
 		bool hasCenter = false;      // otherwise the middle of the model's hull is at the frame
 		HandMath::Vec3 center;
 		bool alignWeaponBone = false; // the model's "weapon_bone" is at the frame instead, like in a hand
-		bool syringe = false;         // the adrenaline's first person model, uncapped: its syringe held like the weapon bone
+		bool syringe = false;         // the adrenaline's first person model: its syringe held like the weapon bone
+		float syringeSeconds = 0.0f;  // since its cap started coming off (BodyLayout::UncappedSyringe)
 		bool onePistol = false;       // the model of two pistols shows only one
 		bool leftGun = false;         // the left hand's gun: where its magazine goes is kept (m_LeftGunWell)
 		bool magazine = false;        // only the weapon's magazine, held by its "weapon_bone_Clip" at the frame
@@ -803,7 +804,11 @@ public:
 	void UpdateBodyYaw(float deltaSeconds);
 	bool ItemUseGestureReady(bool leftHand, int weaponId);
 	bool UpdateItemUse();
-	bool m_ItemTriggerDown[2] = {};          // left, right: the triggers on the last update, for the adrenaline's cap
+	// Left, right: when the trigger of the hand holding the adrenaline was pressed, 0 while it isn't. Its cap comes off
+	// (PlaceSyringePieces).
+	unsigned long long m_SyringeUncapMs[2] = {};
+	float SyringeUncapSeconds(bool leftHand) const;
+	int PlaceSyringePieces(const void *studioHeader, HandMath::Mat34 *bones, int boneCount, float seconds);
 	// Giving pills or adrenaline, and the kit on another player: the hand holding it touches their body with its trigger
 	// and grab held. The kit on oneself: brought against the body with the trigger (body_items.cpp).
 	enum KitUse { KitUse_None, KitUse_Self, KitUse_Other };

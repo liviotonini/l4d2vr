@@ -773,14 +773,24 @@ bool VR::UpdateItemUse()
 	const bool rightItem = !m_LeftUseActive && !m_RightHandEmpty && usedAtBody(m_ActiveWeaponId);
 	const bool leftItem = LeftHandHoldsItem() && usedAtBody(m_LeftItemId);
 
-	// The game's sounds, as its animations play them (they aren't played): the adrenaline's cap comes off as the trigger
-	// is pressed, the needle shows
-	const bool leftTrigger = PressedDigitalAction(m_ActionSecondaryAttack), rightTrigger = PressedDigitalAction(m_ActionPrimaryAttack);
-	if (hostHasMod && ((leftItem && m_LeftItemId == C_WeaponCSBase::ADRENALINE && leftTrigger && !m_ItemTriggerDown[0])
-		|| (rightItem && m_ActiveWeaponId == C_WeaponCSBase::ADRENALINE && rightTrigger && !m_ItemTriggerDown[1])))
+	// The adrenaline's cap comes off as the trigger of the hand holding it is pressed, and the needle shows, in either hand
+	// (PlaceSyringePieces). With the game's sound, as its animation plays it (it isn't played).
+	const bool uncapping[2] = {
+		leftItem && m_LeftItemId == C_WeaponCSBase::ADRENALINE && PressedDigitalAction(m_ActionSecondaryAttack),
+		rightItem && m_ActiveWeaponId == C_WeaponCSBase::ADRENALINE && PressedDigitalAction(m_ActionPrimaryAttack) };
+	bool capOff = false;
+	for (int hand = 0; hand < 2; ++hand)
+	{
+		if (!uncapping[hand])
+			m_SyringeUncapMs[hand] = 0;
+		else if (!m_SyringeUncapMs[hand])
+		{
+			m_SyringeUncapMs[hand] = GetTickCount64();
+			capOff = true;
+		}
+	}
+	if (hostHasMod && capOff)
 		m_Game->ClientCmd_Unrestricted("playgamesound Adrenaline.CapOff");
-	m_ItemTriggerDown[0] = leftTrigger;
-	m_ItemTriggerDown[1] = rightTrigger;
 
 	// Given to another player, touching them with the trigger and the grab
 	UpdateGiving(leftItem, rightItem, hostHasMod);
@@ -1287,10 +1297,12 @@ namespace
 	}
 
 	// The adrenaline's first person model: the syringe is "weapon_clip", centered on its y axis like the weapon bone of
-	// the capped one, and the pieces of the cap are "weapon_bolt" and "weapon_trigger"
+	// the capped one, its cap "weapon_clip_bullets" and the flaps inside the cap "weapon_bolt" and "weapon_trigger"
+	// (BodyLayout::UncappedSyringe). All -1 for another model, which a viewmodel can be for a moment while the weapon
+	// changes.
 	struct SyringeBones
 	{
-		int syringe = -1, capPieces[2] = { -1, -1 };
+		int syringe = -1, cap = -1, flaps[2] = { -1, -1 };
 	};
 
 	const SyringeBones &SyringeBonesOf(const void *studioHeader)
@@ -1301,9 +1313,14 @@ namespace
 			return found->second;
 
 		SyringeBones bones;
-		bones.syringe = Studio::FindBone(studioHeader, "ValveBiped.weapon_clip");
-		bones.capPieces[0] = Studio::FindBone(studioHeader, "ValveBiped.weapon_bolt");
-		bones.capPieces[1] = Studio::FindBone(studioHeader, "ValveBiped.weapon_trigger");
+		const char *name = Studio::ModelName(studioHeader);
+		if (name && strstr(name, "v_adrenaline"))
+		{
+			bones.syringe = Studio::FindBone(studioHeader, "ValveBiped.weapon_clip");
+			bones.cap = Studio::FindBone(studioHeader, "ValveBiped.weapon_clip_bullets");
+			bones.flaps[0] = Studio::FindBone(studioHeader, "ValveBiped.weapon_bolt");
+			bones.flaps[1] = Studio::FindBone(studioHeader, "ValveBiped.weapon_trigger");
+		}
 		return s_Found.emplace(studioHeader, bones).first->second;
 	}
 
@@ -1422,6 +1439,35 @@ void VR::PlaceLeftGunParts(const void *clipBones, const Mat34 &frame, Mat34 *bon
 	}
 }
 
+float VR::SyringeUncapSeconds(bool leftHand) const
+{
+	const unsigned long long since = m_SyringeUncapMs[leftHand ? 0 : 1];
+	return since ? (GetTickCount64() - since) / 1000.0f : -1.0f;
+}
+
+// The adrenaline's first person model, in either hand: its cap and the flaps inside it, `seconds` after the trigger was
+// pressed (BodyLayout::UncappedSyringe), where its syringe is. Negative leaves them as they are. Returns the syringe's
+// bone, -1 if it isn't that model.
+int VR::PlaceSyringePieces(const void *studioHeader, Mat34 *bones, int boneCount, float seconds)
+{
+	const SyringeBones &found = SyringeBonesOf(studioHeader);
+	if (found.syringe < 0 || found.syringe >= boneCount)
+		return -1;
+	if (seconds < 0.0f)
+		return found.syringe;
+
+	const Mat34 syringe = bones[found.syringe];
+	const BodyLayout::SyringePieces pieces = BodyLayout::UncappedSyringe(seconds);
+	if (found.cap >= 0 && found.cap < boneCount)
+		bones[found.cap] = pieces.capShown ? Multiply(syringe, pieces.cap) : CollapsedAt(Origin(syringe));
+	for (int flap = 0; flap < 2; ++flap)
+	{
+		if (found.flaps[flap] >= 0 && found.flaps[flap] < boneCount)
+			bones[found.flaps[flap]] = Multiply(syringe, pieces.flaps[flap]);
+	}
+	return found.syringe;
+}
+
 // The bones of an item drawn on the body: the model as it was made, its center at the frame, at its scale
 void VR::BuildBodyModelBones(const void *studioHeader, const BodyModelDraw &draw, void *outBones)
 {
@@ -1464,14 +1510,9 @@ void VR::BuildBodyModelBones(const void *studioHeader, const BodyModelDraw &draw
 		}
 		if (draw.leftGun)
 			PlaceLeftGunParts(clip, draw.frame, bones, boneCount);
+		// The bind pose has the cap over the middle of the syringe: where it is as the trigger is held
 		if (syringe)
-		{
-			for (int piece : syringe->capPieces)
-			{
-				if (piece >= 0 && piece < boneCount)
-					bones[piece] = CollapsedAt(Origin(draw.frame));
-			}
-		}
+			PlaceSyringePieces(studioHeader, bones, boneCount, std::max(draw.syringeSeconds, 0.0f));
 		if (draw.onePistol)
 		{
 			for (int bone : SecondPistolBonesOf(studioHeader))
