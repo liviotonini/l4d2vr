@@ -324,6 +324,9 @@ namespace
 	// that hand's fist where the grab puts it away
 	const float kPutAwayMarkBlend = 0.3f;
 	const float kPutAwayMarkBlendThere = 0.6f;
+	// The pills and the adrenaline are small and thin, and at those they could hardly be seen on the body
+	const float kPillsMarkBlend = 0.6f;
+	const float kPillsMarkBlendThere = 0.85f;
 
 	// Using pills and adrenaline (VR::ItemUseGestureReady), meters. The mouth from the eyes, and how close the fist with
 	// the pills gets to it.
@@ -663,7 +666,9 @@ void VR::UpdateBodyItems()
 			draw.scale = m_SmallBodyItems ? kChestItemSmallScale : 1.0f;
 			draw.hasCenter = true;
 			draw.center = ChestItemCenter(weaponId);
-			if (!carried)
+			if (!carried && spot == 0)
+				draw.blend = heldThere[spot] ? kPillsMarkBlendThere : kPillsMarkBlend;
+			else if (!carried)
 				draw.blend = heldThere[spot] ? kPutAwayMarkBlendThere : kPutAwayMarkBlend;
 			m_BodyDraws[m_BodyDrawCount++] = draw;
 		}
