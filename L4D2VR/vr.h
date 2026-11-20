@@ -371,9 +371,6 @@ public:
 	HandMath::Vec3 m_ScopeRear;
 	HandMath::Vec3 m_ScopeFront;
 	int m_ScopeBodyWeaponId = 0;
-	// The scope's attachment relative to the weapon's frame, kept while the fire animation isn't shown
-	HandMath::Mat34 m_ScopeAttachmentInFrame;
-	int m_ScopeAttachmentWeaponId = 0;
 	vr::HmdMatrix34_t m_ScopeOverlayTransform = {};
 	Vector m_ScopeCameraPos = { 0,0,0 };
 	QAngle m_ScopeCameraAng = { 0,0,0 };
@@ -428,6 +425,8 @@ public:
 	static constexpr unsigned long long kShoveAnimationMs = 700;
 	unsigned long long m_ShoveHoldUntil = 0;
 	bool m_ShoveDown = false;
+	// The local player's viewmodel as IClientRenderable, whose attachments stay with the weapon (HoldViewmodelAttachment)
+	void *m_ViewmodelRenderable = nullptr;
 	bool m_ViewmodelHasTwoWeapons = false;  // dual pistols shown as such, both hands are holding one
 	bool m_SmallBodyItems = true;           // the pills and grenades on the chest are a bit smaller
 	// Where the wrist is from the controller and how the hand is turned, see DefaultHandOffset. Not in the menu.
@@ -711,6 +710,8 @@ public:
 	void UpdateManualReload();
 	bool IsGameReloadButtonDown() const { return m_GameButtonState[GameButton_Reload] == 1; }
 	bool ThrownGrenadeHasLeftTheHand() const;
+	bool HoldsViewmodelPose();
+	void HoldViewmodelAttachment(void *renderable, int number, Vector &origin, QAngle &angles);
 	const void *ApplyThrowPose(const void *studioHeader, const void *customBones, void *storage);
 	bool ManualReloadIsHolding() const;
 	static bool ReloadHasUnlimitedReserve(int weaponId);

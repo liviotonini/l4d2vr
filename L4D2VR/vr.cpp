@@ -1415,7 +1415,9 @@ bool VR::UpdateScope()
         if (!viewModel)
             return skip("no viewmodel");
 
-        // Same calls the game makes for the laser sight: IClientRenderable::LookupAttachment and GetAttachment of the viewmodel
+        // Same calls the game makes for the laser sight: IClientRenderable::LookupAttachment and GetAttachment of the viewmodel.
+        // While the fire animation of a bolt action isn't shown, the attachment stays where the weapon is drawn
+        // (HoldViewmodelAttachment).
         void *renderable = (uint8_t *)viewModel + 4;
         void **renderableVtable = *(void ***)renderable;
         typedef int(__thiscall *tLookupAttachment)(void *renderable, const char *name);
@@ -1431,29 +1433,6 @@ bool VR::UpdateScope()
 
         Vector attachmentForward, attachmentRight, attachmentUp;
         QAngle::AngleVectors(attachmentAngles, &attachmentForward, &attachmentRight, &attachmentUp);
-
-        // While the fire animation of a bolt action isn't shown, the scope stays where the weapon is drawn
-        if (ManualReloadPumpsByHand())
-        {
-            using namespace HandMath;
-            auto vec = [](const Vector &v) { return Vec3(v.x, v.y, v.z); };
-            auto toVector = [](const Vec3 &v) { return Vector(v.x, v.y, v.z); };
-            const Mat34 frame = FromAxes(vec(m_ViewmodelForward), vec(m_ViewmodelRight) * -1.0f, vec(m_ViewmodelUp), vec(GetRecommendedViewmodelAbsPos()));
-
-            if (!ManualReloadHoldsFirePose() || m_ScopeAttachmentWeaponId != m_ActiveWeaponId)
-            {
-                m_ScopeAttachmentInFrame = Multiply(InvertRigid(frame), FromAxes(vec(attachmentForward), vec(attachmentRight) * -1.0f, vec(attachmentUp), vec(attachmentOrigin)));
-                m_ScopeAttachmentWeaponId = m_ActiveWeaponId;
-            }
-            else
-            {
-                const Mat34 held = Multiply(frame, m_ScopeAttachmentInFrame);
-                attachmentForward = toVector(Axis(held, 0));
-                attachmentRight = toVector(Axis(held, 1) * -1.0f);
-                attachmentUp = toVector(Axis(held, 2));
-                attachmentOrigin = toVector(Origin(held));
-            }
-        }
 
         eyepiece = attachmentOrigin + attachmentForward * scope->eyepiece.x - attachmentRight * scope->eyepiece.y + attachmentUp * scope->eyepiece.z;
     }
@@ -2380,6 +2359,19 @@ void VR::UpdateTracking()
     UpdateEmptyHand(localPlayer);
 
     UpdateFlashlightAttachment();
+
+    // The flashlight and the laser sight leave from the viewmodel's attachments, kept with the weapon as it's drawn
+    // (HoldViewmodelAttachment)
+    m_ViewmodelRenderable = nullptr;
+    if (const uintptr_t getViewModel = m_Game->m_Offsets->GetViewModel.address)
+    {
+        typedef void *(__thiscall *tGetViewModel)(void *player, int index);
+        if (void *viewModel = ((tGetViewModel)getViewModel)(localPlayer, 0))
+        {
+            m_ViewmodelRenderable = (uint8_t *)viewModel + 4;
+            Hooks::HookViewmodelAttachments(m_ViewmodelRenderable);
+        }
+    }
 
     // HMD tracking
     QAngle hmdAngLocal = m_HmdPose.TrackedDeviceAng;	

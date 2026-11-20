@@ -1259,6 +1259,67 @@ void Hooks::dFormatViewModelAttachment(void *player, Vector &origin, bool invers
 
 namespace
 {
+	// IClientRenderable::GetAttachment(int, Vector &, QAngle &): what the game's flashlight and first person laser sight
+	// read from the viewmodel (C_TerrorPlayer, also the scope's VR::UpdateScope)
+	const int kRenderableGetAttachmentOffset = 0x8C;
+	struct ViewmodelAttachmentHook
+	{
+		void **vtable;
+		tRenderableGetAttachment original;
+	};
+	ViewmodelAttachmentHook g_ViewmodelAttachmentHooks[4];
+	int g_ViewmodelAttachmentHookCount = 0;
+}
+
+// The viewmodel's attachments stay with the weapon as it's drawn (VR::HoldViewmodelAttachment): its vtable's
+// GetAttachment is replaced, which only viewmodels use. Called with the local player's viewmodel every frame.
+void Hooks::HookViewmodelAttachments(void *renderable)
+{
+	void **vtable = *(void ***)renderable;
+	for (int i = 0; i < g_ViewmodelAttachmentHookCount; ++i)
+	{
+		if (g_ViewmodelAttachmentHooks[i].vtable == vtable)
+			return;
+	}
+
+	if (g_ViewmodelAttachmentHookCount == ARRAYSIZE(g_ViewmodelAttachmentHooks))
+		return;
+
+	void **slot = (void **)((uintptr_t)vtable + kRenderableGetAttachmentOffset);
+	DWORD oldProtect;
+	if (!VirtualProtect(slot, sizeof(void *), PAGE_READWRITE, &oldProtect))
+	{
+		Diagnostics::Log("viewmodel: its GetAttachment couldn't be replaced, the flashlight and laser sight follow the game's animations");
+		g_ViewmodelAttachmentHooks[g_ViewmodelAttachmentHookCount++] = { vtable, nullptr };
+		return;
+	}
+
+	g_ViewmodelAttachmentHooks[g_ViewmodelAttachmentHookCount++] = { vtable, (tRenderableGetAttachment)*slot };
+	*slot = (void *)&dViewmodelGetAttachment;
+	VirtualProtect(slot, sizeof(void *), oldProtect, &oldProtect);
+	Diagnostics::Log("viewmodel: its attachments (flashlight, laser sight) stay with the weapon while an animation isn't shown");
+}
+
+bool __fastcall Hooks::dViewmodelGetAttachment(void *ecx, void *edx, int number, Vector &origin, QAngle &angles)
+{
+	tRenderableGetAttachment original = nullptr;
+	void **vtable = *(void ***)ecx;
+	for (int i = 0; i < g_ViewmodelAttachmentHookCount; ++i)
+	{
+		if (g_ViewmodelAttachmentHooks[i].vtable == vtable)
+			original = g_ViewmodelAttachmentHooks[i].original;
+	}
+	if (!original)
+		return false;
+
+	const bool found = original(ecx, number, origin, angles);
+	if (found && m_VR->m_IsVREnabled)
+		m_VR->HoldViewmodelAttachment(ecx, number, origin, angles);
+	return found;
+}
+
+namespace
+{
 	class ScopedUseAim
 	{
 	public:

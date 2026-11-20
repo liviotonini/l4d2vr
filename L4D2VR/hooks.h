@@ -86,6 +86,7 @@ typedef void(__thiscall *tVgui_Paint)(void *thisptr, int mode);
 typedef int(__cdecl *tIsSplitScreen)();
 typedef DWORD *(__thiscall *tPrePushRenderTarget)(void *thisptr, int a2);
 typedef void(__cdecl *tFormatViewModelAttachment)(void *player, Vector &origin, bool inverse);
+typedef bool(__thiscall *tRenderableGetAttachment)(void *renderable, int number, Vector &origin, QAngle &angles);
 typedef void *(__thiscall *tFindUseEntity)(void *thisptr, float radius, float dotLimit, float defaultDotLimit, void *traceResult, void *extra);
 typedef void(__thiscall *tPlayerUse)(void *thisptr, void *useEntity);
 typedef bool(__thiscall *tDefaultReload)(void *thisptr, int clipSize1, int clipSize2, int activity);
@@ -248,6 +249,9 @@ public:
 	static int __fastcall dIsSplitScreen();
 	static DWORD *__fastcall dPrePushRenderTarget(void *ecx, void *edx, int a2);
 	static void dFormatViewModelAttachment(void *player, Vector &origin, bool inverse);
+	// The viewmodel's IClientRenderable::GetAttachment, replaced in its vtable once it's there (VR::UpdateTracking)
+	static void HookViewmodelAttachments(void *renderable);
+	static bool __fastcall dViewmodelGetAttachment(void *ecx, void *edx, int number, Vector &origin, QAngle &angles);
 	static void __fastcall dStartGrenadeThrow(void *ecx, void *edx);
 	static void *__fastcall dEmitGrenade(void *ecx, void *edx, VectorValue origin, VectorValue angles, VectorValue velocity, VectorValue angularImpulse, void *owner);
 	static void HookEmitGrenade(void *grenade);

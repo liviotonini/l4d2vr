@@ -27,6 +27,13 @@ namespace
 
 	// The pose of the weapon and the hand before the throw started, relative to the weapon's frame, per model
 	std::unordered_map<const void *, std::vector<Mat34>> g_ThrowPoses;
+	// The viewmodel's attachments before an animation that isn't shown started, relative to the viewmodel, by number
+	struct HeldAttachment
+	{
+		Mat34 inViewmodel;
+		int weaponId = -1;
+	};
+	HeldAttachment g_HeldAttachments[32];
 	// The right hand bone of each weapon model in first person (-1 if it has none)
 	std::unordered_map<const void *, int> g_ViewmodelRightHands;
 	// The syringe of the adrenaline's first person model ("weapon_clip") and the pieces of its cap, -1 if none
@@ -241,14 +248,58 @@ bool VR::ThrownGrenadeHasLeftTheHand() const
 // - While throwing with the arm the game plays its wind-up animation, which pulls the hand back: the grenade stays
 //   where the real hand is.
 // - A pump action pumps by itself in its fire animation: it's pumped by hand instead (ManualReloadHoldsFirePose).
-// Returns the bones to draw with.
-const void *VR::ApplyThrowPose(const void *studioHeader, const void *customBones, void *storage)
+// True while one of them would be playing.
+bool VR::HoldsViewmodelPose()
 {
 	bool hold = GetTickCount64() < m_ShoveHoldUntil;
 	if (m_GrenadeThrowGesture && IsThrowableWeapon(m_ActiveWeaponId))
 		hold = hold || m_GrenadeTriggerHeld || ThrownGrenadeHasLeftTheHand();
 	else if (ManualReloadPumpsByHand())
 		hold = hold || ManualReloadHoldsFirePose();
+	return hold;
+}
+
+// The game's flashlight, its first person laser sight and the scope leave from the viewmodel's attachments
+// (Hooks::dViewmodelGetAttachment). While an animation isn't shown they stay where they were on the weapon, as the
+// weapon does (ApplyThrowPose): a shove doesn't swing the light and the laser around.
+void VR::HoldViewmodelAttachment(void *renderable, int number, Vector &origin, QAngle &angles)
+{
+	if (renderable != m_ViewmodelRenderable || number < 1 || number > (int)std::size(g_HeldAttachments))
+		return;
+
+	// Where the viewmodel's bones are set up from (C_BaseAnimating::SetupBones): IClientRenderable::GetRenderOrigin and
+	// GetRenderAngles
+	typedef const Vector &(__thiscall *tGetRenderOrigin)(void *renderable);
+	typedef const QAngle &(__thiscall *tGetRenderAngles)(void *renderable);
+	void **vtable = *(void ***)renderable;
+	auto frameOf = [](const QAngle &a, const Vector &o)
+	{
+		Vector forward, right, up;
+		QAngle::AngleVectors(a, &forward, &right, &up);
+		return FromAxes(ToVec3(forward), ToVec3(right) * -1.0f, ToVec3(up), ToVec3(o));
+	};
+	const Mat34 viewmodel = frameOf(((tGetRenderAngles)vtable[2])(renderable), ((tGetRenderOrigin)vtable[1])(renderable));
+
+	HeldAttachment &held = g_HeldAttachments[number - 1];
+	if (!HoldsViewmodelPose())
+	{
+		held.inViewmodel = Multiply(InvertRigid(viewmodel), frameOf(angles, origin));
+		held.weaponId = m_ActiveWeaponId;
+		return;
+	}
+	if (held.weaponId != m_ActiveWeaponId)
+		return;
+
+	const Mat34 attachment = Multiply(viewmodel, held.inViewmodel);
+	const Vec3 at = Origin(attachment), forward = Axis(attachment, 0), up = Axis(attachment, 2);
+	origin = Vector(at.x, at.y, at.z);
+	QAngle::VectorAngles(Vector(forward.x, forward.y, forward.z), Vector(up.x, up.y, up.z), angles);
+}
+
+// The weapon and the hands kept in their pose while one of those animations plays. Returns the bones to draw with.
+const void *VR::ApplyThrowPose(const void *studioHeader, const void *customBones, void *storage)
+{
+	const bool hold = HoldsViewmodelPose();
 
 	if (!Studio::IsValid(studioHeader))
 		return customBones;
