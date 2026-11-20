@@ -856,6 +856,7 @@ public:
 	void UpdateFlashlightAttachment();
 	void PatchLaserSight();
 	void PatchLaserSightSlots();
+	void PatchViewmodelPoses();
 	void CreateScopeOverlays();
 	bool UpdateScope();
 	bool UpdateScopeZoom(bool haveBolt, const HandMath::Vec3 &boltGrab);

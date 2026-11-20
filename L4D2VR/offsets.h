@@ -57,6 +57,10 @@ public:
     Offset FlashlightAttachToViewmodel = { "client.dll", 0x260774, "8B 0D ? ? ? ? 83 79 30 00 0F 84 ? ? ? ? 6A 00 8B CF E8", 2 };
     // "lea eax, [ebp-0x1F0]" (viewmodel attachment angles passed to AngleVectors) inside the first person laser sight update of C_TerrorPlayer
     Offset LaserSightAttachmentAngles =  { "client.dll", 0x25E143, "8D 85 F8 FD FF FF 50 8D 8D E0 FD FF FF 51 8D 95 FC FE FF FF 52 8D 85 10 FE FF FF 50 E8", 0x15 };
+    // In C_TerrorViewModel::CalcViewModelView's pose parameters (VR::PatchViewmodelPoses): "sqrtss xmm0, xmm0", the
+    // player's speed for "move_x", and "fld [eax]", the eyes' pitch for "ver_aims"
+    Offset ViewmodelMoveSpeed =          { "client.dll", 0x288204, "F3 0F 10 C1 F3 0F 51 C0 0F 29 45 A0 FF D2 8B 08 0F 57 C0 89 4D C0", 4, true };
+    Offset ViewmodelAimPitch =           { "client.dll", 0x288471, "8B 90 70 02 00 00 FF D2 D9 00 51 D9 1C 24 E8 ? ? ? ? 8B 07 D9 55 D8 8B 90 84 02 00 00", 8, true };
     // C_BasePlayer::GetViewModel(int index), resolves m_hViewModel[index]
     Offset GetViewModel =                { "client.dll", 0x67330, "55 8B EC 8B 45 08 53 57 8B F9 8B 84 87 ? ? ? ? 83 F8 FF 74 ? 8B 15 ? ? ? ? 8B C8 81 E1 FF 0F 00 00" };
     // FormatViewModelAttachment(C_BasePlayer *player, Vector &origin, bool inverse), converts points between the viewmodel FOV and the world FOV

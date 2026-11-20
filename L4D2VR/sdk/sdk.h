@@ -1562,28 +1562,33 @@ public:
 	int padding_0[826];
 	int m_MapBasedMeleeID;
 
+	// Where the controller is in the viewmodel (forward, right, up from its origin, game units), and how the viewmodel
+	// turns from the aim (pitch up, yaw left, roll), turning around the controller (VR::GetRecommendedViewmodelAbsPos).
+	// The shots go along the aim, so a gun's turn is the opposite of where its barrel points at rest (idle, look_mid,
+	// measured in the models' first frame): 4 up and 4 left on the hunting rifle, 2.15 down on the AWP, along the view
+	// on all the others. Turns that don't do that drew the gun pointing below where it shot.
 	static inline std::unordered_map<WeaponID, PositionAngle> viewmodelOffsets
 	{
 		{ NONE,				{{20,3,0}, {0,0,0}} },
-		{ PISTOL,			{{20.5, 5, -2}, {-1, 0, 0}} },
-		{ UZI,				{{22.5, 5, -4}, {-1.5, 0, 1}} },
-		{ PUMPSHOTGUN,		{{14.5, 3.5, -1.5}, {-0.5, 0, 0}} },
-		{ AUTOSHOTGUN,		{{14.5, 3.5, -4}, {-1.5, -2, 0}} },
-		{ M16A1,			{{18, 5.5, -5.5}, {-1.5, -2, 0}} },
-		{ HUNTING_RIFLE,	{{15, 4, -4}, {-4.5, -5, 0}} },
-		{ MAC10,			{{22.5, 4.5, -3.5}, {-2, 0, 1}} },
-		{ SHOTGUN_CHROME,	{{14.5, 4, -2.5}, {-1.5, -1, 0}} },
-		{ SCAR,				{{18, 5.5, -5.5}, {-1.5, 0, -1}} },
-		{ SNIPER_MILITARY,  {{18.5, 5, -5}, {0, -1.5, 0}} },
-		{ SPAS,				{{16, 5, -4.5}, {-1.5, -2, 0}} },
-		{ AK47,				{{17.5, 5.5, -4.5}, {-0.5, 0, 0}} },
-		{ MAGNUM,			{{22, 5, -2.5}, {-0.5, 0, 0}} },
-		{ MP5,				{{18.5, 4, -4.5}, {-0.5, 0, 0}} },
-		{ SG552,			{{20, 5.5, -4.5}, {-0.5, 0, 0}} },
-		{ AWP,				{{21, 5.5, -5.5}, {-0.5, 0, 0}} },
-		{ SCOUT,			{{19.5, 5, -3.5}, {-0.5, 0, 0}} },
+		{ PISTOL,			{{20.5, 5, -2}, {0, 0, 0}} },
+		{ UZI,				{{22.5, 5, -4}, {0, 0, 1}} },
+		{ PUMPSHOTGUN,		{{14.5, 3.5, -1.5}, {0, 0, 0}} },
+		{ AUTOSHOTGUN,		{{14.5, 3.5, -4}, {0, 0, 0}} },
+		{ M16A1,			{{18, 5.5, -5.5}, {0, 0, 0}} },
+		{ HUNTING_RIFLE,	{{15, 4, -4}, {-4, -4, 0}} },
+		{ MAC10,			{{22.5, 4.5, -3.5}, {0, 0, 1}} },
+		{ SHOTGUN_CHROME,	{{14.5, 4, -2.5}, {0, 0, 0}} },
+		{ SCAR,				{{18, 5.5, -5.5}, {0, 0, -1}} },
+		{ SNIPER_MILITARY,  {{18.5, 5, -5}, {0, 0, 0}} },
+		{ SPAS,				{{16, 5, -4.5}, {0, 0, 0}} },
+		{ AK47,				{{17.5, 5.5, -4.5}, {0, 0, 0}} },
+		{ MAGNUM,			{{22, 5, -2.5}, {0, 0, 0}} },
+		{ MP5,				{{18.5, 4, -4.5}, {0, 0, 0}} },
+		{ SG552,			{{20, 5.5, -4.5}, {0, 0, 0}} },
+		{ AWP,				{{21, 5.5, -5.5}, {2.15f, 0, 0}} },
+		{ SCOUT,			{{19.5, 5, -3.5}, {0, 0, 0}} },
 		{ M60,				{{19, 5.5, -7}, {0, 0, 0}} },
-		{ GRENADE_LAUNCHER, {{14, 5, -2}, {-1, 0, 0}} }
+		{ GRENADE_LAUNCHER, {{14, 5, -2}, {0, 0, 0}} }
 	};
 
 	static inline std::unordered_map<std::string, PositionAngle> meleeViewmodelOffsets

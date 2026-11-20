@@ -107,6 +107,7 @@ VR::VR(Game *game)
 
     PatchLaserSight();
     PatchLaserSightSlots();
+    PatchViewmodelPoses();
 
     // The dashboard overlay and its D3D11 device are created on the first Update() (render thread)
     m_SettingsMenu = new SettingsMenu(this);
@@ -1189,6 +1190,34 @@ void VR::PatchLaserSight()
     PatchCodeBytes(attachmentAnglesAddress, weaponAnglesPatch, sizeof(weaponAnglesPatch));
     PatchCodeBytes(eyeAnglesCallAddress, eyeAnglesPatch, sizeof(eyeAnglesPatch));
     PatchCodeBytes(blendCompareAddress, blendPatch, sizeof(blendPatch));
+}
+
+// C_TerrorViewModel::CalcViewModelView leans the gun with two pose parameters of the viewmodel: "ver_aims" from the
+// eyes' pitch (the look_poses layer: up to 3 degrees up or down and 4 to the side) and "move_x" from the player's speed
+// (the run pose: it lowers the MP5 5 degrees and the SG552 8). In VR the eyes are the headset and the gun is in the hand,
+// so the gun pointed away from where it shoots, by how the head looked and how fast the player went. The game is made to
+// see the eyes level and the player standing still, where both are in the middle of their range (idle, look_mid).
+void VR::PatchViewmodelPoses()
+{
+    const uintptr_t speed = m_Game->m_Offsets->ViewmodelMoveSpeed.address;
+    // sqrtss xmm0, xmm0 -> xorps xmm0, xmm0; nop
+    if (speed && CodeBytesMatch(speed, { 0xF3, 0x0F, 0x51, 0xC0 }))
+    {
+        const uint8_t patch[4] = { 0x0F, 0x57, 0xC0, 0x90 };
+        PatchCodeBytes(speed, patch, sizeof(patch));
+    }
+    else
+        Diagnostics::Log("viewmodel: the run pose isn't turned off in this game version, the gun leans while moving");
+
+    const uintptr_t pitch = m_Game->m_Offsets->ViewmodelAimPitch.address;
+    // fld dword ptr [eax] -> fldz
+    if (pitch && CodeBytesMatch(pitch, { 0xD9, 0x00 }))
+    {
+        const uint8_t patch[2] = { 0xD9, 0xEE };
+        PatchCodeBytes(pitch, patch, sizeof(patch));
+    }
+    else
+        Diagnostics::Log("viewmodel: the look poses aren't turned off in this game version, the gun leans with the head");
 }
 
 // ---------------------------------------------------------------------------------------------------------------
