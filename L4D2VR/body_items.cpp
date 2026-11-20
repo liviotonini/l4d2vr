@@ -320,10 +320,10 @@ namespace
 	// (the knife), in the middle of that place. The game's go from 14 units (knife) to 68 (pitchfork).
 	const float kThighMeleeLengthMeters = 0.30f;
 	const float kThighMeleeMaxScale = 0.75f;
-	// While the weapon hand holds what goes on the thigh, a see-through copy of it is there: fainter, stronger with the
-	// fist where the grab puts it away
-	const float kHolsterMarkBlend = 0.3f;
-	const float kHolsterMarkBlendAtHolster = 0.6f;
+	// While a hand holds what goes on the thigh or the chest, a see-through copy of it is there: fainter, stronger with
+	// that hand's fist where the grab puts it away
+	const float kPutAwayMarkBlend = 0.3f;
+	const float kPutAwayMarkBlendThere = 0.6f;
 
 	// Using pills and adrenaline (VR::ItemUseGestureReady), meters. The mouth from the eyes, and how close the fist with
 	// the pills gets to it.
@@ -610,27 +610,48 @@ void VR::UpdateBodyItems()
 		break;
 	}
 
-	// The weapon hand holds it: where it goes, see-through
-	if (!thighTaken && active && holsterInView && m_BodyDrawCount < kMaxBodyDraws && !m_LeftUseActive)
+	// What the weapon hand holds: its active weapon, but the left hand's item while that hand uses it
+	const bool leftItemActive = m_LeftItemIndex && (const void *)m_Game->GetClientEntity(m_LeftItemIndex) == active;
+	C_WeaponCSBase *rightHeld = active && !m_LeftUseActive && !leftItemActive ? (C_WeaponCSBase *)active : nullptr;
+	const int rightHeldId = rightHeld ? rightHeld->GetWeaponID() : 0;
+
+	// The weapon hand holds what goes on the thigh: where it goes, see-through
+	if (!thighTaken && rightHeld && holsterInView && m_BodyDrawCount < kMaxBodyDraws)
 	{
-		C_WeaponCSBase *weapon = (C_WeaponCSBase *)active;
-		const int weaponId = weapon->GetWeaponID();
 		BodyModelDraw draw;
-		const bool leftHands = m_LeftItemIndex && (const void *)m_Game->GetClientEntity(m_LeftItemIndex) == active;
-		if (GetWeaponSlot(weaponId) == 2 && !leftHands && thighDraw(weapon, weaponId, draw))
+		if (GetWeaponSlot(rightHeldId) == 2 && thighDraw(rightHeld, rightHeldId, draw))
 		{
-			draw.blend = IsAtHolster(GetFistPoint(true)) ? kHolsterMarkBlendAtHolster : kHolsterMarkBlend;
+			draw.blend = IsAtHolster(GetFistPoint(true)) ? kPutAwayMarkBlendThere : kPutAwayMarkBlend;
 			m_BodyDraws[m_BodyDrawCount++] = draw;
 		}
 	}
 
+	// A hand holds the pills, the adrenaline or a grenade: where they go on the chest, see-through, while nothing is
+	// there. A thrown grenade has left the hand.
+	int heldIds[2] = { 0, 0 };
+	bool heldThere[2] = { false, false };
+	auto held = [&](int weaponId, bool weaponHand)
+	{
+		const int spot = ChestSpotOf(weaponId);
+		if (spot < 0 || (spot == 1 && ThrownGrenadeHasLeftTheHand()))
+			return;
+		heldIds[spot] = weaponId;
+		heldThere[spot] = heldThere[spot] || GetChestSpotAt(GetFistPoint(weaponHand)) == spot;
+	};
+	if (rightHeld)
+		held(rightHeldId, true);
+	if (m_LeftItemIndex)
+		held(m_LeftItemId, false);
+
 	for (int spot = 0; spot < 2; ++spot)
 	{
-		const int weaponId = m_ChestItemIds[spot];
+		const bool carried = m_ChestItemIds[spot] != 0;
+		const int weaponId = carried ? m_ChestItemIds[spot] : heldIds[spot];
 		if (!weaponId)
 			continue;
 		const Mat34 frame = ChestItemFrame(body, spotOffsets[spot], weaponId, m_VRScale);
-		m_ChestItemPoints[spot] = Origin(frame);
+		if (carried)
+			m_ChestItemPoints[spot] = Origin(frame);
 
 		const void *model = GetModel(m_Game, ModelOfItem(weaponId));
 		const bool inView = Dot(Normalized(Origin(frame) - ToVec3(m_HmdPosAbs)), ToVec3(m_HmdForward)) > kChestViewCosine;
@@ -642,6 +663,8 @@ void VR::UpdateBodyItems()
 			draw.scale = m_SmallBodyItems ? kChestItemSmallScale : 1.0f;
 			draw.hasCenter = true;
 			draw.center = ChestItemCenter(weaponId);
+			if (!carried)
+				draw.blend = heldThere[spot] ? kPutAwayMarkBlendThere : kPutAwayMarkBlend;
 			m_BodyDraws[m_BodyDrawCount++] = draw;
 		}
 	}
