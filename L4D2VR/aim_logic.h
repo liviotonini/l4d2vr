@@ -8,12 +8,13 @@
 //
 // The game spreads a shot before it's fired: CTerrorGun::FireBullet adds a random pitch and yaw, each up to the weapon's
 // current spread (m_flSpread), to the eye angles, and passes them to FireTerrorBullets. The mod fires from the
-// controller instead, replacing those angles (Hooks::dServerFireTerrorBullets), so it adds the spread again here.
+// controller instead, replacing those angles (Hooks::dServerFireTerrorBullets), so it adds a spread again here.
 // m_flSpread follows the player's real speed, whatever the keys or the thumbstick asked (MovementSpread), grows with
 // every shot and comes back down; the laser sight shrinks it.
 //
-// A long gun (any primary weapon but the SMGs) held with one hand spreads as if it were running (OneHandedSpread) and
-// kicks the aim up with every shot (Kick).
+// A gun held as it should be gets a tenth of what moving and firing add to m_flSpread: standing still it's as precise as
+// the controller (ShotSpread). A long gun (any primary weapon but the SMGs) held with one hand gets all of the game's
+// spread, plus as much as running adds (OneHandedSpread), and kicks the aim up with every shot (Kick).
 namespace Aim
 {
 	// The game's weapon IDs (C_WeaponCSBase::WeaponID, checked against it where the game's types are)
@@ -98,12 +99,19 @@ namespace Aim
 		return spread + std::max(gun.maxMovement - gun.minStanding, 0.0f) * kStandingMovementShare;
 	}
 
-	// What a VR player's shot spreads by: the gun's own spread, if the game's is on and it's known (negative if not),
-	// and more for a long gun held with one hand
+	// A gun held as it should be (a long gun with both hands, a short one with one or two) keeps this much of what the
+	// game's spread has above the least standing still: none standing still, a little moving, jumping or firing on
+	constexpr float kSteadySpreadShare = 0.1f;
+
+	// What a VR player's shot spreads by, from the gun's own spread (negative if it isn't known) with the game's on.
+	// Held as it should be, a tenth of what moving and firing add to it (kSteadySpreadShare). A long gun held with one
+	// hand: all of it, and more (OneHandedSpread).
 	inline float ShotSpread(const GunScript &gun, float gunSpread, bool gameSpread, bool oneHanded)
 	{
 		const float spread = gameSpread && gunSpread > 0.0f ? gunSpread : 0.0f;
-		return oneHanded && gun.longGun ? OneHandedSpread(gun, spread) : spread;
+		if (oneHanded && gun.longGun)
+			return OneHandedSpread(gun, spread);
+		return std::max(spread - gun.minStanding, 0.0f) * kSteadySpreadShare;
 	}
 
 	inline uint32_t Hash(uint32_t x)

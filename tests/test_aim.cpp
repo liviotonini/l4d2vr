@@ -67,14 +67,55 @@ namespace
 		const GunScript &awp = *FindGun(Awp);
 		CHECK(OneHandedSpread(awp, awp.minStanding) > 20.0f * awp.minStanding);
 
-		// A shot: the gun's spread with the game's on, none without; one hand adds to either, but not on an SMG
-		CHECK_NEAR(ShotSpread(rifle, 1.5f, true, false), 1.5f, 0.0001f);
-		CHECK_NEAR(ShotSpread(rifle, 1.5f, false, false), 0.0f, 0.0001f);
+		// One hand on a long gun: all of the gun's spread with the game's on, and more; without it, only the more
 		CHECK_NEAR(ShotSpread(rifle, 1.5f, true, true), OneHandedSpread(rifle, 1.5f), 0.0001f);
 		CHECK_NEAR(ShotSpread(rifle, 1.5f, false, true), OneHandedSpread(rifle, 0.0f), 0.0001f);
-		CHECK_NEAR(ShotSpread(*FindGun(Uzi), 1.5f, true, true), 1.5f, 0.0001f);
+		// Held as it should be: a tenth of what the gun's spread has above the least standing still, none without the
+		// game's; an SMG with one hand is held as it should be
+		CHECK_NEAR(ShotSpread(rifle, 1.5f, true, false), (1.5f - 0.4f) * kSteadySpreadShare, 0.0001f);
+		CHECK_NEAR(ShotSpread(rifle, 1.5f, false, false), 0.0f, 0.0001f);
+		CHECK_NEAR(ShotSpread(*FindGun(Uzi), 1.5f, true, true), (1.5f - 1.0f) * kSteadySpreadShare, 0.0001f);
 		// The gun's spread unknown (the game's code not found): none of it
 		CHECK_NEAR(ShotSpread(rifle, -1.0f, true, false), 0.0f, 0.0001f);
+	}
+
+	void TestSteady()
+	{
+		printf("Aim: a gun held as it should be\n");
+		const GunScript &rifle = *FindGun(Rifle);
+		const GunScript &awp = *FindGun(Awp);
+		const GunScript &ak = *FindGun(Ak47);
+		const GunScript &pistol = *FindGun(Pistol);
+		auto steady = [](const GunScript &gun, float speed, bool ducking, bool onGround)
+		{
+			return ShotSpread(gun, MovementSpread(gun, speed, ducking, onGround), true, false);
+		};
+
+		// Standing still or crouched: exactly where it points, as before the game's spread came back
+		for (const GunScript *gun : { &rifle, &awp, &ak, &pistol, FindGun(Uzi), FindGun(PumpShotgun) })
+		{
+			CHECK_NEAR(steady(*gun, 0.0f, false, true), 0.0f, 0.0001f);
+			CHECK_NEAR(steady(*gun, 0.0f, true, true), 0.0f, 0.0001f);
+		}
+		// The laser sight takes the gun's spread under the least standing still: nothing either
+		CHECK_NEAR(ShotSpread(rifle, rifle.minStanding * 0.4f, true, false), 0.0f, 0.0001f);
+
+		// Walking or the thumbstick pushed a little: very little (a rifle under 0.15 degrees, 2.6 cm at 10 m)
+		CHECK(steady(rifle, kSlowestStickSpeed, false, true) <= steady(rifle, kWalkSpeed, false, true));
+		CHECK(steady(rifle, kWalkSpeed, false, true) < 0.15f);
+		CHECK(steady(ak, kWalkSpeed, false, true) < 0.15f);
+		CHECK(steady(awp, kWalkSpeed, false, true) < 0.1f);
+		// Running and jumping: little (under 0.5 degrees), and still more than walking
+		CHECK(steady(rifle, kRunSpeed, false, true) > steady(rifle, kWalkSpeed, false, true));
+		CHECK(steady(rifle, kRunSpeed, false, true) < 0.4f);
+		CHECK(steady(ak, kRunSpeed, false, true) < 0.4f);
+		CHECK(steady(rifle, 0.0f, false, false) < 0.5f);
+		// Firing on: a tenth of what the shots add
+		CHECK_NEAR(ShotSpread(rifle, 0.4f + 1.7f, true, false), 0.17f, 0.0001f);
+
+		// One hand on a long gun spreads many times more than both, standing still and running
+		CHECK(ShotSpread(rifle, MovementSpread(rifle, 0.0f, false, true), true, true) > 3.0f);
+		CHECK(ShotSpread(rifle, MovementSpread(rifle, kRunSpeed, false, true), true, true) > 10.0f * steady(rifle, kRunSpeed, false, true));
 	}
 
 	void TestSpreadAngles()
@@ -175,6 +216,7 @@ void RunAimTests()
 {
 	TestMovementSpread();
 	TestOneHanded();
+	TestSteady();
 	TestSpreadAngles();
 	TestKick();
 }

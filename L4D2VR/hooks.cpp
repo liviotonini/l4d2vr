@@ -29,8 +29,9 @@ namespace
 }
 
 // How a VR player's shots aim (aim_logic.h). The game's gun turns the eye angles by its spread and the view's kick before
-// FireTerrorBullets, whose angles the mod replaces with the controller's: the spread is added to them again, from the
-// same seed, so the client shows each shot where the server fires it.
+// FireTerrorBullets, whose angles the mod replaces with the controller's: a spread from the gun's is added to them again
+// (a tenth of what moving and firing add for a gun held as it should be, all of it and more for a long gun with one
+// hand), from the same seed, so the client shows each shot where the server fires it.
 namespace
 {
 	// Bits of a VR player's usercmd buttons that the game doesn't use, taken off by the server before the game sees them
