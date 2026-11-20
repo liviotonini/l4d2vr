@@ -9,12 +9,17 @@ a logic_script that runs scripts/vscripts/l4d2vr_testroom.nut (no infected, no b
 info_director that calls L4D2VR_TestRoom() a second after gameplay starts, which puts every weapon and item on tables
 around the survivors. The mission file (missions/l4d2vr_testroom.txt) also turns on every melee weapon.
 
+The cubemaps embedded in the map are in materials/maps/c2m1_highway/, but the engine looks for the ones models use
+(weapons, props) in materials/maps/<name of the loaded map>/: without copies under the new name, models are drawn white.
+
 From the console:  map l4d2vr_testroom
 """
+import io
 import os
 import re
 import struct
 import sys
+import zipfile
 import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -101,6 +106,21 @@ def build_bsp():
     return bytes(bsp)
 
 
+def cubemaps(bsp):
+    """The cubemap textures of the map's pakfile (lump 40, a zip), under the new map's name:
+    {'materials/maps/l4d2vr_testroom/c1088_5344_-895.vtf': bytes, ...}"""
+    version, offset, length, fourcc = struct.unpack_from('<iii4s', bsp, 8 + 16 * 40)
+    source = 'materials/maps/%s/' % SOURCE_MAP
+    found = {}
+    with zipfile.ZipFile(io.BytesIO(bsp[offset:offset + length])) as pak:
+        for name in pak.namelist():
+            if name.lower().startswith(source) and name.lower().endswith('.vtf') and '/' not in name[len(source):]:
+                found['materials/maps/%s/%s' % (MAP, name[len(source):])] = pak.read(name)
+    if not any(name.endswith('/cubemapdefault.vtf') for name in found):
+        raise RuntimeError('no cubemaps in the pakfile of ' + SOURCE_MAP)
+    return found
+
+
 def build_vpk(files):
     """VPK version 1 with the data in the same file. files: {'path/name.ext': bytes}"""
     tree = {}
@@ -173,6 +193,7 @@ if __name__ == '__main__':
         'maps/%s.nav' % MAP: build_nav(len(bsp)),
         'scripts/vscripts/l4d2vr_testroom.nut': read('scripts/vscripts/l4d2vr_testroom.nut'),
     }
+    files.update(cubemaps(bsp))
     addons = os.path.join(GAME, 'left4dead2', 'addons')
     out = os.path.join(addons, VPK_NAME)
     with open(out, 'wb') as f:
