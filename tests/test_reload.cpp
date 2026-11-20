@@ -46,6 +46,20 @@ namespace
 		void moveTo(const Vec3 &palm) { in.palm = palm; in.held = palm; step(); }
 		void grip(bool down) { in.grip = down; step(); }
 		void trigger(bool down) { in.trigger = down; step(); }
+		// The trigger takes the bolt where it is and pulls it all the way back; `events` are the pull's
+		void pullBolt() { moveTo(kBolt); trigger(true); moveTo(kBolt + Vec3(-9.0f, 0.0f, 0.0f)); }
+		// Forward again, and let go
+		void releaseBolt() { moveTo(kBolt); trigger(false); }
+		// A new magazine (or shell) from the waist, in: the events of when it went in
+		unsigned insertFresh()
+		{
+			moveTo(kWaist);
+			grip(true);
+			moveTo(kSocket);
+			const unsigned inserted = events;
+			grip(false);
+			return inserted;
+		}
 	};
 
 	void TestMagazine()
@@ -173,6 +187,8 @@ namespace
 		r.moveTo(kBolt + Vec3(-9.0f, 0.0f, 0.0f));
 		CHECK_NEAR(r.machine.BoltPull(), r.in.boltTravel, 0.001f);
 		CHECK(r.events & Event_BoltPulled);
+		CHECK(!(r.events & Event_RoundEjected)); // the chamber was empty: nothing comes out
+		CHECK(!(r.events & Event_CaseEjected));
 		CHECK(!r.machine.NeedsCycle());
 		CHECK(!r.machine.ReloadInProgress());
 		CHECK(!r.machine.BoltLockedBack());
@@ -201,17 +217,22 @@ namespace
 		r.step();
 		CHECK(!r.machine.NeedsCycle());
 
-		// Pulled when it isn't needed, it still moves and clicks, and changes nothing
+		// Pulled when it isn't needed, it throws out the round that was in the chamber and chambers the next
 		CHECK(!r.machine.NeedsCycle());
 		r.moveTo(kBolt);
 		r.trigger(true);
 		CHECK(r.machine.GetState() == State::HoldingBolt);
 		r.moveTo(kBolt + Vec3(-1.0f, 0.0f, 0.0f));
 		CHECK_NEAR(r.machine.BoltPull(), 1.0f, 0.001f);
+		CHECK(!(r.events & Event_RoundEjected));
 		r.moveTo(kBolt + Vec3(-9.0f, 0.0f, 0.0f));
 		CHECK(r.events & Event_BoltPulled);
+		CHECK(r.events & Event_RoundEjected);
 		r.trigger(false);
 		CHECK(r.events & Event_BoltReleased);
+		CHECK(!r.machine.NeedsCycle());
+		r.in.clip = 49; // the server took it
+		r.step();
 		CHECK(!r.machine.NeedsCycle());
 
 		// An empty weapon racked with nothing to chamber still needs it afterwards
@@ -758,10 +779,196 @@ namespace
 	}
 }
 
+namespace
+{
+	// The bolt pulled with a live round in the chamber throws it out: one less in the weapon
+	void TestRoundEjected()
+	{
+		printf("manual reload: a live round thrown out by the bolt\n");
+
+		// Reloaded empty: the bolt chambers a round, nothing comes out
+		{
+			Rig r(1, 30, 100, false);
+			r.in.clip = 0;
+			r.step();
+			r.pullMagazineOut();
+			CHECK(r.insertFresh() & Event_Inserted);
+			r.in.clip = 30;
+			r.in.reserve = 70;
+			r.step();
+			CHECK(r.machine.NeedsCycle());
+			r.pullBolt();
+			CHECK(r.events & Event_BoltPulled);
+			CHECK(!(r.events & (Event_RoundEjected | Event_CaseEjected)));
+			r.releaseBolt();
+			CHECK(!r.machine.NeedsCycle());
+			CHECK(!r.machine.BlocksFire(30, false));
+		}
+
+		// Reloaded two short: full, with the round in the chamber, ready to fire. Pulling the bolt then throws that round out.
+		{
+			Rig r(28, 30, 100, false);
+			r.pullMagazineOut();
+			CHECK(r.insertFresh() & Event_Inserted);
+			r.in.clip = 30;
+			r.in.reserve = 98;
+			r.step();
+			CHECK(!r.machine.NeedsCycle());
+			CHECK(!r.machine.BlocksFire(30, false));
+
+			r.pullBolt();
+			CHECK(r.events & Event_BoltPulled);
+			CHECK(r.events & Event_RoundEjected);
+			CHECK(!(r.events & Event_CaseEjected));
+			CHECK(!r.machine.NeedsCycle()); // the next one went in
+			r.releaseBolt();
+			CHECK(!(r.events & Event_RoundEjected)); // only once per pull
+			r.in.clip = 29; // the server took it
+			r.step();
+			CHECK(!r.machine.NeedsCycle());
+			CHECK(!r.machine.BlocksFire(29, false));
+
+			// Pulled back and forth with the trigger held: one round each time
+			r.pullBolt();
+			CHECK(r.events & Event_RoundEjected);
+			r.moveTo(kBolt);
+			CHECK(r.events & Event_BoltReleased);
+			r.moveTo(kBolt + Vec3(-9.0f, 0.0f, 0.0f));
+			CHECK(r.events & Event_RoundEjected);
+			r.releaseBolt();
+			r.in.clip = 27; // both at once
+			r.step();
+			CHECK(!r.machine.NeedsCycle());
+		}
+
+		// The last round thrown out: nothing to chamber, so it's held back at once, before the server's count
+		{
+			Rig r(1, 30, 100, false);
+			r.pullBolt();
+			CHECK(r.events & Event_RoundEjected);
+			CHECK(r.machine.NeedsCycle());
+			r.releaseBolt();
+			CHECK(r.machine.BoltLockedBack());
+			CHECK(r.machine.BlocksFire(1, false));
+			r.in.clip = 0;
+			r.step();
+			CHECK(r.machine.NeedsCycle());
+			// Nothing more comes out of it
+			r.pullBolt();
+			CHECK(r.events & Event_BoltPulled);
+			CHECK(!(r.events & Event_RoundEjected));
+			r.releaseBolt();
+			CHECK(r.machine.NeedsCycle());
+		}
+
+		// A pump worked without a shot throws out a live shell; the clip dropping for it isn't a shot
+		{
+			Rig r(8, 8, 50, true);
+			r.in.pumpEveryShot = true;
+			r.step();
+			r.pullBolt();
+			CHECK(r.events & Event_RoundEjected);
+			CHECK(!(r.events & Event_CaseEjected));
+			r.releaseBolt();
+			r.in.clip = 7;
+			r.step();
+			CHECK(!r.machine.NeedsCycle());
+			CHECK(!r.machine.BlocksFire(7, true));
+
+			// A real shot: the pump throws its empty case out, and nothing else
+			r.in.clip = 6;
+			r.step();
+			CHECK(r.machine.NeedsCycle());
+			r.pullBolt();
+			CHECK(r.events & Event_CaseEjected);
+			CHECK(!(r.events & Event_RoundEjected));
+			r.releaseBolt();
+			CHECK(!r.machine.NeedsCycle());
+			CHECK(!r.machine.BlocksFire(6, true));
+		}
+
+		// The shot is seen before the server's count of the shell thrown out: one of the two drops is still a shot
+		{
+			Rig r(8, 8, 50, true);
+			r.in.pumpEveryShot = true;
+			r.step();
+			r.pullBolt();
+			r.releaseBolt();
+			r.in.clip = 7;
+			r.step();
+			r.in.clip = 6;
+			r.step();
+			CHECK(r.machine.NeedsCycle());
+		}
+
+		// A host whose mod doesn't take it: the clip never drops, and after a while a shot counts again
+		{
+			Rig r(8, 8, 50, true);
+			r.in.pumpEveryShot = true;
+			r.step();
+			r.pullBolt();
+			CHECK(r.events & Event_RoundEjected);
+			r.releaseBolt();
+			for (int i = 0; i < kEjectWaitUpdates; ++i)
+				r.step();
+			r.in.clip = 7;
+			r.step();
+			CHECK(r.machine.NeedsCycle());
+		}
+
+		// The last shell fired: once loaded, the pump throws out its case. The last one thrown out live leaves nothing.
+		{
+			Rig r(1, 8, 50, true);
+			r.in.pumpEveryShot = true;
+			r.step();
+			r.in.clip = 0;
+			r.step();
+			CHECK(r.machine.NeedsCycle());
+			CHECK(r.insertFresh() & Event_ShellInserted);
+			r.in.clip = 1;
+			r.step();
+			r.pullBolt();
+			CHECK(r.events & Event_CaseEjected);
+			CHECK(!(r.events & Event_RoundEjected));
+			r.releaseBolt();
+			CHECK(!r.machine.NeedsCycle());
+
+			r.pullBolt();
+			CHECK(r.events & Event_RoundEjected);
+			CHECK(r.machine.NeedsCycle());
+			r.releaseBolt();
+			r.in.clip = 0;
+			r.step();
+			r.insertFresh();
+			r.in.clip = 1;
+			r.step();
+			r.pullBolt();
+			CHECK(!(r.events & (Event_RoundEjected | Event_CaseEjected)));
+			r.releaseBolt();
+			CHECK(!r.machine.NeedsCycle());
+		}
+
+		// A weapon change forgets it all
+		{
+			Rig r(8, 8, 50, true);
+			r.in.pumpEveryShot = true;
+			r.step();
+			r.pullBolt();
+			r.releaseBolt();
+			r.machine.Reset();
+			r.step();
+			r.in.clip = 7;
+			r.step();
+			CHECK(r.machine.NeedsCycle());
+		}
+	}
+}
+
 void RunReloadTests()
 {
 	TestMagazine();
 	TestEmptyAndBolt();
+	TestRoundEjected();
 	TestMagazineFromWaist();
 	TestPumpEveryShot();
 	TestBoltWhileWalking();

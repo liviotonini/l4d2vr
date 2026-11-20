@@ -475,9 +475,18 @@ void VR::UpdateLeftGunReload()
 		PlayWeaponSound(spec.magazineInSound);
 	if (events & Reload::Event_BoltPulled)
 		PlayWeaponSound(spec.boltBackSound);
-	// A pump or a bolt action throws its case out when it's worked
-	if ((events & Reload::Event_BoltPulled) && gun->workedByHand && now - m_LeftGunShellMs < 250)
+	// Worked after a shot, a pump or a bolt action throws its empty case out. Worked with a live round in the chamber, any
+	// gun throws that round out, and the server takes it from the gun (LeftGun::ServerEject).
+	if ((events & (Reload::Event_CaseEjected | Reload::Event_RoundEjected)) && now - m_LeftGunShellMs < 250)
 		Hooks::ClientParticle(gun->brass, ToVector(m_LeftGunShell), ToVector(m_LeftGunShell + m_LeftGunShellDir * kMuzzleFlashLength));
+	if (events & Reload::Event_RoundEjected)
+	{
+		m_LeftGunClip = std::max(0, m_LeftGunClip - 1);
+		char command[48];
+		snprintf(command, sizeof(command), "l4d2vr_eject 1 %d", m_LeftItemId);
+		m_Game->m_EngineClient->ServerCmd(command, true);
+		Diagnostics::Log("left gun: the right hand threw out a live round, %d were in it", in.clip);
+	}
 	if (events & Reload::Event_BoltReleased)
 		PlayWeaponSound(spec.boltForwardSound);
 	if (events & (Reload::Event_GrabbedOld | Reload::Event_MagazineOut | Reload::Event_DroppedOld | Reload::Event_GrabbedFresh | Reload::Event_BoltPulled))
@@ -960,6 +969,22 @@ void LeftGun::ServerReload(edict_t *edict, int playerIndex, int ammoType)
 	}
 	DualWield::ServerNetworkChanged(gun);
 	Diagnostics::Log("left gun: player %d loaded weapon %d, %d in it", playerIndex, data->weaponId, clip);
+}
+
+// The right hand pulled the bolt of the left hand's gun with a live round in the chamber, which came out
+void LeftGun::ServerEject(edict_t *edict, int playerIndex, int weaponId)
+{
+	void *player;
+	const GunData *data;
+	void *gun = ServerLeftGun(edict, playerIndex, player, data);
+	if (!gun || data->weaponId != weaponId || VR::GetReloadCapacity(weaponId) <= 0)
+		return;
+	int &clip = *(int *)((uint8_t *)gun + kServerClipOffset);
+	if (clip <= 0 || clip > 1000)
+		return;
+	--clip;
+	DualWield::ServerNetworkChanged(gun);
+	Diagnostics::Log("left gun: player %d threw a round out of weapon %d, %d in it", playerIndex, weaponId, clip);
 }
 
 void LeftGun::ServerAmmo(edict_t *edict, int playerIndex, int ammoType)

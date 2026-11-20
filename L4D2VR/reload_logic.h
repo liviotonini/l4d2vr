@@ -27,6 +27,11 @@ namespace Reload
 		Event_GrabbedBolt = 1 << 7,
 		Event_BoltPulled = 1 << 8,   // pulled all the way back (or worked with the button)
 		Event_BoltReleased = 1 << 9, // let go after that: it goes forward
+		// Pulled with a live round in the chamber: it comes out unfired, so the weapon has one less. The weapon's clip
+		// shows it once the server takes it.
+		Event_RoundEjected = 1 << 10,
+		// A pump or bolt action worked after a shot: the empty case comes out
+		Event_CaseEjected = 1 << 11,
 	};
 
 	struct Inputs
@@ -70,6 +75,9 @@ namespace Reload
 	const float kBoltReturned = 0.2f;
 	// Pulled back more than this, the weapon doesn't fire
 	const float kBoltBlocksFire = 0.1f;
+	// How many updates a round thrown out waits for the weapon's clip to show it (about a second): a host whose mod
+	// doesn't take it never does
+	const int kEjectWaitUpdates = 90;
 
 	inline float DistanceToSegment(const HandMath::Vec3 &point, const HandMath::Vec3 &a, const HandMath::Vec3 &b)
 	{
@@ -128,6 +136,9 @@ namespace Reload
 			m_TriggerWasDown = false;
 			m_PressUsed = false;
 			m_LastClip = -1;
+			m_EjectsPending = 0;
+			m_EjectWait = 0;
+			m_SpentCase = false;
 		}
 
 		unsigned Update(const Inputs &in)
@@ -158,12 +169,23 @@ namespace Reload
 			// What the hand may start (Inputs::onlyFreeHand)
 			const bool mayReload = in.handFree || !in.onlyFreeHand;
 
+			// Rounds the bolt threw out (Event_RoundEjected) leave the clip when the server takes them: that isn't a shot
+			int dropped = m_LastClip > 0 && in.clip < m_LastClip ? m_LastClip - in.clip : 0;
+			const int ejectedNow = std::min(dropped, m_EjectsPending);
+			m_EjectsPending -= ejectedNow;
+			dropped -= ejectedNow;
+			if (m_EjectsPending > 0 && --m_EjectWait <= 0)
+				m_EjectsPending = 0;
+
 			// The weapon ran out: the bolt stays back until it's pulled
 			if (in.clip == 0 && m_LastClip != 0 && in.hasBolt && in.capacity > 0)
 				m_NeedsCycle = true;
 			// A pump action fired: the empty shell stays in until the pump is worked
-			if (in.pumpEveryShot && in.hasBolt && m_LastClip > 0 && in.clip < m_LastClip)
+			if (in.pumpEveryShot && in.hasBolt && dropped > 0)
+			{
 				m_NeedsCycle = true;
+				m_SpentCase = true;
+			}
 			m_LastClip = in.clip;
 			const bool mayTakeBolt = in.handFree || (mayReload && m_NeedsCycle);
 
@@ -266,9 +288,23 @@ namespace Reload
 				if (!m_BoltPulledThisGrab && m_BoltPull >= in.boltTravel * kBoltPullNeeded)
 				{
 					m_BoltPulledThisGrab = true;
-					// Chambers a round, if there's one to chamber
-					if (in.clip > 0)
-						m_NeedsCycle = false;
+					// What the weapon has, less what was thrown out that its clip doesn't show yet
+					int rounds = in.clip - m_EjectsPending;
+					if (m_SpentCase)
+					{
+						m_SpentCase = false;
+						events |= Event_CaseEjected;
+					}
+					else if (!m_NeedsCycle && rounds > 0)
+					{
+						// A live round was in the chamber: it comes out as if it had been fired, and the next one goes in
+						--rounds;
+						++m_EjectsPending;
+						m_EjectWait = kEjectWaitUpdates;
+						events |= Event_RoundEjected;
+					}
+					// Chambers a round, if there's one to chamber. The last one thrown out leaves it empty, held back.
+					m_NeedsCycle = rounds <= 0;
 					events |= Event_BoltPulled;
 				}
 				else if (m_BoltPulledThisGrab && in.trigger && m_BoltPull <= in.boltTravel * kBoltReturned)
@@ -312,5 +348,8 @@ namespace Reload
 		bool m_TriggerWasDown = false;
 		bool m_PressUsed = false;
 		int m_LastClip = -1;
+		int m_EjectsPending = 0;  // rounds thrown out that the clip doesn't show yet
+		int m_EjectWait = 0;      // updates left to wait for them
+		bool m_SpentCase = false; // a pump or bolt action fired: its empty case is in the chamber
 	};
 }

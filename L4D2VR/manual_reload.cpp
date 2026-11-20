@@ -8,6 +8,8 @@
 #include "reload_logic.h"
 #include "pose_relay.h"
 #include "diagnostics.h"
+#include "hooks.h"
+#include "left_gun.h"
 
 using namespace HandMath;
 
@@ -121,6 +123,8 @@ namespace
 		int bolt = -1;
 		int boltParent = -1;
 		Mat34 boltRest;  // where the bolt sits on its parent when nothing moves it
+		int shell = -1;  // the bone of the ejection port (the "shell" attachment), -1 if the model has none
+		Mat34 shellOnBone;
 		float gamePumpTravel = 0.0f; // how far back the game's own animation takes the pump, for the log
 		int actionSounds = -1;       // the sounds of the action in its fire animations: 1 on, 0 off, -1 not set yet
 	};
@@ -135,6 +139,9 @@ namespace
 	// Where the weapon was drawn from. The hand (GetLeftPalm) is from the same tracking update, so walking moves both
 	// the same way.
 	Vec3 g_WeaponPoint;
+	// Where a round thrown out by the bolt leaves the weapon, and the way it goes: out to its right, a little up
+	Vec3 g_EjectPort;
+	Vec3 g_EjectDirection;
 	bool g_HaveBolt = false;
 	ULONGLONG g_LastViewmodelDraw = 0;
 	int g_LastWeaponId = 0;
@@ -179,8 +186,12 @@ namespace
 	const Vec3 kMagazineInPalm(0.4f, -1.9f, 0.7f);
 	const Vec3 kShellInFingers(1.6f, -1.3f, 0.2f);
 
+	// A round thrown out by the bolt is the weapon's case effect (the scripts' EjectBrassEffect), this long, units
+	const float kEjectEffectLength = 8.0f;
+
 	Vec3 ToVec3(const Vector &v) { return Vec3(v.x, v.y, v.z); }
 	Vec3 ArrayToVec3(const float v[3]) { return Vec3(v[0], v[1], v[2]); }
+	Vector ToVector(const Vec3 &v) { return Vector(v.x, v.y, v.z); }
 
 	// What the hand holds, at the same angle it has in the weapon
 	Mat34 HeldRelativeToHand(const Profile &profile, const Mat34 &magazineWorld, const Mat34 &weaponFrame)
@@ -602,6 +613,18 @@ void VR::UpdateManualReload()
 		PlayWeaponSound(profile->sounds->boltBack);
 	if (events & Reload::Event_BoltReleased)
 		PlayWeaponSound(profile->sounds->boltForward);
+
+	// The bolt threw out a live round: it leaves the ejection port as a fired case does, and the server takes it from the
+	// weapon (PoseRelay::ApplyEject). The case of a shot is the game's fire animation's.
+	if (events & Reload::Event_RoundEjected)
+	{
+		if (const LeftGun::GunData *gun = LeftGun::Find(m_ActiveWeaponId))
+			Hooks::ClientParticle(gun->brass, ToVector(g_EjectPort), ToVector(g_EjectPort + g_EjectDirection * kEjectEffectLength));
+		char command[48];
+		snprintf(command, sizeof(command), "l4d2vr_eject 0 %d", m_ActiveWeaponId);
+		m_Game->m_EngineClient->ServerCmd(command, true);
+		Diagnostics::Log("manual reload: the bolt threw out a live round, %d were in the weapon", inputs.clip);
+	}
 }
 
 bool VR::ManualReloadBlocksFire() const
@@ -684,6 +707,7 @@ bool VR::BuildReloadViewmodel(const void *studioHeader, const void *customBones,
 			else
 				ids.boltParent = -1;
 		}
+		ids.shell = Studio::AttachmentOnBone(studioHeader, "shell", ids.shellOnBone);
 		found->second = ids;
 
 		if (ids.magazine < 0)
@@ -711,6 +735,15 @@ bool VR::BuildReloadViewmodel(const void *studioHeader, const void *customBones,
 		const float lockedBack = g_Machine.BoltLockedBack() ? profile->boltTravel : 0.0f;
 		g_BoltGrab = TransformPoint(source[ids.bolt], ArrayToVec3(profile->boltCenter)) - forward * lockedBack;
 	}
+	// The ejection port: the model's "shell" attachment, or by the bolt (the slide of the pistols, the bolt of the CS:S
+	// guns, which have none)
+	if (ids.shell >= 0 && ids.shell < boneCount)
+		g_EjectPort = Origin(Multiply(source[ids.shell], ids.shellOnBone));
+	else if (g_HaveBolt)
+		g_EjectPort = TransformPoint(source[ids.bolt], ArrayToVec3(profile->boltCenter));
+	else
+		g_EjectPort = g_Socket;
+	g_EjectDirection = Normalized(ToVec3(m_ViewmodelRight) + ToVec3(m_ViewmodelUp) * 0.3f);
 	g_LastViewmodelDraw = now;
 
 	// Where the mark goes: relative to the right controller in its OpenVR frame (x right, y up, z back). It faces the eyes,

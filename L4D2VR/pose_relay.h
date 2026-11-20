@@ -140,4 +140,5 @@ private:
 	bool SendToClientUnreliable(int playerIndex, const char *command);
 	bool SendToClient(edict_t *edict, const char *command);
 	void ApplyReload(edict_t *player, int shell, int ammoType, int expectedReserve);
+	void ApplyEject(edict_t *player, int weaponId);
 };

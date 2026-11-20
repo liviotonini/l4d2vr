@@ -54,4 +54,6 @@ namespace LeftGun
 	void ServerReload(edict_t *edict, int playerIndex, int ammoType);
 	// The right hand took ammo in the world: the left hand's gun's ammo is full too
 	void ServerAmmo(edict_t *edict, int playerIndex, int ammoType);
+	// The right hand pulled the gun's bolt with a live round in the chamber: one less in it
+	void ServerEject(edict_t *edict, int playerIndex, int weaponId);
 }

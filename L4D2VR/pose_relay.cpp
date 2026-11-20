@@ -751,6 +751,27 @@ bool PoseRelay::HandleServerCommand(edict_t *player, const void *commandObject)
 		return true;
 	}
 
+	// A bolt pulled with a live round in the chamber, which came out: the hand (0 the weapon held, 1 the left hand's gun)
+	// and the weapon's ID (manual_reload.cpp, left_gun.cpp)
+	if (strcmp(name, "l4d2vr_eject") == 0)
+	{
+		if (args.Count() == 3)
+		{
+			const int weaponId = atoi(args.Arg(2));
+			if (atoi(args.Arg(1)) == 0)
+			{
+				ApplyEject(player, weaponId);
+			}
+			else
+			{
+				const int index = ServerPlayerIndex(m_Game, player);
+				if (m_Game->IsValidPlayerIndex(index))
+					LeftGun::ServerEject(player, index, weaponId);
+			}
+		}
+		return true;
+	}
+
 	// The hand grabbed something in the world: the use that comes next is aimed from there. With "1" after the angles
 	// it was the left hand, which keeps what it takes (dual wield).
 	if (strcmp(name, "l4d2vr_use_aim") == 0)
@@ -1065,6 +1086,29 @@ void PoseRelay::ApplyReload(edict_t *player, int shell, int ammoType, int expect
 	*((uint8_t *)weapon + kInReloadOffset) = 0;
 	*((uint8_t *)weapon + kPartialReloadOffset) = 0;
 	*((uint8_t *)weapon + kReloadFromEmptyOffset) = 0;
+}
+
+// On the server: the bolt of the weapon the player holds was pulled with a live round in the chamber, which came out
+// unfired. `weaponId` is the weapon the client meant: a weapon changed meanwhile loses nothing.
+void PoseRelay::ApplyEject(edict_t *player, int weaponId)
+{
+	const int kClipOffset = 0x1414;
+
+	if (!player || !player->m_pUnk)
+		return;
+
+	void *serverPlayer = player->m_pUnk->GetBaseEntity();
+	typedef Server_WeaponCSBase *(__thiscall *tGetActiveWeapon)(void *thisptr);
+	tGetActiveWeapon getActiveWeapon = (tGetActiveWeapon)(m_Game->m_Offsets->GetActiveWeapon.address);
+	Server_WeaponCSBase *weapon = serverPlayer && getActiveWeapon ? getActiveWeapon(serverPlayer) : nullptr;
+	if (!weapon || weapon->GetWeaponID() != weaponId || VR::GetReloadCapacity(weaponId) <= 0)
+		return;
+
+	int &clip = *(int *)((uint8_t *)weapon + kClipOffset);
+	if (clip <= 0 || clip > 1000)
+		return;
+	--clip;
+	DualWield::ServerNetworkChanged(weapon);
 }
 
 void PoseRelay::OnPoseReceived(int playerIndex, uint16_t sequence, const char *payload)

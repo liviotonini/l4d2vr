@@ -117,6 +117,23 @@ namespace Studio
 		return (uint8_t *)base + *(const int32_t *)(base + 244) + attachment * 92 + 8;
 	}
 
+	// The bone the attachment `name` is on and its place on that bone, -1 if the model has none by that name
+	inline int AttachmentOnBone(const void *header, const char *name, HandMath::Mat34 &onBone)
+	{
+		const uint8_t *base = (const uint8_t *)header;
+		const int32_t count = *(const int32_t *)(base + 240), index = *(const int32_t *)(base + 244);
+		for (int i = 0; i < count; ++i)
+		{
+			const uint8_t *attachment = base + index + i * 92;
+			if (_stricmp((const char *)attachment + *(const int32_t *)attachment, name) == 0)
+			{
+				memcpy(&onBone, attachment + 12, sizeof(float) * 12);
+				return *(const int32_t *)(attachment + 8);
+			}
+		}
+		return -1;
+	}
+
 	const int kMaxBones = 128;
 
 	// The model's hitboxes (its first set) together, as a box in the frame of the bone `inBone` as the model was made.
