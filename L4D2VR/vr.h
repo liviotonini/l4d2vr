@@ -797,7 +797,7 @@ public:
 	void OnRemoteLeftItem(int playerIndex, int itemIndex);
 	void DualWieldTest(const char *action);
 	bool GetGrabUseAim(Vector &origin, QAngle &angles) const;
-	bool BuildRemoteItemBones(int entityIndex, const void *weapon, const void *studioHeader, void *outBones);
+	bool BuildRemoteItemBones(int entityIndex, const void *entity, const void *model, const void *studioHeader, void *outBones);
 	static bool IsHeldInTheHand(int weaponId);
 	bool GetRightHandTarget(const HandRig &rig, HandMath::Mat34 &hand, float backMeters = 0.0f) const;
 	HandMath::Vec3 GetFistPoint(bool weaponHand) const;
@@ -856,7 +856,7 @@ public:
 	HandMath::Mat34 GetLeftHandGrabFrame() const;
 	HandMath::Vec3 GetRightWristAbs() const;
 	bool BuildRemotePlayerBones(int playerIndex, const void *studioHeader, const void *customBones, void *outBones);
-	bool BuildRemoteWeaponBones(int entityIndex, const void *studioHeader, const void *customBones, void *outBones);
+	bool BuildRemoteWeaponBones(int entityIndex, const void *model, const void *renderable, const void *studioHeader, const void *customBones, void *outBones);
 	void HideWristHud();
 	void UpdateFlashlightAttachment();
 	void PatchLaserSight();

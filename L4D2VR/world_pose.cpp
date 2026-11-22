@@ -1,6 +1,7 @@
 #include "vr.h"
 #include <Windows.h>
 #include <algorithm>
+#include <cmath>
 #include <unordered_map>
 #include "sdk.h"
 #include "game.h"
@@ -12,10 +13,46 @@ using namespace HandMath;
 
 namespace
 {
-	// A weapon drawn this far from where its player's animation had "weapon_bone" the last time that player was drawn,
-	// turned the same way, is the one in that hand. The player moves between the two draws: a frame at a run is 2 units.
+	// A weapon of the model the player holds drawn this far from where its player's animation had "weapon_bone" the last
+	// time that player was drawn, turned the same way, is the one in that hand. A frame at a run is 2 units.
 	const float kWeaponMatchDistance = 12.0f;
 	const float kWeaponMatchAlignment = 0.9f;
+	// Between the player's draw and the weapon's the player moved this much at most; more is a teleport
+	const float kMaxMoveBetweenDraws = 40.0f;
+
+	// How the weapon drawn was told to be the one in a player's hand
+	enum class WeaponFound { No, AsTheWeapon, ByItsRenderable, AsItsOwner, ByPlace };
+
+	const char *FoundText(WeaponFound how)
+	{
+		switch (how)
+		{
+		case WeaponFound::AsTheWeapon: return "drawn as the weapon they hold";
+		case WeaponFound::ByItsRenderable: return "drawn with its renderable";
+		case WeaponFound::AsItsOwner: return "drawn as its owner, the player";
+		case WeaponFound::ByPlace: return "drawn where their animation has it";
+		default: return "NOT taken as theirs";
+		}
+	}
+
+	// Where the game draws an entity from (IClientRenderable::GetRenderOrigin)
+	bool RenderOrigin(const void *entity, Vec3 &origin)
+	{
+		if (!entity)
+			return false;
+		__try
+		{
+			void *renderable = (uint8_t *)entity + 4;
+			typedef const Vector &(__thiscall *tGetOrigin)(void *thisptr);
+			const Vector &v = ((tGetOrigin)(*(void ***)renderable)[1])(renderable);
+			origin = Vec3(v.x, v.y, v.z);
+			return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			return false;
+		}
+	}
 
 	Vec3 ToVec3(const Vector &v) { return Vec3(v.x, v.y, v.z); }
 
@@ -48,15 +85,20 @@ namespace
 		return bone;
 	}
 
-	// Once per player and model, for checking in the log that other players' weapons follow their hands
-	void LogRemoteWeapon(int player, const void *studioHeader, bool byEntity, bool moved)
+	// Once per player, model and outcome, for checking in the log how the game draws other players' weapons and whether
+	// they follow the hands: the entity the draw is for (the weapon, the player or another), and how far its weapon bone
+	// is from the one of the player's animation
+	void LogRemoteWeapon(int player, const void *studioHeader, WeaponFound how, int entityIndex, const char *entityIs, float boneDistance,
+		float boneAlignment, float moved)
 	{
-		static const void *s_Logged[33] = {};
-		if (player < 1 || player > 32 || s_Logged[player] == studioHeader)
+		static const void *s_Model[33] = {};
+		static WeaponFound s_How[33] = {};
+		if (player < 1 || player > 32 || (s_Model[player] == studioHeader && s_How[player] == how))
 			return;
-		s_Logged[player] = studioHeader;
-		Diagnostics::Log("remote players: %s follows player %d's hand (found %s%s)", Studio::ModelName(studioHeader), player,
-			byEntity ? "as the weapon they hold" : "where the game draws it in their hand", moved ? ", moved with them since they were drawn" : "");
+		s_Model[player] = studioHeader;
+		s_How[player] = how;
+		Diagnostics::Log("remote players: %s of player %d, %s (entity %d, %s); weapon bone %.1f units from theirs, aligned %.2f; player moved %.1f since drawn",
+			Studio::ModelName(studioHeader), player, FoundText(how), entityIndex, entityIs, boneDistance, boneAlignment, moved);
 	}
 }
 
@@ -144,7 +186,22 @@ bool VR::BuildRemotePlayerBones(int playerIndex, const void *studioHeader, const
 			hold.animatedBone = ((const Mat34 *)customBones)[model.weaponBone];
 			hold.hasAnimatedBone = true;
 		}
+
+		// What it is, to know it when the game draws it: the game can draw it as its own entity or as the player's
+		const void *player = m_Game->GetClientEntity(playerIndex);
+		hold.weapon = player ? (const void *)((C_BasePlayer *)player)->GetActiveWeapon() : nullptr;
+		hold.worldModel = hold.weapon ? GetWorldModel(hold.weapon) : nullptr;
+		hold.entityModel = hold.weapon ? GetEntityModel(hold.weapon) : nullptr;
+		hold.hasPlayerOrigin = RenderOrigin(player, hold.playerOrigin);
 		haveHold = IsFinite(hold.delta);
+
+		static const void *s_LoggedHeld[33] = {};
+		if (playerIndex >= 1 && playerIndex <= 32 && s_LoggedHeld[playerIndex] != hold.worldModel)
+		{
+			s_LoggedHeld[playerIndex] = hold.worldModel;
+			const char *name = hold.worldModel ? m_Game->m_ModelInfo->GetModelName((void *)hold.worldModel) : nullptr;
+			Diagnostics::Log("remote players: player %d holds %s", playerIndex, name ? name : "nothing");
+		}
 	}
 	if (haveHold)
 		m_Game->m_PoseRelay->SetWeaponHold(playerIndex, hold);
@@ -172,10 +229,12 @@ bool VR::BuildRemotePlayerBones(int playerIndex, const void *studioHeader, const
 }
 
 // A weapon in the hand of another VR player moves with the hand, by how the hand was moved the last time that player
-// was drawn. It's found as the weapon the player holds, or, whatever entity the game draws it for, by being where the
-// player's animation has "weapon_bone" (the weapon is merged to it). If the weapon is drawn before its player in a
-// frame, the player has moved since: the weapon is moved by that too, so it doesn't trail behind the hand.
-bool VR::BuildRemoteWeaponBones(int entityIndex, const void *studioHeader, const void *customBones, void *outBones)
+// was drawn. Left 4 Dead 2 can draw a weapon merged to a player as that player (its entity index and renderable), so
+// the weapon is known by its model being the one of the weapon the player holds, drawn as that weapon or as that player,
+// or, failing those, by being where the player's animation has "weapon_bone" (the weapon is merged to it). If the weapon
+// is drawn before its player in a frame, the player has moved since: the weapon is moved by that too, so it doesn't
+// trail behind the hand.
+bool VR::BuildRemoteWeaponBones(int entityIndex, const void *model, const void *renderable, const void *studioHeader, const void *customBones, void *outBones)
 {
 	if (!m_ShowOtherPlayersMovement || !m_Game->m_PoseRelay->HasRemotePlayers() || !Studio::IsValid(studioHeader))
 		return false;
@@ -184,72 +243,91 @@ bool VR::BuildRemoteWeaponBones(int entityIndex, const void *studioHeader, const
 	if (boneCount <= 0 || boneCount > Studio::kMaxBones)
 		return false;
 
-	const void *weapon = m_Game->GetClientEntity(entityIndex);
+	const void *drawn = m_Game->GetClientEntity(entityIndex);
 	const Mat34 *source = (const Mat34 *)customBones;
 	const int weaponBone = MergedWeaponBone(studioHeader);
-	// A weapon lying in the world isn't in anyone's hand, wherever it is
-	const bool carried = !weapon || (entityIndex >= 1 && entityIndex <= 32) || HasOwnerEntity(weapon);
-	const bool hasWeaponBone = carried && weaponBone >= 0 && weaponBone < boneCount;
+	const bool hasWeaponBone = weaponBone >= 0 && weaponBone < boneCount;
+	const bool drawnAsPlayer = entityIndex >= 1 && entityIndex <= 32;
 
 	int found = -1;
-	bool byEntity = false;
-	float distance = kWeaponMatchDistance;
+	WeaponFound how = WeaponFound::No;
 	PoseRelay::WeaponHold hold;
+	float boneDistance = -1.0f, boneAlignment = -1.0f;
+	int unmatched = -1;   // a player holding a weapon of this model, which wasn't taken as theirs (for the log)
+	float unmatchedDistance = -1.0f, unmatchedAlignment = -1.0f;
 
-	for (int player = 1; player <= 32; ++player)
+	for (int player = 1; player <= 32 && found < 0; ++player)
 	{
 		PoseRelay::WeaponHold candidate;
-		if (!m_Game->m_PoseRelay->GetWeaponHold(player, candidate))
+		if (!m_Game->m_PoseRelay->GetWeaponHold(player, candidate) || !candidate.weapon)
 			continue;
 
-		float away = 1e9f;
+		const bool sameModel = model && (model == candidate.worldModel || model == candidate.entityModel);
+		const void *playerEntity = m_Game->GetClientEntity(player);
+
+		float distance = -1.0f, alignment = -1.0f;
 		if (hasWeaponBone && candidate.hasAnimatedBone)
 		{
-			const Mat34 &drawn = source[weaponBone];
-			if (Dot(Axis(drawn, 1), Axis(candidate.animatedBone, 1)) > kWeaponMatchAlignment
-				&& Dot(Axis(drawn, 2), Axis(candidate.animatedBone, 2)) > kWeaponMatchAlignment)
-				away = Length(Origin(drawn) - Origin(candidate.animatedBone));
+			const Mat34 &bone = source[weaponBone];
+			distance = Length(Origin(bone) - Origin(candidate.animatedBone));
+			alignment = std::min(Dot(Axis(bone, 1), Axis(candidate.animatedBone, 1)), Dot(Axis(bone, 2), Axis(candidate.animatedBone, 2)));
 		}
 
-		C_BasePlayer *owner = weapon ? (C_BasePlayer *)m_Game->GetClientEntity(player) : nullptr;
-		if (owner && (const void *)owner->GetActiveWeapon() == weapon)
-		{
-			found = player;
-			byEntity = true;
-			distance = away;
-			hold = candidate;
-			break;
-		}
+		WeaponFound candidateHow = WeaponFound::No;
+		if (drawn && drawn == candidate.weapon)
+			candidateHow = WeaponFound::AsTheWeapon;
+		else if (renderable && renderable == (const uint8_t *)candidate.weapon + 4)
+			candidateHow = WeaponFound::ByItsRenderable;
+		else if (sameModel && (entityIndex == player || (renderable && playerEntity && renderable == (const uint8_t *)playerEntity + 4)))
+			candidateHow = WeaponFound::AsItsOwner;
+		else if (sameModel && (drawnAsPlayer || !drawn || HasOwnerEntity(drawn)) && distance >= 0.0f && distance < kWeaponMatchDistance
+			&& alignment > kWeaponMatchAlignment)
+			candidateHow = WeaponFound::ByPlace; // a weapon lying in the world isn't in anyone's hand, wherever it is
 
-		if (away < distance)
+		if (candidateHow != WeaponFound::No)
 		{
 			found = player;
-			distance = away;
+			how = candidateHow;
 			hold = candidate;
+			boneDistance = distance;
+			boneAlignment = alignment;
+		}
+		else if (sameModel && unmatched < 0)
+		{
+			unmatched = player;
+			unmatchedDistance = distance;
+			unmatchedAlignment = alignment;
 		}
 	}
+
+	const char *entityIs = !drawn ? "no entity" : drawnAsPlayer ? "a player" : HasOwnerEntity(drawn) ? "carried" : "not carried";
 
 	if (found < 0)
 	{
+		if (unmatched >= 0)
+			LogRemoteWeapon(unmatched, studioHeader, WeaponFound::No, entityIndex, entityIs, unmatchedDistance, unmatchedAlignment, 0.0f);
+
 		// Not in a hand: pills or a grenade they carry go on the chest
-		return weapon ? BuildRemoteItemBones(entityIndex, weapon, studioHeader, outBones) : false;
+		return BuildRemoteItemBones(entityIndex, drawn, model, studioHeader, outBones);
 	}
 
+	// The delta takes the hand from where the animation had it to where the mod put it, both where the player was when
+	// drawn. Where the player is now: the same move, shifted by how far the player went.
 	Mat34 delta = hold.delta;
-	bool moved = false;
-	if (distance < kWeaponMatchDistance)
+	float moved = 0.0f;
+	Vec3 now;
+	if (hold.hasPlayerOrigin && RenderOrigin(m_Game->GetClientEntity(found), now))
 	{
-		// The delta takes the hand from where the animation had it to where the mod put it, both where the player was.
-		// Where the player is now: the same move, shifted by how far the animation's weapon bone went.
-		const Vec3 shift = Origin(source[weaponBone]) - Origin(hold.animatedBone);
-		SetAxis(delta, 3, Origin(delta) + shift - RotateVector(delta, shift));
-		moved = Length(shift) > 0.01f;
+		const Vec3 shift = now - hold.playerOrigin;
+		moved = Length(shift);
+		if (moved > 0.001f && moved < kMaxMoveBetweenDraws)
+			SetAxis(delta, 3, Origin(delta) + shift - RotateVector(delta, shift));
 	}
 
 	Mat34 *bones = (Mat34 *)outBones;
 	for (int i = 0; i < boneCount; ++i)
 		bones[i] = Multiply(delta, source[i]);
 
-	LogRemoteWeapon(found, studioHeader, byEntity, moved);
+	LogRemoteWeapon(found, studioHeader, how, entityIndex, entityIs, boneDistance, boneAlignment, moved);
 	return true;
 }

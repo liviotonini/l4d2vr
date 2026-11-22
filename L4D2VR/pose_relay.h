@@ -68,6 +68,11 @@ public:
 		HandMath::Mat34 delta;          // from the hand of the game's animation to where the mod put it
 		HandMath::Mat34 animatedBone;   // "weapon_bone" in the game's animation, which the weapon is merged to
 		bool hasAnimatedBone = false;
+		const void *weapon = nullptr;       // the weapon the player holds
+		const void *worldModel = nullptr;   // its model in the world (m_iWorldModelIndex), and its own (m_nModelIndex)
+		const void *entityModel = nullptr;
+		HandMath::Vec3 playerOrigin;        // where the player was drawn from
+		bool hasPlayerOrigin = false;
 	};
 	void SetWeaponHold(int playerIndex, const WeaponHold &hold);
 	void ClearWeaponHold(int playerIndex);

@@ -1142,7 +1142,7 @@ void Hooks::DrawModelForVR(void *ecx, void *state, const ModelRenderInfo_t &info
 		else if (kind == ModelKind::Survivor)
 			changed = m_VR->BuildRemotePlayerBones(info.entity_index, studioHeader, pCustomBoneToWorld, bones);
 		else if (kind == ModelKind::WorldWeapon)
-			changed = m_VR->BuildRemoteWeaponBones(info.entity_index, studioHeader, pCustomBoneToWorld, bones);
+			changed = m_VR->BuildRemoteWeaponBones(info.entity_index, info.pModel, info.pRenderable, studioHeader, pCustomBoneToWorld, bones);
 
 		if (changed)
 			return hkDrawModelExecute.fOriginal(ecx, state, info, bones);

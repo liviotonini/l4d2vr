@@ -35,8 +35,9 @@ namespace PosePlayout
 		bool Empty() const { return m_Count == 0; }
 		double LastArrivalMs() const { return m_LastArrival; }
 
-		// How far behind the newest pose the playback was the last time it was sampled
+		// How far behind the newest pose the playback was the last time it was sampled, and when that was
 		double DelayBehindNewestMs() const { return m_Count > 0 ? m_Times[m_Count - 1] - m_LastPlayback : 0.0; }
+		double LastSampleMs() const { return m_HaveOffset ? m_LastSampleMs : -1e300; }
 
 		// How long the slowest and the fastest recent poses took to arrive, apart (the network's jitter)
 		double JitterMs() const

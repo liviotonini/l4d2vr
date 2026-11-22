@@ -514,13 +514,15 @@ void PoseRelay::OnLeftItemReceived(int playerIndex, int itemIndex)
 
 void PoseRelay::OnDualTest(const char *action)
 {
-	// remotepose_<player>: that player (a bot) is drawn for 20 s as if it were a VR player sending its arms
+	// remotepose_<player>: that player (a bot) is drawn for 20 s as if it were a VR player sending its arms.
+	// remotepose_all: every other player.
 	int player = 0;
-	if (sscanf_s(action, "remotepose_%d", &player) == 1)
+	const bool all = strcmp(action, "remotepose_all") == 0;
+	if (all || sscanf_s(action, "remotepose_%d", &player) == 1)
 	{
-		m_TestPosePlayer = player >= 1 && player <= 32 ? player : 0;
+		m_TestPosePlayer = all ? -1 : player >= 1 && player <= 32 ? player : 0;
 		m_TestPoseUntilMs = NowMs() + 20000;
-		Diagnostics::Log("dual test: player %d is drawn with arms from test poses for 20 s", m_TestPosePlayer);
+		Diagnostics::Log("dual test: %s drawn with arms from test poses for 20 s", all ? "every other player is" : "this player is");
 		return;
 	}
 
@@ -531,11 +533,12 @@ void PoseRelay::OnDualTest(const char *action)
 // player looks, as a VR player would send them. They go straight to OnPoseReceived, without the server.
 void PoseRelay::UpdateTestPose()
 {
-	if (m_TestPosePlayer <= 0)
+	if (m_TestPosePlayer == 0)
 		return;
-	if (NowMs() > m_TestPoseUntilMs || m_TestPosePlayer == m_Game->m_EngineClient->GetLocalPlayer())
+	const int local = m_Game->m_EngineClient->GetLocalPlayer();
+	if (NowMs() > m_TestPoseUntilMs || m_TestPosePlayer == local)
 	{
-		Diagnostics::Log("dual test: the test poses of player %d ended", m_TestPosePlayer);
+		Diagnostics::Log("dual test: the test poses ended");
 		m_TestPosePlayer = 0;
 		return;
 	}
@@ -545,31 +548,46 @@ void PoseRelay::UpdateTestPose()
 		return;
 	m_NextTestPoseMs = now + kSendIntervalMs;
 
-	float pitch = 0.0f, yaw = 0.0f;
-	if (!m_Game->m_VR->GetPlayerEyeAngles(m_Game->GetClientEntity(m_TestPosePlayer), pitch, yaw))
-		yaw = 0.0f;
+	const int first = m_TestPosePlayer > 0 ? m_TestPosePlayer : 1;
+	const int last = m_TestPosePlayer > 0 ? m_TestPosePlayer : 32;
+	for (int player = first; player <= last; ++player)
+	{
+		const void *entity = m_Game->GetClientEntity(player);
+		if (player == local || !entity)
+			continue;
 
-	Vec3 forward, right;
-	YawBasis(yaw, forward, right);
-	const Vec3 up(0.0f, 0.0f, 1.0f);
-	const float turn = (float)(now / 1000.0 * 3.14159265 * 2.0 * 0.5); // half a turn per second
-	const Vec3 rightWrist = forward * 14.0f + right * 6.0f - up * 14.0f + (right * cosf(turn) + up * sinf(turn)) * 4.0f;
-	const Vec3 leftWrist = forward * 12.0f - right * 8.0f - up * 16.0f;
-	const QAngle level(0.0f, yaw, 0.0f);
+		// Past the player slots the entities are others: only survivors
+		const void *model = m_Game->m_VR->GetEntityModel(entity);
+		const char *modelName = model ? m_Game->m_ModelInfo->GetModelName((void *)model) : nullptr;
+		if (!modelName || !strstr(modelName, "survivors/"))
+			continue;
 
-	l4d2vr_pose::WirePacket packet;
-	packet.versionAndValidMask = (uint8_t)((l4d2vr_pose::kVersion << 4) | l4d2vr_pose::kValidMask);
-	packet.featureMask = l4d2vr_pose::kFeatureBodyYaw;
-	packet.handStateFlags = l4d2vr_pose::kHandStateRightNativeFingerAnimation | l4d2vr_pose::kHandStateLeftNativeFingerAnimation;
-	packet.bodyYaw = PackAngle(yaw);
-	PackPoint(Vec3(), level, yaw, packet.hmd);
-	PackPoint(rightWrist, level, yaw, packet.rightHand);
-	PackPoint(leftWrist, level, yaw, packet.leftHand);
-	l4d2vr_pose::FinalizePacket(packet);
+		float pitch = 0.0f, yaw = 0.0f;
+		if (!m_Game->m_VR->GetPlayerEyeAngles(entity, pitch, yaw))
+			yaw = 0.0f;
 
-	std::string payload;
-	if (l4d2vr_pose::EncodePayload(packet, payload))
-		OnPoseReceived(m_TestPosePlayer, (uint16_t)(unsigned long long)now, payload.c_str());
+		Vec3 forward, right;
+		YawBasis(yaw, forward, right);
+		const Vec3 up(0.0f, 0.0f, 1.0f);
+		const float turn = (float)(now / 1000.0 * 3.14159265 * 2.0 * 0.5); // half a turn per second
+		const Vec3 rightWrist = forward * 14.0f + right * 6.0f - up * 14.0f + (right * cosf(turn) + up * sinf(turn)) * 4.0f;
+		const Vec3 leftWrist = forward * 12.0f - right * 8.0f - up * 16.0f;
+		const QAngle level(0.0f, yaw, 0.0f);
+
+		l4d2vr_pose::WirePacket packet;
+		packet.versionAndValidMask = (uint8_t)((l4d2vr_pose::kVersion << 4) | l4d2vr_pose::kValidMask);
+		packet.featureMask = l4d2vr_pose::kFeatureBodyYaw;
+		packet.handStateFlags = l4d2vr_pose::kHandStateRightNativeFingerAnimation | l4d2vr_pose::kHandStateLeftNativeFingerAnimation;
+		packet.bodyYaw = PackAngle(yaw);
+		PackPoint(Vec3(), level, yaw, packet.hmd);
+		PackPoint(rightWrist, level, yaw, packet.rightHand);
+		PackPoint(leftWrist, level, yaw, packet.leftHand);
+		l4d2vr_pose::FinalizePacket(packet);
+
+		std::string payload;
+		if (l4d2vr_pose::EncodePayload(packet, payload))
+			OnPoseReceived(player, (uint16_t)(unsigned long long)now, payload.c_str());
+	}
 }
 
 void PoseRelay::Reset()

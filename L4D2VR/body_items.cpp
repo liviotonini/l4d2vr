@@ -1539,33 +1539,49 @@ void VR::BuildBodyModelBones(const void *studioHeader, const BodyModelDraw &draw
 
 // Another VR player's pills or grenade, drawn by the game where that player carries them: moved to the chest. False
 // when it isn't one.
-bool VR::BuildRemoteItemBones(int entityIndex, const void *weapon, const void *studioHeader, void *outBones)
+bool VR::BuildRemoteItemBones(int entityIndex, const void *entity, const void *model, const void *studioHeader, void *outBones)
 {
 	if (g_MyWeaponsOffset < 0)
 		return false;
 
 	// Only an entity found in a player's inventory is known to be a weapon: weapons lying around in the map are drawn
-	// with the same models and aren't
+	// with the same models and aren't. The game can draw what a player carries as that player (its entity index): then
+	// it's the item of the player whose model is drawn.
 	for (int player = 1; player <= 32; ++player)
 	{
 		if (!m_RemoteHeadOffsetValid[player])
 			continue;
 
 		C_BasePlayer *owner = (C_BasePlayer *)m_Game->GetClientEntity(player);
-		if (!owner || (const void *)owner->GetActiveWeapon() == weapon)
+		if (!owner)
 			continue;
+		const void *active = (const void *)owner->GetActiveWeapon();
 
-		bool carries = false;
-		for (int i = 0; i < g_MyWeaponsCount && !carries; ++i)
+		const void *weapon = nullptr;
+		int itemIndex = -1;
+		for (int i = 0; i < g_MyWeaponsCount && !weapon; ++i)
 		{
 			const int handle = Read<int>(owner, g_MyWeaponsOffset + i * 4);
-			carries = IsValidHandle(handle) && (handle & kHandleIndexMask) == entityIndex;
+			if (!IsValidHandle(handle))
+				continue;
+			const int index = handle & kHandleIndexMask;
+			const bool drawnAsOwner = entityIndex == player && model;
+			if (index != entityIndex && !drawnAsOwner)
+				continue;
+			const void *item = m_Game->GetClientEntity(index);
+			if (!item || item == active)
+				continue;
+			if (index == entityIndex || GetWorldModel(item) == model || GetEntityModel(item) == model)
+			{
+				weapon = item;
+				itemIndex = index;
+			}
 		}
-		if (!carries)
+		if (!weapon)
 			continue;
 
 		// In their left hand (dual wield): held like in the local player's, from where the hand is
-		if (m_RemoteLeftItem[player] == entityIndex)
+		if (m_RemoteLeftItem[player] == itemIndex)
 		{
 			PoseRelay::Frame pose;
 			if (!m_Game->m_PoseRelay->GetPose(player, pose) || !pose.hasLeftHand)
